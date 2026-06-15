@@ -208,6 +208,12 @@ export function buildSidebarData(
             icon: icons.radio,
           },
           {
+            title: t('Channel Console'),
+            url: '/channel-console',
+            activeUrls: ['/channel-console'],
+            icon: icons.radio,
+          },
+          {
             title: t('Models'),
             url: '/models/metadata',
             icon: icons.box,
