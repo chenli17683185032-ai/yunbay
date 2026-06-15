@@ -623,6 +623,8 @@ git commit -m "feat: add channel console import preview parser"
 
 ### Task 3: Pricing normalization and ratio compilation
 
+Runtime note: New API `ModelRatio` is not raw USD per 1M tokens. In the existing ratio settings, `ModelRatio = 1` represents about `$0.002 / 1K tokens` (`$2 / 1M tokens`). Therefore token prices compile as `input_usd_per_1m_tokens / 2 * markup`, while `CompletionRatio`, `CacheRatio`, and `CreateCacheRatio` remain relative ratios against input price.
+
 **Files:**
 - Create: `service/channelconsole/pricing.go`
 - Create: `service/channelconsole/pricing_test.go`
@@ -723,7 +725,7 @@ func CompileTokenPrice(price NormalizedModelPrice, markup float64) CompiledPrice
         }
         return compiled
     }
-    modelRatio := (*price.InputUSDPer1MTokens) * markup
+    modelRatio := (*price.InputUSDPer1MTokens) / 2.0 * markup
     compiled.ModelRatio = &modelRatio
     if price.OutputUSDPer1MTokens != nil && *price.OutputUSDPer1MTokens > 0 {
         completion := (*price.OutputUSDPer1MTokens) / (*price.InputUSDPer1MTokens)
