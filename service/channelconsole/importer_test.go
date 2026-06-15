@@ -146,6 +146,22 @@ func TestPreviewCustomKeepsExplicitProxyHostEvenWhenTextMentionsOfficialDomain(t
 	})
 }
 
+func TestPreviewCustomAnthropicLikeHostKeepsProxyPath(t *testing.T) {
+	input := "Base URL: https://notanthropic.com/api/v1/chat/completions\nKey: sk-one"
+	preview := PreviewImport(input)
+
+	assertProviderDefaults(t, preview, providerExpectation{
+		provider:         ProviderCustomOpenAICompatible,
+		label:            "OpenAI 兼容",
+		channelType:      constant.ChannelTypeOpenAI,
+		baseURL:          "https://notanthropic.com/api",
+		priceSource:      PriceSourceManual,
+		modelDiscovery:   modelDiscoveryOpenAICompatible,
+		defaultTestModel: "gpt-4o-mini",
+		requiresConfirm:  true,
+	})
+}
+
 func TestPreviewJSONImportKind(t *testing.T) {
 	preview := PreviewImport(`{"base_url":"https://api.openai.com/v1/chat/completions","api_key":"sk-redacted"}`)
 	if preview.ImportKind != ImportKindJSON {

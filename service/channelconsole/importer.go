@@ -149,7 +149,7 @@ func normalizeBaseURL(rawURL string) string {
 		return schemeHost
 	case host == "openrouter.ai":
 		return "https://openrouter.ai/api"
-	case strings.Contains(host, "anthropic.com"):
+	case isAnthropicHost(host):
 		return schemeHost
 	case host == "generativelanguage.googleapis.com":
 		return schemeHost
