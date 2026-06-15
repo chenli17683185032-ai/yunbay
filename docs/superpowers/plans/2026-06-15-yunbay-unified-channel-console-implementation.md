@@ -323,6 +323,8 @@ git commit -m "feat: add channel console metadata models"
 
 - [ ] **Step 1: Write failing parser tests**
 
+Runtime note: preview `BaseURL` is the value that later becomes New API channel `base_url`, not necessarily the provider REST endpoint. Therefore OpenRouter normalizes to `https://openrouter.ai/api` so New API can append `/v1/...`, and OpenAI-compatible third-party URLs strip trailing `/v1` so they follow the existing channel form warning. `constant.ChannelTypeCustom` is reserved for full endpoint URLs; `ProviderCustomOpenAICompatible` uses `constant.ChannelTypeOpenAI` with a custom base URL.
+
 Create `service/channelconsole/importer_test.go`.
 
 ```go
@@ -334,7 +336,7 @@ func TestPreviewOpenRouterCurl(t *testing.T) {
     input := `curl https://openrouter.ai/api/v1/chat/completions -H "Authorization: Bearer sk-or-redacted"`
     preview := PreviewImport(input)
     if preview.Provider != ProviderOpenRouter { t.Fatalf("provider = %s", preview.Provider) }
-    if preview.BaseURL != "https://openrouter.ai/api/v1" { t.Fatalf("base url = %s", preview.BaseURL) }
+    if preview.BaseURL != "https://openrouter.ai/api" { t.Fatalf("base url = %s", preview.BaseURL) }
     if len(preview.Keys) != 1 { t.Fatalf("keys = %d", len(preview.Keys)) }
     if preview.Keys[0] != "sk-or-redacted" { t.Fatalf("key not extracted") }
     if preview.PriceSource != PriceSourceOpenRouter { t.Fatalf("price source = %s", preview.PriceSource) }
@@ -352,7 +354,7 @@ func TestPreviewBaseURLAndMultipleKeys(t *testing.T) {
     input := "Base URL: https://gateway.example.com/v1\nKey: sk-one\nsk-two"
     preview := PreviewImport(input)
     if preview.Provider != ProviderCustomOpenAICompatible { t.Fatalf("provider = %s", preview.Provider) }
-    if preview.BaseURL != "https://gateway.example.com/v1" { t.Fatalf("base url = %s", preview.BaseURL) }
+    if preview.BaseURL != "https://gateway.example.com" { t.Fatalf("base url = %s", preview.BaseURL) }
     if len(preview.Keys) != 2 { t.Fatalf("keys = %#v", preview.Keys) }
     if !preview.IsMultiKey { t.Fatalf("expected multi-key") }
 }
@@ -555,7 +557,7 @@ func detectProvider(preview *ImportPreview, raw string) {
         preview.Provider = ProviderOpenRouter
         preview.ProviderLabel = "OpenRouter"
         preview.ChannelType = constant.ChannelTypeOpenRouter
-        if preview.BaseURL == "" { preview.BaseURL = "https://openrouter.ai/api/v1" }
+        if preview.BaseURL == "" { preview.BaseURL = "https://openrouter.ai/api" }
         preview.PriceSource = PriceSourceOpenRouter
         preview.ModelDiscovery = "openrouter_models"
         preview.DefaultTestModel = "openai/gpt-4o-mini"
@@ -586,7 +588,7 @@ func detectProvider(preview *ImportPreview, raw string) {
     default:
         preview.Provider = ProviderCustomOpenAICompatible
         preview.ProviderLabel = "OpenAI 兼容第三方"
-        preview.ChannelType = constant.ChannelTypeCustom
+        preview.ChannelType = constant.ChannelTypeOpenAI
         preview.PriceSource = PriceSourceManual
         preview.ModelDiscovery = "openai_compatible_models"
         preview.DefaultTestModel = "gpt-4o-mini"

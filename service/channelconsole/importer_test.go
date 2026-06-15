@@ -16,7 +16,7 @@ func TestPreviewOpenRouterCurl(t *testing.T) {
 		provider:         ProviderOpenRouter,
 		label:            "OpenRouter",
 		channelType:      constant.ChannelTypeOpenRouter,
-		baseURL:          "https://openrouter.ai/api/v1",
+		baseURL:          "https://openrouter.ai/api",
 		priceSource:      PriceSourceOpenRouter,
 		modelDiscovery:   modelDiscoveryProviderAPI,
 		defaultTestModel: "openai/gpt-4o-mini",
@@ -80,8 +80,8 @@ func TestPreviewBaseURLAndMultipleKeys(t *testing.T) {
 	assertProviderDefaults(t, preview, providerExpectation{
 		provider:         ProviderCustomOpenAICompatible,
 		label:            "OpenAI 兼容",
-		channelType:      constant.ChannelTypeCustom,
-		baseURL:          "https://gateway.example.com/v1",
+		channelType:      constant.ChannelTypeOpenAI,
+		baseURL:          "https://gateway.example.com",
 		priceSource:      PriceSourceManual,
 		modelDiscovery:   modelDiscoveryOpenAICompatible,
 		defaultTestModel: "gpt-4o-mini",
@@ -114,10 +114,36 @@ func TestPreviewStructuredTextAliases(t *testing.T) {
 		if preview.ImportKind != ImportKindStructured {
 			t.Fatalf("%q import kind = %s", input, preview.ImportKind)
 		}
-		if preview.BaseURL != "https://gateway.example.com/v1" {
+		if preview.BaseURL != "https://gateway.example.com" {
 			t.Fatalf("%q base url = %s", input, preview.BaseURL)
 		}
 	}
+}
+
+func TestPreviewStructuredKeyEqualsAlias(t *testing.T) {
+	preview := PreviewImport("key=sk-one")
+	if preview.ImportKind != ImportKindStructured {
+		t.Fatalf("import kind = %s", preview.ImportKind)
+	}
+	if preview.Provider != ProviderOpenAI {
+		t.Fatalf("provider = %s", preview.Provider)
+	}
+}
+
+func TestPreviewCustomKeepsExplicitProxyHostEvenWhenTextMentionsOfficialDomain(t *testing.T) {
+	input := "Base URL: https://proxy.example.com/api.openai.com/v1/chat/completions\nKey: sk-one"
+	preview := PreviewImport(input)
+
+	assertProviderDefaults(t, preview, providerExpectation{
+		provider:         ProviderCustomOpenAICompatible,
+		label:            "OpenAI 兼容",
+		channelType:      constant.ChannelTypeOpenAI,
+		baseURL:          "https://proxy.example.com/api.openai.com",
+		priceSource:      PriceSourceManual,
+		modelDiscovery:   modelDiscoveryOpenAICompatible,
+		defaultTestModel: "gpt-4o-mini",
+		requiresConfirm:  true,
+	})
 }
 
 func TestPreviewJSONImportKind(t *testing.T) {
@@ -211,8 +237,8 @@ func TestPreviewCustomDefaultBaseRequiresConfirmation(t *testing.T) {
 	assertProviderDefaults(t, preview, providerExpectation{
 		provider:         ProviderCustomOpenAICompatible,
 		label:            "OpenAI 兼容",
-		channelType:      constant.ChannelTypeCustom,
-		baseURL:          "https://api.openai.com/v1",
+		channelType:      constant.ChannelTypeOpenAI,
+		baseURL:          "https://api.openai.com",
 		priceSource:      PriceSourceManual,
 		modelDiscovery:   modelDiscoveryOpenAICompatible,
 		defaultTestModel: "gpt-4o-mini",

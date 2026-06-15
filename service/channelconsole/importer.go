@@ -148,7 +148,7 @@ func normalizeBaseURL(rawURL string) string {
 	case host == "api.openai.com":
 		return schemeHost
 	case host == "openrouter.ai":
-		return "https://openrouter.ai/api/v1"
+		return "https://openrouter.ai/api"
 	case strings.Contains(host, "anthropic.com"):
 		return schemeHost
 	case host == "generativelanguage.googleapis.com":
@@ -163,7 +163,7 @@ func normalizeBaseURL(rawURL string) string {
 		"/messages",
 	} {
 		if strings.HasSuffix(path, endpoint) {
-			basePath := strings.TrimRight(strings.TrimSuffix(path, endpoint), "/")
+			basePath := trimOpenAICompatibleVersionPath(strings.TrimRight(strings.TrimSuffix(path, endpoint), "/"))
 			if basePath == "" {
 				return schemeHost
 			}
@@ -171,6 +171,7 @@ func normalizeBaseURL(rawURL string) string {
 		}
 	}
 
+	path = trimOpenAICompatibleVersionPath(path)
 	if path == "" {
 		return schemeHost
 	}
@@ -197,19 +198,20 @@ func extractKeys(raw string) []string {
 
 func detectProvider(raw string, baseURL string, keys []string) providerDefaults {
 	text := strings.ToLower(raw + " " + baseURL)
+	baseHost := normalizedURLHost(baseURL)
 
 	switch {
-	case strings.Contains(text, "openrouter.ai") || hasKeyPrefix(keys, "sk-or-"):
+	case isOpenRouterHost(baseHost) || hasKeyPrefix(keys, "sk-or-"):
 		return providerDefaults{
 			provider:         ProviderOpenRouter,
 			label:            "OpenRouter",
 			channelType:      constant.ChannelTypeOpenRouter,
-			baseURL:          "https://openrouter.ai/api/v1",
+			baseURL:          "https://openrouter.ai/api",
 			priceSource:      PriceSourceOpenRouter,
 			modelDiscovery:   modelDiscoveryProviderAPI,
 			defaultTestModel: "openai/gpt-4o-mini",
 		}
-	case strings.Contains(text, "anthropic.com") || hasKeyPrefix(keys, "sk-ant-") || strings.Contains(text, "anthropic-version"):
+	case isAnthropicHost(baseHost) || hasKeyPrefix(keys, "sk-ant-") || strings.Contains(text, "anthropic-version"):
 		return providerDefaults{
 			provider:         ProviderAnthropic,
 			label:            "Anthropic",
@@ -219,7 +221,7 @@ func detectProvider(raw string, baseURL string, keys []string) providerDefaults 
 			modelDiscovery:   modelDiscoveryProviderAPI,
 			defaultTestModel: "claude-3-5-haiku-20241022",
 		}
-	case strings.Contains(text, "generativelanguage.googleapis.com") || hasKeyPrefix(keys, "AIza"):
+	case isGeminiHost(baseHost) || hasKeyPrefix(keys, "AIza"):
 		return providerDefaults{
 			provider:         ProviderGemini,
 			label:            "Gemini",
@@ -229,7 +231,7 @@ func detectProvider(raw string, baseURL string, keys []string) providerDefaults 
 			modelDiscovery:   modelDiscoveryProviderAPI,
 			defaultTestModel: "gemini-1.5-flash",
 		}
-	case strings.Contains(text, "api.openai.com") || (baseURL == "" && hasGenericOpenAIKey(keys)):
+	case isOpenAIHost(baseHost) || (baseURL == "" && hasGenericOpenAIKey(keys)):
 		return providerDefaults{
 			provider:         ProviderOpenAI,
 			label:            "OpenAI",
@@ -243,8 +245,8 @@ func detectProvider(raw string, baseURL string, keys []string) providerDefaults 
 		return providerDefaults{
 			provider:         ProviderCustomOpenAICompatible,
 			label:            "OpenAI 兼容",
-			channelType:      constant.ChannelTypeCustom,
-			baseURL:          "https://api.openai.com/v1",
+			channelType:      constant.ChannelTypeOpenAI,
+			baseURL:          "https://api.openai.com",
 			priceSource:      PriceSourceManual,
 			modelDiscovery:   modelDiscoveryOpenAICompatible,
 			defaultTestModel: "gpt-4o-mini",
@@ -262,6 +264,17 @@ func hasKeyPrefix(keys []string, prefix string) bool {
 	return false
 }
 
+func trimOpenAICompatibleVersionPath(path string) string {
+	path = strings.TrimRight(path, "/")
+	if path == "/v1" {
+		return ""
+	}
+	if strings.HasSuffix(path, "/v1") {
+		return strings.TrimRight(strings.TrimSuffix(path, "/v1"), "/")
+	}
+	return path
+}
+
 func hasStructuredImportHint(lower string) bool {
 	for _, hint := range []string{
 		"base url",
@@ -276,6 +289,13 @@ func hasStructuredImportHint(lower string) bool {
 		"api-key",
 	} {
 		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+
+	for _, line := range strings.Split(lower, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "key=") {
 			return true
 		}
 	}
@@ -304,4 +324,28 @@ func hasGenericOpenAIKey(keys []string) bool {
 		}
 	}
 	return false
+}
+
+func normalizedURLHost(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Hostname())
+}
+
+func isOpenRouterHost(host string) bool {
+	return host == "openrouter.ai"
+}
+
+func isOpenAIHost(host string) bool {
+	return host == "api.openai.com"
+}
+
+func isAnthropicHost(host string) bool {
+	return host == "anthropic.com" || host == "api.anthropic.com" || strings.HasSuffix(host, ".anthropic.com")
+}
+
+func isGeminiHost(host string) bool {
+	return host == "generativelanguage.googleapis.com"
 }
