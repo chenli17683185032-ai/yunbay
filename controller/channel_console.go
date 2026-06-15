@@ -71,7 +71,7 @@ func CheckChannelConsoleHealth(c *gin.Context) {
 		return
 	}
 
-	check, err := channelconsole.RecordManualHealthCheck(id)
+	check, err := RunChannelConsoleHealthCheck(id, channelconsole.HealthCheckTypeManual)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return

@@ -208,6 +208,20 @@ func TestChannelConsoleHealthCheckHandlerRecordsManualRequest(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	originalRunner := channelConsoleHealthCheckRunner
+	channelConsoleHealthCheckRunner = func(channel *model.Channel, checkType string) channelConsoleHealthCheckOutcome {
+		require.Equal(t, result.ChannelID, channel.Id)
+		require.Equal(t, channelconsole.HealthCheckTypeManual, checkType)
+		return channelConsoleHealthCheckOutcome{
+			status:         channelconsole.HealthHealthy,
+			modelName:      "gpt-4o-mini",
+			responseTimeMs: 321,
+		}
+	}
+	t.Cleanup(func() {
+		channelConsoleHealthCheckRunner = originalRunner
+	})
+
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", result.ChannelID)}}
@@ -221,23 +235,25 @@ func TestChannelConsoleHealthCheckHandlerRecordsManualRequest(t *testing.T) {
 	data := body["data"].(map[string]interface{})
 	require.Equal(t, float64(result.ChannelID), data["channel_id"])
 	require.Equal(t, "manual", data["check_type"])
-	require.Equal(t, "unchecked", data["status"])
-	require.Equal(t, "manual_check_queued", data["error_code"])
-	require.Equal(t, "已记录手动验活请求；实时上游调用由后续调度器执行", data["error_message"])
+	require.Equal(t, "healthy", data["status"])
+	require.Equal(t, "gpt-4o-mini", data["model_name"])
+	require.Equal(t, float64(321), data["response_time_ms"])
+	require.Empty(t, data["error_code"])
+	require.Empty(t, data["error_message"])
 	require.NotZero(t, data["checked_at"])
 
 	checks, err := model.ListChannelConsoleHealthChecks(result.ChannelID, 50)
 	require.NoError(t, err)
 	require.Len(t, checks, 1)
 	require.Equal(t, "manual", checks[0].CheckType)
-	require.Equal(t, "unchecked", checks[0].Status)
+	require.Equal(t, "healthy", checks[0].Status)
 
 	meta, err := model.GetChannelConsoleChannelByChannelID(result.ChannelID)
 	require.NoError(t, err)
 	require.Equal(t, checks[0].CheckedAt, meta.LastHealthCheckAt)
-	require.Equal(t, "manual_check_queued", meta.LastErrorCode)
-	require.Equal(t, "已记录手动验活请求；实时上游调用由后续调度器执行", meta.LastErrorMessage)
-	require.Equal(t, "unchecked", meta.HealthStatus)
+	require.Empty(t, meta.LastErrorCode)
+	require.Empty(t, meta.LastErrorMessage)
+	require.Equal(t, "healthy", meta.HealthStatus)
 }
 
 func TestChannelConsoleHealthCheckRejectsInvalidID(t *testing.T) {

@@ -61,7 +61,7 @@ export function ChannelDetailDrawer({
       toast.error(res.message || t('Health check failed'))
       return
     }
-    toast.success(t('Health check recorded'))
+    toast.success(t('Health check completed'))
     const refreshed = await getChannelConsoleDetail(channel.id)
     setDetail(refreshed.data || null)
     onChecked?.()

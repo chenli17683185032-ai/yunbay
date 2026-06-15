@@ -17,10 +17,24 @@ const (
 )
 
 const (
-	manualHealthCheckType    = "manual"
+	HealthCheckTypeManual    = "manual"
+	HealthCheckTypeAutomatic = "automatic"
+
+	manualHealthCheckType    = HealthCheckTypeManual
 	manualHealthQueuedCode   = "manual_check_queued"
 	manualHealthQueuedNotice = "已记录手动验活请求；实时上游调用由后续调度器执行"
 )
+
+type HealthCheckRecord struct {
+	ChannelID      int
+	KeyIndex       *int
+	ModelName      string
+	CheckType      string
+	Status         string
+	ResponseTimeMs int
+	ErrorCode      string
+	ErrorMessage   string
+}
 
 func AggregateHealthStatus(statuses []string) string {
 	if len(statuses) == 0 {
@@ -55,6 +69,62 @@ func AggregateHealthStatus(statuses []string) string {
 		return HealthFailed
 	}
 	return HealthHealthy
+}
+
+func RecordHealthCheckResult(record HealthCheckRecord) (*model.ChannelConsoleHealthCheck, error) {
+	status := normalizeHealthCheckStatus(record.Status)
+	checkType := strings.TrimSpace(record.CheckType)
+	if checkType == "" {
+		checkType = HealthCheckTypeAutomatic
+	}
+	responseTimeMs := record.ResponseTimeMs
+	if responseTimeMs < 0 {
+		responseTimeMs = 0
+	}
+
+	errorCode := strings.TrimSpace(record.ErrorCode)
+	errorMessage := strings.TrimSpace(record.ErrorMessage)
+	if status == HealthHealthy {
+		errorCode = ""
+		errorMessage = ""
+	}
+
+	check := &model.ChannelConsoleHealthCheck{
+		ChannelId:      record.ChannelID,
+		KeyIndex:       record.KeyIndex,
+		ModelName:      strings.TrimSpace(record.ModelName),
+		CheckType:      checkType,
+		Status:         status,
+		ErrorCode:      errorCode,
+		ErrorMessage:   errorMessage,
+		ResponseTimeMs: responseTimeMs,
+	}
+
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		var meta model.ChannelConsoleChannel
+		if err := tx.Where("channel_id = ?", record.ChannelID).First(&meta).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrChannelConsoleMetadataNotFound
+			}
+			return err
+		}
+
+		if err := tx.Create(check).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&model.ChannelConsoleChannel{}).Where("id = ?", meta.Id).Updates(map[string]any{
+			"health_status":        status,
+			"last_health_check_at": check.CheckedAt,
+			"last_error_code":      errorCode,
+			"last_error_message":   errorMessage,
+			"updated_at":           check.CheckedAt,
+		}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return check, nil
 }
 
 func RecordManualHealthCheck(channelID int) (*model.ChannelConsoleHealthCheck, error) {
@@ -95,4 +165,21 @@ func RecordManualHealthCheck(channelID int) (*model.ChannelConsoleHealthCheck, e
 		return nil, err
 	}
 	return check, nil
+}
+
+func normalizeHealthCheckStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case HealthHealthy:
+		return HealthHealthy
+	case HealthWarning:
+		return HealthWarning
+	case HealthFailed:
+		return HealthFailed
+	case HealthDisabled:
+		return HealthDisabled
+	case HealthUnchecked:
+		return HealthUnchecked
+	default:
+		return HealthWarning
+	}
 }

@@ -1906,14 +1906,14 @@ Spec coverage:
 - Import convenience is covered by Tasks 2, 4, 5, 7, and 8.
 - Model discovery is represented by preview defaults and model fields in Tasks 4 and 8; live provider model syncing remains a follow-up inside the same API surface after the first import UI works.
 - Automatic pricing is covered by Task 3 and metadata tables from Task 1; full settings write-back can be expanded after the compiler is verified.
-- Periodic health is partially covered by Task 6 with persisted health checks and status model; scheduler automation remains a follow-up task after manual health recording is stable.
+- Periodic health is covered by Task 6 plus the follow-up implementation shipped in this branch: manual health checks now execute a live upstream channel test, persist the result, update `health_status`, and a master-node scheduler periodically checks console-managed channels.
 - Unified admin UI is covered by Tasks 8 and 9.
 - Original `/channels` advanced page remains intact.
 - CLIProxyAPI / OAuth is explicitly out of P0 and not implemented here.
 
 Known first-slice limits:
 
-- This plan intentionally ships a safe first slice before adding live scheduled background jobs. It creates the API/data/UI foundation, import parser, channel creation, price compiler, and health records. The next plan should add live `/v1/models` fetching, OpenRouter remote price ingestion, New API ratio-setting write-back, and a timed scheduler once this slice is stable.
+- This plan ships the API/data/UI foundation, import parser, channel creation, price compiler, persisted health records, live manual health check, and timed console-channel health scheduler. The next plan should add live `/v1/models` fetching, OpenRouter remote price ingestion, and New API ratio-setting write-back.
 
 Placeholder scan:
 
@@ -1925,3 +1925,12 @@ Type consistency:
 - Backend provider strings match frontend string types.
 - Health status values are the same across model, service, and frontend.
 - API paths use `/api/channel-console/*` consistently.
+
+## Implementation Addendum: Live and Periodic Health Checks
+
+After the first manual health-recording slice, health checking was upgraded to a live closed loop:
+
+- `POST /api/channel-console/channels/:id/health-check` now validates that the channel belongs to the console, runs the existing New API channel-test path against the channel's test model, persists the health record, and updates console metadata.
+- `controller.StartChannelConsoleHealthCheckTask()` starts on the master node and periodically runs checks for console-managed channels. The default interval is 6 hours and can be overridden with `CHANNEL_CONSOLE_HEALTH_CHECK_FREQUENCY` in minutes; set `CHANNEL_CONSOLE_HEALTH_CHECK_ENABLED=false` to disable it.
+- Disabled New API channels are marked `disabled` without consuming upstream quota.
+- Failed upstream tests persist `failed`, `error_code`, `error_message`, and `response_time_ms`; healthy checks clear previous error fields.
