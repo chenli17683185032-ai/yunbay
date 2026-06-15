@@ -225,6 +225,14 @@ func SetApiRouter(router *gin.Engine) {
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)
 		}
+		channelConsoleRoute := apiRouter.Group("/channel-console")
+		channelConsoleRoute.Use(middleware.AdminAuth())
+		{
+			channelConsoleRoute.POST("/import/preview", middleware.CriticalRateLimit(), controller.PreviewChannelConsoleImport)
+			channelConsoleRoute.POST("/import/commit", middleware.CriticalRateLimit(), controller.CommitChannelConsoleImport)
+			channelConsoleRoute.GET("/channels", controller.ListChannelConsoleChannels)
+			channelConsoleRoute.GET("/channels/:id", controller.GetChannelConsoleChannel)
+		}
 		channelRoute := apiRouter.Group("/channel")
 		channelRoute.Use(middleware.AdminAuth())
 		{
