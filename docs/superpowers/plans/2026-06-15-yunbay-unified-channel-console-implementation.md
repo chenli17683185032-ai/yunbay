@@ -8,9 +8,30 @@
 
 **Tech Stack:** Go 1.22+, Gin, GORM, New API `common` JSON wrappers, React 19, TypeScript, TanStack Router, Base UI/Tailwind components, Bun/npm frontend scripts.
 
+**Updated Project Location:** 云贝相关文件已经从 Codex 临时目录迁移到桌面独立目录。后续实施本计划时，主工作目录固定为：
+
+```text
+/Users/ethan/Desktop/云贝/云贝网站/new-api
+```
+
+**Related Local Folders:**
+
+```text
+/Users/ethan/Desktop/云贝/云贝 APP/codex-history-unifier
+/Users/ethan/Desktop/云贝/服务器相关
+```
+
+**Execution Rule:** 所有本计划中的相对路径都以 `/Users/ethan/Desktop/云贝/云贝网站/new-api` 为项目根目录。后续 sub agent 或人工执行任务时，不再使用旧的 `/Users/ethan/Documents/Codex/.../work/new-api` 路径。
+
 ---
 
 ## File Structure
+
+Unless a path is explicitly absolute, every path below is relative to:
+
+```text
+/Users/ethan/Desktop/云贝/云贝网站/new-api
+```
 
 Backend files to create:
 
