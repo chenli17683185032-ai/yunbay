@@ -69,6 +69,24 @@ func TestCompilePerCallPrice(t *testing.T) {
 	assertFloatPtr(t, "model price", compiled.ModelPrice, 0.024)
 }
 
+func TestCompileImageUnitPrice(t *testing.T) {
+	compiled := CompileTokenPrice(NormalizedModelPrice{
+		ModelName:       "image-model",
+		ImageUSDPerUnit: floatPtr(0.03),
+	}, 1.2)
+
+	if compiled.PriceStatus != PriceStatusSynced {
+		t.Fatalf("status = %s", compiled.PriceStatus)
+	}
+	if !compiled.Enabled {
+		t.Fatalf("image price should be enabled")
+	}
+	assertFloatPtr(t, "model price", compiled.ModelPrice, 0.036)
+	if compiled.ModelRatio != nil || compiled.CompletionRatio != nil || compiled.CacheRatio != nil {
+		t.Fatalf("image fixed price should not compile token ratios: %#v", compiled)
+	}
+}
+
 func TestBuiltInOpenAIPriceTemplate(t *testing.T) {
 	prices := BuiltInPrices(ProviderOpenAI)
 	price, ok := prices["gpt-4o-mini"]
