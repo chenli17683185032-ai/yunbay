@@ -1045,27 +1045,67 @@ Create `service/channelconsole/health.go`.
 ```go
 package channelconsole
 
+import (
+    "errors"
+    "strings"
+
+    "github.com/QuantumNous/new-api/model"
+    "gorm.io/gorm"
+)
+
 const (
-    HealthHealthy = "healthy"
-    HealthWarning = "warning"
-    HealthFailed = "failed"
-    HealthDisabled = "disabled"
-    HealthUnchecked = "unchecked"
+    HealthHealthy = model.ChannelConsoleStatusHealthy
+    HealthWarning = model.ChannelConsoleStatusWarning
+    HealthFailed = model.ChannelConsoleStatusFailed
+    HealthDisabled = model.ChannelConsoleStatusDisabled
+    HealthUnchecked = model.ChannelConsoleStatusUnchecked
 )
 
 func AggregateHealthStatus(statuses []string) string {
     if len(statuses) == 0 { return HealthUnchecked }
     hasHealthy := false
     hasFailed := false
+    hasWarningLike := false
     for _, status := range statuses {
+        status = strings.TrimSpace(status)
         if status == HealthDisabled { return HealthDisabled }
         if status == HealthHealthy { hasHealthy = true }
         if status == HealthFailed { hasFailed = true }
-        if status == HealthWarning || status == HealthUnchecked { return HealthWarning }
+        if status == HealthWarning || status == HealthUnchecked { hasWarningLike = true }
+        if status != HealthHealthy && status != HealthFailed && status != HealthDisabled && status != HealthWarning && status != HealthUnchecked { hasWarningLike = true }
     }
+    if hasWarningLike { return HealthWarning }
     if hasHealthy && hasFailed { return HealthWarning }
     if hasFailed { return HealthFailed }
     return HealthHealthy
+}
+
+func RecordManualHealthCheck(channelID int) (*model.ChannelConsoleHealthCheck, error) {
+    check := &model.ChannelConsoleHealthCheck{
+        ChannelId: channelID,
+        CheckType: "manual",
+        Status: HealthUnchecked,
+        ErrorCode: "manual_check_queued",
+        ErrorMessage: "已记录手动验活请求；实时上游调用由后续调度器执行",
+    }
+    err := model.DB.Transaction(func(tx *gorm.DB) error {
+        var meta model.ChannelConsoleChannel
+        if err := tx.Where("channel_id = ?", channelID).First(&meta).Error; err != nil {
+            if errors.Is(err, gorm.ErrRecordNotFound) { return ErrChannelConsoleMetadataNotFound }
+            return err
+        }
+        if err := tx.Create(check).Error; err != nil { return err }
+        updates := map[string]any{
+            "last_health_check_at": check.CheckedAt,
+            "last_error_code": "manual_check_queued",
+            "last_error_message": "已记录手动验活请求；实时上游调用由后续调度器执行",
+            "updated_at": check.CheckedAt,
+        }
+        if strings.TrimSpace(meta.HealthStatus) == "" { updates["health_status"] = HealthUnchecked }
+        return tx.Model(&model.ChannelConsoleChannel{}).Where("id = ?", meta.Id).Updates(updates).Error
+    })
+    if err != nil { return nil, err }
+    return check, nil
 }
 ```
 
@@ -1076,10 +1116,10 @@ Append controller function in `controller/channel_console.go` that calls existin
 ```go
 func CheckChannelConsoleHealth(c *gin.Context) {
     id, err := strconv.Atoi(c.Param("id"))
-    if err != nil { c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid channel id"}); return }
-    check := &model.ChannelConsoleHealthCheck{ChannelId: id, CheckType: "manual", Status: channelconsole.HealthUnchecked, ErrorCode: "manual_check_queued", ErrorMessage: "已记录手动验活请求；实时上游调用由后续调度器执行"}
-    if err := model.CreateChannelConsoleHealthCheck(check); err != nil { c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()}); return }
-    c.JSON(http.StatusOK, gin.H{"success": true, "data": check})
+    if err != nil { common.ApiErrorMsg(c, "invalid channel id"); return }
+    check, err := channelconsole.RecordManualHealthCheck(id)
+    if err != nil { common.ApiErrorMsg(c, err.Error()); return }
+    common.ApiSuccess(c, check)
 }
 ```
 
@@ -1096,7 +1136,10 @@ channelConsoleRoute.POST("/channels/:id/health-check", middleware.CriticalRateLi
 Run:
 
 ```bash
-go test ./service/channelconsole -run 'TestAggregateHealthStatus' -count=1 && go test ./controller ./router
+go test ./service/channelconsole -count=1
+go test ./controller -run 'TestChannelConsole' -count=1
+go test ./router -count=1
+go test ./model -count=1
 ```
 
 Expected: health tests pass and backend packages compile.
@@ -1205,9 +1248,15 @@ export interface ChannelConsoleListItem {
     health_status: ChannelConsoleStatus
     model_sync_status: string
     price_sync_status: string
-    last_error_message?: string
+    last_health_check_at: number
+    last_model_sync_at: number
+    last_price_sync_at: number
+    last_error_code: string
+    last_error_message: string
     markup: number
     auto_disable_policy: string
+    created_at: number
+    updated_at: number
   }
 }
 
@@ -1218,6 +1267,19 @@ export interface ChannelConsoleListResult {
   page_size: number
 }
 
+export interface ChannelConsoleHealthCheck {
+  id: number
+  channel_id: number
+  key_index?: number | null
+  model_name: string
+  check_type: string
+  status: ChannelConsoleStatus
+  response_time_ms: number
+  error_code: string
+  error_message: string
+  checked_at: number
+}
+
 export interface ChannelConsoleDetail {
   channel: ManagedChannelSummary
   console: {
@@ -1225,13 +1287,23 @@ export interface ChannelConsoleDetail {
     channel_id: number
     provider: string
     provider_kind: string
+    import_kind: string
+    price_source: string
     health_status: ChannelConsoleStatus
     model_sync_status: string
     price_sync_status: string
-    last_error_message?: string
+    last_health_check_at: number
+    last_model_sync_at: number
+    last_price_sync_at: number
+    last_error_code: string
+    last_error_message: string
+    markup: number
+    auto_disable_policy: string
+    created_at: number
+    updated_at: number
   }
   prices: Array<Record<string, unknown>>
-  health_checks: Array<Record<string, unknown>>
+  health_checks: ChannelConsoleHealthCheck[]
 }
 
 export interface ApiResponse<T> {
@@ -1250,6 +1322,7 @@ import { api } from '@/lib/api'
 import type {
   ApiResponse,
   ChannelConsoleDetail,
+  ChannelConsoleHealthCheck,
   ChannelConsoleListResult,
   ImportCommitRequest,
   ImportCommitResult,
@@ -1288,7 +1361,7 @@ export async function getChannelConsoleDetail(
 
 export async function checkChannelConsoleHealth(
   id: number
-): Promise<ApiResponse<Record<string, unknown>>> {
+): Promise<ApiResponse<ChannelConsoleHealthCheck>> {
   const res = await api.post(`/api/channel-console/channels/${id}/health-check`)
   return res.data
 }

@@ -231,6 +231,7 @@ func SetApiRouter(router *gin.Engine) {
 			channelConsoleRoute.POST("/import/preview", middleware.CriticalRateLimit(), controller.PreviewChannelConsoleImport)
 			channelConsoleRoute.POST("/import/commit", middleware.CriticalRateLimit(), controller.CommitChannelConsoleImport)
 			channelConsoleRoute.GET("/channels", controller.ListChannelConsoleChannels)
+			channelConsoleRoute.POST("/channels/:id/health-check", middleware.CriticalRateLimit(), controller.CheckChannelConsoleHealth)
 			channelConsoleRoute.GET("/channels/:id", controller.GetChannelConsoleChannel)
 		}
 		channelRoute := apiRouter.Group("/channel")

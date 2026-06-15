@@ -63,3 +63,19 @@ func GetChannelConsoleChannel(c *gin.Context) {
 
 	common.ApiSuccess(c, detail)
 }
+
+func CheckChannelConsoleHealth(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiErrorMsg(c, "invalid channel id")
+		return
+	}
+
+	check, err := channelconsole.RecordManualHealthCheck(id)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+
+	common.ApiSuccess(c, check)
+}

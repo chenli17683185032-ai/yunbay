@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/channelconsole"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -196,6 +197,91 @@ func TestChannelConsoleDetailRejectsInvalidID(t *testing.T) {
 	body := decodeChannelConsoleResponse(t, recorder)
 	require.Equal(t, false, body["success"])
 	require.Equal(t, "invalid channel id", body["message"])
+}
+
+func TestChannelConsoleHealthCheckHandlerRecordsManualRequest(t *testing.T) {
+	setupChannelConsoleControllerTestDB(t)
+
+	result, err := channelconsole.CommitImport(channelconsole.ImportCommitRequest{
+		RawInput: "sk-redacted-example",
+		Models:   []string{"gpt-4o-mini"},
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", result.ChannelID)}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/channel-console/channels/%d/health-check", result.ChannelID), nil)
+
+	CheckChannelConsoleHealth(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeChannelConsoleResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+	data := body["data"].(map[string]interface{})
+	require.Equal(t, float64(result.ChannelID), data["channel_id"])
+	require.Equal(t, "manual", data["check_type"])
+	require.Equal(t, "unchecked", data["status"])
+	require.Equal(t, "manual_check_queued", data["error_code"])
+	require.Equal(t, "已记录手动验活请求；实时上游调用由后续调度器执行", data["error_message"])
+	require.NotZero(t, data["checked_at"])
+
+	checks, err := model.ListChannelConsoleHealthChecks(result.ChannelID, 50)
+	require.NoError(t, err)
+	require.Len(t, checks, 1)
+	require.Equal(t, "manual", checks[0].CheckType)
+	require.Equal(t, "unchecked", checks[0].Status)
+
+	meta, err := model.GetChannelConsoleChannelByChannelID(result.ChannelID)
+	require.NoError(t, err)
+	require.Equal(t, checks[0].CheckedAt, meta.LastHealthCheckAt)
+	require.Equal(t, "manual_check_queued", meta.LastErrorCode)
+	require.Equal(t, "已记录手动验活请求；实时上游调用由后续调度器执行", meta.LastErrorMessage)
+	require.Equal(t, "unchecked", meta.HealthStatus)
+}
+
+func TestChannelConsoleHealthCheckRejectsInvalidID(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "bad"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel-console/channels/bad/health-check", nil)
+
+	CheckChannelConsoleHealth(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeChannelConsoleResponse(t, recorder)
+	require.Equal(t, false, body["success"])
+	require.Equal(t, "invalid channel id", body["message"])
+}
+
+func TestChannelConsoleHealthCheckRejectsNonConsoleChannel(t *testing.T) {
+	setupChannelConsoleControllerTestDB(t)
+
+	regularChannel := &model.Channel{
+		Type:   1,
+		Key:    "sk-regular-channel",
+		Name:   "regular channel",
+		Status: common.ChannelStatusEnabled,
+		Models: "gpt-4o-mini",
+		Group:  "default",
+	}
+	require.NoError(t, model.DB.Create(regularChannel).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", regularChannel.Id)}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/channel-console/channels/%d/health-check", regularChannel.Id), nil)
+
+	CheckChannelConsoleHealth(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeChannelConsoleResponse(t, recorder)
+	require.Equal(t, false, body["success"])
+	require.Contains(t, body["message"], "渠道控制台元数据不存在")
+
+	checks, err := model.ListChannelConsoleHealthChecks(regularChannel.Id, 50)
+	require.NoError(t, err)
+	require.Empty(t, checks)
 }
 
 func decodeChannelConsoleResponse(t *testing.T, recorder *httptest.ResponseRecorder) map[string]interface{} {
