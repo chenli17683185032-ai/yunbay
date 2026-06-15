@@ -129,6 +129,12 @@ export interface ChannelConsoleListResult {
   page_size: number
 }
 
+export interface ChannelConsoleBatchDeleteResult {
+  requested: number
+  deleted: number
+  skipped_ids: number[]
+}
+
 export interface ChannelConsoleDetail {
   channel: ManagedChannelSummary
   console: ChannelConsoleMeta
@@ -136,8 +142,107 @@ export interface ChannelConsoleDetail {
   health_checks: ChannelConsoleHealthCheck[]
 }
 
+export type CredentialPoolKind = 'third_party_api' | 'oauth_cli'
+export type CredentialKind = 'api_key' | 'cliproxy_auth'
+
+export interface CredentialPool {
+  id: number
+  name: string
+  provider: string
+  provider_kind: CredentialPoolKind
+  base_url: string
+  models: string
+  default_test_model: string
+  price_source: string
+  health_status: ChannelConsoleStatus
+  model_sync_status: string
+  price_sync_status: string
+  last_health_check_at: number
+  last_model_sync_at: number
+  last_error_code: string
+  last_error_message: string
+  markup: number
+  new_api_channel_id: number
+  created_at: number
+  updated_at: number
+}
+
+export interface CredentialPoolCredential {
+  id: number
+  pool_id: number
+  credential_kind: CredentialKind
+  display_name: string
+  cliproxy_auth_file: string
+  status: ChannelConsoleStatus
+  status_message: string
+  last_health_check_at: number
+  last_error_code: string
+  last_error_message: string
+  last_model_sync_at: number
+  last_successful_model: string
+  success_count: number
+  failure_count: number
+  created_at: number
+  updated_at: number
+}
+
+export interface CredentialPoolListResult {
+  items: CredentialPool[]
+  total: number
+}
+
+export interface CredentialPoolDetail {
+  pool: CredentialPool
+  credentials: CredentialPoolCredential[]
+}
+
+export interface CredentialBatchDeleteResult {
+  deleted: number
+  failed: number[]
+}
+
 export interface ApiResponse<T> {
   success: boolean
   message?: string
   data?: T
+}
+
+export interface CliProxyStatus {
+  configured: boolean
+  reachable: boolean
+  base_url: string
+  files_count: number
+  message: string
+}
+
+export interface CliProxyAuthFile {
+  id: string
+  auth_index: string
+  name: string
+  type: string
+  provider: string
+  status: string
+  status_message: string
+  disabled: boolean
+  unavailable: boolean
+  runtime_only: boolean
+  source: string
+  size: number
+  modtime: string
+  email: string
+  account_type: string
+  account: string
+  last_refresh: string
+  success: number
+  failed: number
+}
+
+export interface CliProxyAuthFilesResult {
+  files: CliProxyAuthFile[]
+}
+
+export interface CliProxyAuthURLResult {
+  status: string
+  url: string
+  state: string
 }

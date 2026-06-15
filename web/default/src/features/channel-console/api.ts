@@ -20,9 +20,19 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import type {
   ApiResponse,
+  ChannelConsoleBatchDeleteResult,
   ChannelConsoleDetail,
   ChannelConsoleHealthCheck,
   ChannelConsoleListResult,
+  CredentialBatchDeleteResult,
+  CredentialPool,
+  CredentialPoolCredential,
+  CredentialPoolDetail,
+  CredentialPoolKind,
+  CredentialPoolListResult,
+  CliProxyAuthFilesResult,
+  CliProxyAuthURLResult,
+  CliProxyStatus,
   ImportCommitRequest,
   ImportCommitResult,
   ImportPreview,
@@ -63,9 +73,112 @@ export async function getChannelConsoleDetail(
   return res.data
 }
 
+export async function listCredentialPools(): Promise<
+  ApiResponse<CredentialPoolListResult>
+> {
+  const res = await api.get('/api/channel-console/pools')
+  return res.data
+}
+
+export async function createCredentialPool(payload: {
+  name: string
+  provider_kind: CredentialPoolKind
+  base_url?: string
+  provider?: string
+}): Promise<ApiResponse<CredentialPool>> {
+  const res = await api.post('/api/channel-console/pools', payload)
+  return res.data
+}
+
+export async function getCredentialPoolDetail(
+  id: number
+): Promise<ApiResponse<CredentialPoolDetail>> {
+  const res = await api.get(`/api/channel-console/pools/${id}`)
+  return res.data
+}
+
+export async function addThirdPartyCredential(
+  poolId: number,
+  payload: { api_key: string; display_name?: string }
+): Promise<ApiResponse<CredentialPoolCredential>> {
+  const res = await api.post(
+    `/api/channel-console/pools/${poolId}/credentials/api-key`,
+    payload
+  )
+  return res.data
+}
+
+export async function addCliProxyCredential(
+  poolId: number,
+  payload: { name: string; raw_credential: string }
+): Promise<ApiResponse<CredentialPoolCredential>> {
+  const res = await api.post(
+    `/api/channel-console/pools/${poolId}/credentials/cliproxy-auth`,
+    payload
+  )
+  return res.data
+}
+
+export async function batchDeleteCredentials(
+  ids: number[]
+): Promise<ApiResponse<CredentialBatchDeleteResult>> {
+  const res = await api.post('/api/channel-console/credentials/batch-delete', {
+    ids,
+  })
+  return res.data
+}
+
+export async function batchDeleteChannelConsoleChannels(
+  ids: number[]
+): Promise<ApiResponse<ChannelConsoleBatchDeleteResult>> {
+  const res = await api.post('/api/channel-console/channels/batch-delete', {
+    ids,
+  })
+  return res.data
+}
+
 export async function checkChannelConsoleHealth(
   id: number
 ): Promise<ApiResponse<ChannelConsoleHealthCheck>> {
   const res = await api.post(`/api/channel-console/channels/${id}/health-check`)
+  return res.data
+}
+
+export async function getCliProxyStatus(): Promise<ApiResponse<CliProxyStatus>> {
+  const res = await api.get('/api/channel-console/cliproxy/status')
+  return res.data
+}
+
+export async function listCliProxyAuthFiles(): Promise<
+  ApiResponse<CliProxyAuthFilesResult>
+> {
+  const res = await api.get('/api/channel-console/cliproxy/auth-files')
+  return res.data
+}
+
+export async function uploadCliProxyAuthFile(payload: {
+  name: string
+  raw_credential: string
+}): Promise<ApiResponse<{ status: string }>> {
+  const res = await api.post('/api/channel-console/cliproxy/auth-files', payload)
+  return res.data
+}
+
+export async function deleteCliProxyAuthFiles(
+  names: string[]
+): Promise<ApiResponse<{ deleted: number; failed: string[] }>> {
+  const res = await api.post(
+    '/api/channel-console/cliproxy/auth-files/batch-delete',
+    { names }
+  )
+  return res.data
+}
+
+export async function getCliProxyAuthURL(
+  provider: string
+): Promise<ApiResponse<CliProxyAuthURLResult>> {
+  const res = await api.get('/api/channel-console/cliproxy/auth-url', {
+    params: { provider },
+  })
   return res.data
 }

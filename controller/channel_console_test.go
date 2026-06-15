@@ -45,6 +45,8 @@ func setupChannelConsoleControllerTestDB(t *testing.T) {
 		&model.Channel{},
 		&model.Ability{},
 		&model.ChannelConsoleChannel{},
+		&model.ChannelConsolePool{},
+		&model.ChannelConsoleCredential{},
 		&model.ChannelConsoleModelPrice{},
 		&model.ChannelConsoleHealthCheck{},
 	))
@@ -167,6 +169,53 @@ func TestChannelConsoleCommitListAndDetailHandlers(t *testing.T) {
 	regularDetailBody := decodeChannelConsoleResponse(t, regularDetailRecorder)
 	require.Equal(t, false, regularDetailBody["success"])
 	require.Contains(t, regularDetailBody["message"], "渠道控制台元数据不存在")
+}
+
+func TestChannelConsoleBatchDeleteHandlerSkipsNonConsoleChannels(t *testing.T) {
+	setupChannelConsoleControllerTestDB(t)
+
+	result, err := channelconsole.CommitImport(channelconsole.ImportCommitRequest{
+		RawInput: "sk-redacted-example",
+		Models:   []string{"gpt-4o-mini"},
+	})
+	require.NoError(t, err)
+
+	regularChannel := &model.Channel{
+		Type:   1,
+		Key:    "sk-regular-channel",
+		Name:   "regular channel",
+		Status: common.ChannelStatusEnabled,
+		Models: "gpt-4o-mini",
+		Group:  "default",
+	}
+	require.NoError(t, model.DB.Create(regularChannel).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/channel-console/channels/batch-delete",
+		strings.NewReader(fmt.Sprintf(`{"ids":[%d,%d]}`, result.ChannelID, regularChannel.Id)),
+	)
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	BatchDeleteChannelConsoleChannels(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeChannelConsoleResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+	data := body["data"].(map[string]interface{})
+	require.Equal(t, float64(2), data["requested"])
+	require.Equal(t, float64(1), data["deleted"])
+	skipped := data["skipped_ids"].([]interface{})
+	require.Len(t, skipped, 1)
+	require.Equal(t, float64(regularChannel.Id), skipped[0])
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", result.ChannelID).Count(&count).Error)
+	require.Zero(t, count)
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", regularChannel.Id).Count(&count).Error)
+	require.Equal(t, int64(1), count)
 }
 
 func TestChannelConsoleCommitHandlerReturnsServiceError(t *testing.T) {

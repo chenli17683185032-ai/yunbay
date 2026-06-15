@@ -56,6 +56,50 @@ type ChannelConsoleChannel struct {
 	DeletedAt         gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
+type ChannelConsolePool struct {
+	Id                int            `json:"id" gorm:"primaryKey"`
+	Name              string         `json:"name" gorm:"size:128;index;not null"`
+	Provider          string         `json:"provider" gorm:"size:64;index;not null"`
+	ProviderKind      string         `json:"provider_kind" gorm:"size:64;index;not null"`
+	BaseURL           string         `json:"base_url" gorm:"type:text"`
+	Models            string         `json:"models" gorm:"type:text"`
+	DefaultTestModel  string         `json:"default_test_model" gorm:"size:255"`
+	PriceSource       string         `json:"price_source" gorm:"size:64;index;not null"`
+	HealthStatus      string         `json:"health_status" gorm:"size:32;index;not null;default:'unchecked'"`
+	ModelSyncStatus   string         `json:"model_sync_status" gorm:"size:32;not null;default:'unchecked'"`
+	PriceSyncStatus   string         `json:"price_sync_status" gorm:"size:32;not null;default:'unchecked'"`
+	LastHealthCheckAt int64          `json:"last_health_check_at" gorm:"bigint;default:0"`
+	LastModelSyncAt   int64          `json:"last_model_sync_at" gorm:"bigint;default:0"`
+	LastErrorCode     string         `json:"last_error_code" gorm:"size:128"`
+	LastErrorMessage  string         `json:"last_error_message" gorm:"type:text"`
+	Markup            float64        `json:"markup" gorm:"default:1.2"`
+	NewAPIChannelID   int            `json:"new_api_channel_id" gorm:"index;default:0"`
+	CreatedAt         int64          `json:"created_at" gorm:"bigint"`
+	UpdatedAt         int64          `json:"updated_at" gorm:"bigint"`
+	DeletedAt         gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
+type ChannelConsoleCredential struct {
+	Id                  int            `json:"id" gorm:"primaryKey"`
+	PoolID              int            `json:"pool_id" gorm:"index;not null"`
+	CredentialKind      string         `json:"credential_kind" gorm:"size:64;index;not null"`
+	DisplayName         string         `json:"display_name" gorm:"size:255"`
+	Credential          string         `json:"-" gorm:"type:text"`
+	CliProxyAuthFile    string         `json:"cliproxy_auth_file" gorm:"size:255;index"`
+	Status              string         `json:"status" gorm:"size:32;index;not null;default:'unchecked'"`
+	StatusMessage       string         `json:"status_message" gorm:"type:text"`
+	LastHealthCheckAt   int64          `json:"last_health_check_at" gorm:"bigint;default:0"`
+	LastErrorCode       string         `json:"last_error_code" gorm:"size:128"`
+	LastErrorMessage    string         `json:"last_error_message" gorm:"type:text"`
+	LastModelSyncAt     int64          `json:"last_model_sync_at" gorm:"bigint;default:0"`
+	LastSuccessfulModel string         `json:"last_successful_model" gorm:"size:255"`
+	SuccessCount        int64          `json:"success_count" gorm:"bigint;default:0"`
+	FailureCount        int64          `json:"failure_count" gorm:"bigint;default:0"`
+	CreatedAt           int64          `json:"created_at" gorm:"bigint"`
+	UpdatedAt           int64          `json:"updated_at" gorm:"bigint"`
+	DeletedAt           gorm.DeletedAt `json:"-" gorm:"index"`
+}
+
 type ChannelConsoleModelPrice struct {
 	Id                         int      `json:"id" gorm:"primaryKey"`
 	ChannelId                  int      `json:"channel_id" gorm:"uniqueIndex:idx_channel_console_model_price,priority:1;not null"`
@@ -104,6 +148,45 @@ func (c *ChannelConsoleChannel) BeforeCreate(tx *gorm.DB) error {
 }
 
 func (c *ChannelConsoleChannel) BeforeUpdate(tx *gorm.DB) error {
+	c.UpdatedAt = time.Now().Unix()
+	return nil
+}
+
+func (p *ChannelConsolePool) BeforeCreate(tx *gorm.DB) error {
+	now := time.Now().Unix()
+	p.CreatedAt = now
+	p.UpdatedAt = now
+	if p.HealthStatus == "" {
+		p.HealthStatus = ChannelConsoleStatusUnchecked
+	}
+	if p.ModelSyncStatus == "" {
+		p.ModelSyncStatus = ChannelConsoleStatusUnchecked
+	}
+	if p.PriceSyncStatus == "" {
+		p.PriceSyncStatus = ChannelConsolePriceStatusUnknown
+	}
+	if p.Markup == 0 {
+		p.Markup = 1.2
+	}
+	return nil
+}
+
+func (p *ChannelConsolePool) BeforeUpdate(tx *gorm.DB) error {
+	p.UpdatedAt = time.Now().Unix()
+	return nil
+}
+
+func (c *ChannelConsoleCredential) BeforeCreate(tx *gorm.DB) error {
+	now := time.Now().Unix()
+	c.CreatedAt = now
+	c.UpdatedAt = now
+	if c.Status == "" {
+		c.Status = ChannelConsoleStatusUnchecked
+	}
+	return nil
+}
+
+func (c *ChannelConsoleCredential) BeforeUpdate(tx *gorm.DB) error {
 	c.UpdatedAt = time.Now().Unix()
 	return nil
 }

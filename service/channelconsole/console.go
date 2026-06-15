@@ -2,6 +2,7 @@ package channelconsole
 
 import (
 	"errors"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -64,6 +65,16 @@ type ManagedChannelDetail struct {
 	Console      *model.ChannelConsoleChannel      `json:"console"`
 	Prices       []model.ChannelConsoleModelPrice  `json:"prices"`
 	HealthChecks []model.ChannelConsoleHealthCheck `json:"health_checks"`
+}
+
+type ManagedChannelBatchDeleteRequest struct {
+	IDs []int `json:"ids"`
+}
+
+type ManagedChannelBatchDeleteResult struct {
+	Requested  int   `json:"requested"`
+	Deleted    int   `json:"deleted"`
+	SkippedIDs []int `json:"skipped_ids"`
 }
 
 func CommitImport(req ImportCommitRequest) (*ImportCommitResult, error) {
@@ -240,6 +251,60 @@ func GetManagedChannelDetail(channelID int) (*ManagedChannelDetail, error) {
 	}, nil
 }
 
+func BatchDeleteManagedChannels(ids []int) (*ManagedChannelBatchDeleteResult, error) {
+	ids = uniquePositiveIDs(ids)
+	result := &ManagedChannelBatchDeleteResult{Requested: len(ids)}
+	if len(ids) == 0 {
+		return result, nil
+	}
+
+	var consoleIDs []int
+	if err := model.DB.
+		Model(&model.ChannelConsoleChannel{}).
+		Where("channel_id IN ?", ids).
+		Pluck("channel_id", &consoleIDs).Error; err != nil {
+		return nil, err
+	}
+	sort.Ints(consoleIDs)
+
+	consoleIDSet := make(map[int]struct{}, len(consoleIDs))
+	for _, id := range consoleIDs {
+		consoleIDSet[id] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := consoleIDSet[id]; !ok {
+			result.SkippedIDs = append(result.SkippedIDs, id)
+		}
+	}
+	if len(consoleIDs) == 0 {
+		return result, nil
+	}
+
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("channel_id IN ?", consoleIDs).Delete(&model.ChannelConsoleHealthCheck{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("channel_id IN ?", consoleIDs).Delete(&model.ChannelConsoleModelPrice{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("channel_id IN ?", consoleIDs).Delete(&model.ChannelConsoleChannel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("channel_id IN ?", consoleIDs).Delete(&model.Ability{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id IN ?", consoleIDs).Delete(&model.Channel{}).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	result.Deleted = len(consoleIDs)
+	return result, nil
+}
+
 func normalizeMultiKeyMode(mode string) constant.MultiKeyMode {
 	switch constant.MultiKeyMode(strings.TrimSpace(mode)) {
 	case constant.MultiKeyModeRandom:
@@ -267,6 +332,22 @@ func normalizeCommitModels(models []string, defaultModel string) []string {
 		normalized = append(normalized, strings.TrimSpace(defaultModel))
 	}
 	return normalized
+}
+
+func uniquePositiveIDs(ids []int) []int {
+	unique := make([]int, 0, len(ids))
+	seen := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	return unique
 }
 
 func loadManagedChannel(channelID int) (*model.Channel, error) {

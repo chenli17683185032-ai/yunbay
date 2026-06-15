@@ -16,28 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
-import { listChannelConsoleChannels } from './api'
-import { ChannelConsoleTable } from './components/channel-console-table'
-import { ChannelDetailDrawer } from './components/channel-detail-drawer'
-import { ImportPanel } from './components/import-panel'
-import type { ChannelConsoleListItem } from './types'
+import { CredentialPoolConsole } from './components/credential-pool-console'
 
 export function ChannelConsole() {
   const { t } = useTranslation()
-  const [items, setItems] = useState<ChannelConsoleListItem[]>([])
-  const [selected, setSelected] = useState<ChannelConsoleListItem | null>(null)
-
-  async function loadChannels() {
-    const res = await listChannelConsoleChannels({ page_size: 100 })
-    setItems(res.data?.items || [])
-  }
-
-  useEffect(() => {
-    void loadChannels()
-  }, [])
 
   return (
     <SectionPageLayout fixedContent>
@@ -45,16 +29,7 @@ export function ChannelConsole() {
         {t('Unified Channel Console')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        <div className='grid h-full min-h-0 gap-4 overflow-auto xl:grid-cols-[1fr_380px]'>
-          <ChannelConsoleTable items={items} onOpen={setSelected} />
-          <ImportPanel onImported={loadChannels} />
-        </div>
-        <ChannelDetailDrawer
-          item={selected}
-          onChecked={loadChannels}
-          onOpenChange={(open) => !open && setSelected(null)}
-          open={Boolean(selected)}
-        />
+        <CredentialPoolConsole />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

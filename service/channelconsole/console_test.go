@@ -2,6 +2,8 @@ package channelconsole
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -40,6 +42,8 @@ func setupChannelConsoleServiceTestDB(t *testing.T) {
 		&model.Channel{},
 		&model.Ability{},
 		&model.ChannelConsoleChannel{},
+		&model.ChannelConsolePool{},
+		&model.ChannelConsoleCredential{},
 		&model.ChannelConsoleModelPrice{},
 		&model.ChannelConsoleHealthCheck{},
 	))
@@ -149,4 +153,136 @@ func TestCommitImportAppliesDefaultsAndRejectsMissingKeys(t *testing.T) {
 	missingKeyResult, err := CommitImport(ImportCommitRequest{RawInput: "Base URL: https://gateway.example.com"})
 	require.Error(t, err)
 	require.Nil(t, missingKeyResult)
+}
+
+func TestBatchDeleteManagedChannelsDeletesOnlyConsoleOwnedRows(t *testing.T) {
+	setupChannelConsoleServiceTestDB(t)
+
+	consoleResult, err := CommitImport(ImportCommitRequest{
+		RawInput: "sk-redacted-console",
+		Models:   []string{"gpt-4o-mini"},
+	})
+	require.NoError(t, err)
+
+	price := model.ChannelConsoleModelPrice{
+		ChannelId:   consoleResult.ChannelID,
+		ModelName:   "gpt-4o-mini",
+		Source:      PriceSourceOpenAI,
+		PriceStatus: model.ChannelConsolePriceStatusSynced,
+	}
+	require.NoError(t, model.DB.Create(&price).Error)
+	require.NoError(t, model.CreateChannelConsoleHealthCheck(&model.ChannelConsoleHealthCheck{
+		ChannelId: consoleResult.ChannelID,
+		ModelName: "gpt-4o-mini",
+		CheckType: HealthCheckTypeManual,
+		Status:    model.ChannelConsoleStatusFailed,
+	}))
+
+	regularChannel := &model.Channel{
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "sk-regular-channel",
+		Name:   "regular channel",
+		Status: common.ChannelStatusEnabled,
+		Models: "gpt-4o-mini",
+		Group:  "default",
+	}
+	require.NoError(t, model.DB.Create(regularChannel).Error)
+	require.NoError(t, regularChannel.AddAbilities(nil))
+
+	deleteResult, err := BatchDeleteManagedChannels([]int{
+		consoleResult.ChannelID,
+		regularChannel.Id,
+		consoleResult.ChannelID,
+		0,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 2, deleteResult.Requested)
+	require.Equal(t, 1, deleteResult.Deleted)
+	require.Equal(t, []int{regularChannel.Id}, deleteResult.SkippedIDs)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", consoleResult.ChannelID).Count(&count).Error)
+	require.Zero(t, count)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", consoleResult.ChannelID).Count(&count).Error)
+	require.Zero(t, count)
+	require.NoError(t, model.DB.Model(&model.ChannelConsoleModelPrice{}).Where("channel_id = ?", consoleResult.ChannelID).Count(&count).Error)
+	require.Zero(t, count)
+	require.NoError(t, model.DB.Model(&model.ChannelConsoleHealthCheck{}).Where("channel_id = ?", consoleResult.ChannelID).Count(&count).Error)
+	require.Zero(t, count)
+	_, err = model.GetChannelConsoleChannelByChannelID(consoleResult.ChannelID)
+	require.Error(t, err)
+
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", regularChannel.Id).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+	require.NoError(t, model.DB.Model(&model.Ability{}).Where("channel_id = ?", regularChannel.Id).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestCredentialPoolThirdPartyCredentialDiscoversModelsAndSyncsMultiKeyChannel(t *testing.T) {
+	setupChannelConsoleServiceTestDB(t)
+
+	modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			http.NotFound(w, r)
+			return
+		}
+		require.Equal(t, "Bearer sk-one", r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-auto"},{"id":"gpt-plus"}]}`))
+	}))
+	t.Cleanup(modelServer.Close)
+
+	pool, err := CreateCredentialPool(CreateCredentialPoolRequest{
+		Name:         "OpenAI Compatible Pool",
+		ProviderKind: model.ChannelConsoleKindThirdPartyAPI,
+		BaseURL:      modelServer.URL + "/v1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.ChannelConsoleKindThirdPartyAPI, pool.ProviderKind)
+	require.Zero(t, pool.NewAPIChannelID)
+
+	firstCredential, err := AddThirdPartyCredentialToPool(t.Context(), pool.Id, AddThirdPartyCredentialRequest{
+		APIKey: "sk-one",
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.ChannelConsoleStatusHealthy, firstCredential.Status)
+	require.Equal(t, MaskCredential("sk-one"), firstCredential.DisplayName)
+
+	detail, err := GetCredentialPoolDetail(pool.Id)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-auto,gpt-plus", detail.Pool.Models)
+	require.Equal(t, "gpt-auto", detail.Pool.DefaultTestModel)
+	require.Greater(t, detail.Pool.NewAPIChannelID, 0)
+	require.Len(t, detail.Credentials, 1)
+
+	channel, err := model.GetChannelById(detail.Pool.NewAPIChannelID, true)
+	require.NoError(t, err)
+	require.Equal(t, "sk-one", channel.Key)
+	require.False(t, channel.ChannelInfo.IsMultiKey)
+	require.Equal(t, "gpt-auto,gpt-plus", channel.Models)
+	require.Equal(t, modelServer.URL, channel.GetBaseURL())
+	require.Equal(t, "gpt-auto", *channel.TestModel)
+
+	secondCredential, err := AddThirdPartyCredentialToPool(t.Context(), pool.Id, AddThirdPartyCredentialRequest{
+		APIKey: "sk-two",
+		Models: []string{"gpt-auto", "gpt-plus"},
+	})
+	require.NoError(t, err)
+	require.Equal(t, model.ChannelConsoleStatusHealthy, secondCredential.Status)
+
+	detail, err = GetCredentialPoolDetail(pool.Id)
+	require.NoError(t, err)
+	require.Len(t, detail.Credentials, 2)
+
+	channel, err = model.GetChannelById(detail.Pool.NewAPIChannelID, true)
+	require.NoError(t, err)
+	require.Equal(t, "sk-one\nsk-two", channel.Key)
+	require.True(t, channel.ChannelInfo.IsMultiKey)
+	require.Equal(t, 2, channel.ChannelInfo.MultiKeySize)
+	require.Equal(t, constant.MultiKeyModePolling, channel.ChannelInfo.MultiKeyMode)
+
+	var abilities []model.Ability
+	require.NoError(t, model.DB.Where("channel_id = ?", channel.Id).Order("model asc").Find(&abilities).Error)
+	require.Len(t, abilities, 2)
+	require.Equal(t, "gpt-auto", abilities[0].Model)
+	require.Equal(t, "gpt-plus", abilities[1].Model)
 }
