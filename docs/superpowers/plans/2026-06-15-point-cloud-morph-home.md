@@ -342,7 +342,7 @@ Expected: both pass.
 Run:
 
 ```bash
-cd /Users/ethan/Documents/Codex/2026-06-14/chrome-https-new-contabo-com-servers/work/new-api
+cd /Users/ethan/Desktop/云贝/云贝网站/new-api
 docker build --target builder -t new-api-web-pointcloud-check .
 ```
 
