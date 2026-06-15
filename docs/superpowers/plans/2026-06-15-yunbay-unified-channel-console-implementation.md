@@ -422,13 +422,14 @@ type ImportPreview struct {
 }
 
 type ImportCommitRequest struct {
+    // Price write-back flags are intentionally not exposed in this first commit path.
+    // Known-price enablement will be added with the dedicated price sync/write-back task.
     RawInput         string   `json:"raw_input"`
     Name             string   `json:"name"`
     Group            string   `json:"group"`
     Models           []string `json:"models"`
     MultiKeyMode     string   `json:"multi_key_mode"`
     Markup           float64  `json:"markup"`
-    EnableKnownPrice bool     `json:"enable_known_price"`
 }
 ```
 
@@ -813,6 +814,8 @@ type ImportCommitResult struct {
 
 - [ ] **Step 2: Implement commit orchestration**
 
+Runtime note: New API multi-key status lists are sparse. Missing key indexes mean enabled; disabled/error states are stored explicitly. The commit path should not pre-fill `MultiKeyStatusList` with enabled entries.
+
 Create `service/channelconsole/console.go` with the following functions.
 
 ```go
@@ -858,10 +861,7 @@ func CommitImport(req ImportCommitRequest) (*ImportCommitResult, error) {
             MultiKeyMode: constant.MultiKeyMode(mode),
         },
     }
-    if channel.ChannelInfo.IsMultiKey {
-        channel.ChannelInfo.MultiKeyStatusList = map[int]int{}
-        for i := range preview.Keys { channel.ChannelInfo.MultiKeyStatusList[i] = common.ChannelStatusEnabled }
-    }
+    // Keep MultiKeyStatusList sparse: missing index means enabled in existing New API semantics.
     if err := model.AddChannel(channel); err != nil { return nil, err }
     meta := &model.ChannelConsoleChannel{
         ChannelId: channel.Id,
@@ -1143,7 +1143,6 @@ export interface ImportCommitRequest {
   models?: string[]
   multi_key_mode?: 'random' | 'polling'
   markup?: number
-  enable_known_price?: boolean
 }
 
 export interface ImportCommitResult {
@@ -1306,7 +1305,6 @@ export function ImportPanel({ onImported }: { onImported: () => void }) {
         models: preview.default_test_model ? [preview.default_test_model] : [],
         multi_key_mode: preview.multi_key_mode,
         markup: 1.2,
-        enable_known_price: true,
       })
       if (!res.success) throw new Error(res.message || t('Import failed'))
       toast.success(t('Channel imported'))

@@ -65,12 +65,6 @@ func CommitImport(req ImportCommitRequest) (*ImportCommitResult, error) {
 			MultiKeyMode: multiKeyMode,
 		},
 	}
-	if channel.ChannelInfo.IsMultiKey {
-		channel.ChannelInfo.MultiKeyStatusList = make(map[int]int, len(preview.Keys))
-		for index := range preview.Keys {
-			channel.ChannelInfo.MultiKeyStatusList[index] = common.ChannelStatusEnabled
-		}
-	}
 
 	meta := &model.ChannelConsoleChannel{
 		Provider:          preview.Provider,

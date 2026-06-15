@@ -38,13 +38,12 @@ type ImportPreview struct {
 }
 
 type ImportCommitRequest struct {
-	RawInput         string   `json:"raw_input"`
-	Name             string   `json:"name"`
-	Group            string   `json:"group"`
-	Models           []string `json:"models"`
-	MultiKeyMode     string   `json:"multi_key_mode"`
-	Markup           float64  `json:"markup"`
-	EnableKnownPrice bool     `json:"enable_known_price"`
+	RawInput     string   `json:"raw_input"`
+	Name         string   `json:"name"`
+	Group        string   `json:"group"`
+	Models       []string `json:"models"`
+	MultiKeyMode string   `json:"multi_key_mode"`
+	Markup       float64  `json:"markup"`
 }
 
 type ImportCommitResult struct {

@@ -80,8 +80,11 @@ func TestCommitImportCreatesChannelAndMetadata(t *testing.T) {
 	require.True(t, channel.ChannelInfo.IsMultiKey)
 	require.Equal(t, 2, channel.ChannelInfo.MultiKeySize)
 	require.Equal(t, constant.MultiKeyModeRandom, channel.ChannelInfo.MultiKeyMode)
-	require.Equal(t, common.ChannelStatusEnabled, channel.ChannelInfo.MultiKeyStatusList[0])
-	require.Equal(t, common.ChannelStatusEnabled, channel.ChannelInfo.MultiKeyStatusList[1])
+	require.Empty(t, channel.ChannelInfo.MultiKeyStatusList)
+	nextKey, keyIndex, newAPIError := channel.GetNextEnabledKey()
+	require.Nil(t, newAPIError)
+	require.Contains(t, []string{"sk-or-one", "sk-or-two"}, nextKey)
+	require.Contains(t, []int{0, 1}, keyIndex)
 
 	var abilities []model.Ability
 	require.NoError(t, model.DB.Where("channel_id = ?", result.ChannelID).Order("model asc").Find(&abilities).Error)
