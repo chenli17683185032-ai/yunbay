@@ -106,7 +106,7 @@ func detectImportKind(raw string) string {
 		return ImportKindCurl
 	case strings.HasPrefix(trimmed, "{"):
 		return ImportKindJSON
-	case strings.Contains(lower, "base url") || strings.Contains(lower, "key:"):
+	case hasStructuredImportHint(lower):
 		return ImportKindStructured
 	default:
 		return ImportKindKeyOnly
@@ -114,6 +114,16 @@ func detectImportKind(raw string) string {
 }
 
 func extractBaseURL(raw string) string {
+	for _, line := range strings.Split(raw, "\n") {
+		lowerLine := strings.ToLower(line)
+		if !hasBaseURLHint(lowerLine) {
+			continue
+		}
+		if match := urlPattern.FindString(line); match != "" {
+			return normalizeBaseURL(match)
+		}
+	}
+
 	match := urlPattern.FindString(raw)
 	if match == "" {
 		return ""
@@ -199,17 +209,7 @@ func detectProvider(raw string, baseURL string, keys []string) providerDefaults 
 			modelDiscovery:   modelDiscoveryProviderAPI,
 			defaultTestModel: "openai/gpt-4o-mini",
 		}
-	case strings.Contains(text, "api.openai.com"):
-		return providerDefaults{
-			provider:         ProviderOpenAI,
-			label:            "OpenAI",
-			channelType:      constant.ChannelTypeOpenAI,
-			baseURL:          "https://api.openai.com",
-			priceSource:      PriceSourceOpenAI,
-			modelDiscovery:   modelDiscoveryOpenAICompatible,
-			defaultTestModel: "gpt-4o-mini",
-		}
-	case strings.Contains(text, "anthropic.com"):
+	case strings.Contains(text, "anthropic.com") || hasKeyPrefix(keys, "sk-ant-") || strings.Contains(text, "anthropic-version"):
 		return providerDefaults{
 			provider:         ProviderAnthropic,
 			label:            "Anthropic",
@@ -229,11 +229,22 @@ func detectProvider(raw string, baseURL string, keys []string) providerDefaults 
 			modelDiscovery:   modelDiscoveryProviderAPI,
 			defaultTestModel: "gemini-1.5-flash",
 		}
+	case strings.Contains(text, "api.openai.com") || (baseURL == "" && hasGenericOpenAIKey(keys)):
+		return providerDefaults{
+			provider:         ProviderOpenAI,
+			label:            "OpenAI",
+			channelType:      constant.ChannelTypeOpenAI,
+			baseURL:          "https://api.openai.com",
+			priceSource:      PriceSourceOpenAI,
+			modelDiscovery:   modelDiscoveryOpenAICompatible,
+			defaultTestModel: "gpt-4o-mini",
+		}
 	default:
 		return providerDefaults{
 			provider:         ProviderCustomOpenAICompatible,
 			label:            "OpenAI 兼容",
 			channelType:      constant.ChannelTypeCustom,
+			baseURL:          "https://api.openai.com/v1",
 			priceSource:      PriceSourceManual,
 			modelDiscovery:   modelDiscoveryOpenAICompatible,
 			defaultTestModel: "gpt-4o-mini",
@@ -245,6 +256,50 @@ func detectProvider(raw string, baseURL string, keys []string) providerDefaults 
 func hasKeyPrefix(keys []string, prefix string) bool {
 	for _, key := range keys {
 		if strings.HasPrefix(key, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasStructuredImportHint(lower string) bool {
+	for _, hint := range []string{
+		"base url",
+		"baseurl",
+		"base_url",
+		"api base",
+		"endpoint",
+		"key:",
+		"key =",
+		"api_key",
+		"api key",
+		"api-key",
+	} {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBaseURLHint(lowerLine string) bool {
+	for _, hint := range []string{
+		"base url",
+		"baseurl",
+		"base_url",
+		"api base",
+		"endpoint",
+	} {
+		if strings.Contains(lowerLine, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasGenericOpenAIKey(keys []string) bool {
+	for _, key := range keys {
+		if strings.HasPrefix(key, "sk-") && !strings.HasPrefix(key, "sk-or-") && !strings.HasPrefix(key, "sk-ant-") {
 			return true
 		}
 	}
