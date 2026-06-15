@@ -46,3 +46,13 @@ type ImportCommitRequest struct {
 	Markup           float64  `json:"markup"`
 	EnableKnownPrice bool     `json:"enable_known_price"`
 }
+
+type ImportCommitResult struct {
+	ChannelID    int    `json:"channel_id"`
+	Name         string `json:"name"`
+	Provider     string `json:"provider"`
+	KeyCount     int    `json:"key_count"`
+	ModelCount   int    `json:"model_count"`
+	HealthStatus string `json:"health_status"`
+	PriceStatus  string `json:"price_status"`
+}
