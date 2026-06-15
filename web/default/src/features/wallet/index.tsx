@@ -45,6 +45,10 @@ import {
   getMinTopupAmount,
   isWaffoPancakePayment,
 } from './lib'
+import {
+  getWalletInitialSectionTargetId,
+  type WalletInitialSection,
+} from './lib/initial-section'
 import type {
   UserWalletData,
   PaymentMethod,
@@ -54,6 +58,7 @@ import type {
 
 interface WalletProps {
   initialShowHistory?: boolean
+  initialSection?: WalletInitialSection
 }
 
 export function Wallet(props: WalletProps) {
@@ -129,6 +134,20 @@ export function Wallet(props: WalletProps) {
       window.history.replaceState({}, '', window.location.pathname)
     }
   }, [props.initialShowHistory])
+
+  useEffect(() => {
+    const targetId = getWalletInitialSectionTargetId(props.initialSection)
+    if (!targetId || topupLoading) return
+
+    const timeoutId = window.setTimeout(() => {
+      document.getElementById(targetId)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      })
+    }, 100)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [props.initialSection, topupLoading])
 
   // Initialize topup amount when topup info is loaded
   useEffect(() => {

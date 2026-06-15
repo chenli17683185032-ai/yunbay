@@ -39,6 +39,7 @@ interface FooterProps {
   columns?: FooterColumnProps[]
   copyright?: string
   className?: string
+  attributionOnly?: boolean
 }
 
 const NEW_API_FOOTER_ATTRIBUTION_KEY = [
@@ -220,6 +221,28 @@ export function Footer(props: FooterProps) {
   )
 
   const displayColumns = props.columns ?? fallbackColumns
+
+  if (props.attributionOnly) {
+    return (
+      <footer
+        className={cn(
+          'border-border/40 relative z-10 border-t',
+          props.className
+        )}
+      >
+        <div className='mx-auto flex max-w-6xl flex-col items-center justify-between gap-x-3 gap-y-2 px-6 py-4 sm:flex-row'>
+          <div className='text-muted-foreground/40 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-xs sm:justify-start'>
+            <span>
+              &copy; {currentYear} {displayName}.{' '}
+              {props.copyright ?? t('footer.defaultCopyright')}
+            </span>
+            <LegalLinks leadingSeparator />
+          </div>
+          <ProjectAttribution currentYear={currentYear} />
+        </div>
+      </footer>
+    )
+  }
 
   if (footerHtml) {
     return (

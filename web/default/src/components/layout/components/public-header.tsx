@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/stores/auth-store'
+import { getPublicHeaderAuthedTarget } from '@/features/auth/lib/post-login-routing'
 import { cn } from '@/lib/utils'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
@@ -61,12 +62,12 @@ export interface PublicHeaderProps {
 
 export function PublicHeader(props: PublicHeaderProps) {
   const {
-    navLinks = defaultTopNavLinks,
     showThemeSwitch = true,
     showLanguageSwitcher = true,
     logo: customLogo,
     siteName: customSiteName,
     homeUrl = '/',
+    showNavigation = true,
     showAuthButtons = true,
     showNotifications = true,
   } = props
@@ -93,8 +94,20 @@ export function PublicHeader(props: PublicHeaderProps) {
 
   const user = auth.user
   const isAuthenticated = !!user
+  const authedTarget = getPublicHeaderAuthedTarget(user)
   const displaySiteName = customSiteName || systemName
-  const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const navLinks = props.navLinks ?? defaultTopNavLinks
+  const links =
+    props.navLinks !== undefined
+      ? navLinks
+      : dynamicLinks.length > 0
+        ? dynamicLinks
+        : navLinks
+  const mobileLinks = props.mobileLinks ?? links
+  const isHashNavLink = useCallback(
+    (href: string) => href.startsWith('#') || href.startsWith('/#'),
+    []
+  )
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20)
@@ -164,16 +177,45 @@ export function PublicHeader(props: PublicHeaderProps) {
         return
       }
 
+      if (isHashNavLink(link.href)) {
+        const hashIndex = link.href.indexOf('#')
+        const hash = link.href.slice(hashIndex + 1)
+        const shouldHandleOnCurrentPage =
+          link.href.startsWith('#') || pathname === '/'
+        const target = shouldHandleOnCurrentPage
+          ? document.getElementById(hash)
+          : null
+
+        if (target) {
+          event.preventDefault()
+          window.history.pushState(null, '', link.href)
+          if (target.closest('[data-landing-snap-root]')) {
+            window.dispatchEvent(
+              new CustomEvent('public-landing:navigate', {
+                detail: { hash: link.href },
+              })
+            )
+          } else {
+            target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+        }
+      }
+
       if (closeMobile) {
         setMobileOpen(false)
       }
     },
-    [t]
+    [isHashNavLink, pathname, t]
   )
 
   return (
     <>
-      <header className='pointer-events-none fixed inset-x-0 top-0 z-50'>
+      <header
+        className={cn(
+          'pointer-events-none fixed inset-x-0 top-0 z-50',
+          props.className
+        )}
+      >
         <div
           className={cn(
             'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
@@ -213,87 +255,107 @@ export function PublicHeader(props: PublicHeaderProps) {
             </Link>
 
             {/* Desktop nav */}
-            <div className='hidden items-center gap-0.5 sm:flex'>
-              {links.map((link, i) => {
-                const isActive = pathname === link.href
-                if (link.external) {
+            {showNavigation && (
+              <div className='hidden items-center gap-0.5 sm:flex'>
+                {links.map((link, i) => {
+                  const isActive = pathname === link.href
+                  const isHashLink = isHashNavLink(link.href)
+                  if (link.external) {
+                    return (
+                      <a
+                        key={i}
+                        href={link.href}
+                        target='_blank'
+                        rel='noopener noreferrer'
+                        aria-disabled={link.disabled}
+                        tabIndex={link.disabled ? -1 : undefined}
+                        onClick={(event) => handleNavLinkClick(event, link)}
+                        className={cn(
+                          'text-muted-foreground hover:text-foreground rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                          link.disabled && 'pointer-events-none opacity-50'
+                        )}
+                      >
+                        {t(link.title)}
+                      </a>
+                    )
+                  }
+                  if (isHashLink) {
+                    return (
+                      <a
+                        key={i}
+                        href={link.href}
+                        aria-disabled={link.disabled}
+                        tabIndex={link.disabled ? -1 : undefined}
+                        onClick={(event) => handleNavLinkClick(event, link)}
+                        className={cn(
+                          'text-muted-foreground hover:text-foreground rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                          link.disabled && 'pointer-events-none opacity-50'
+                        )}
+                      >
+                        {t(link.title)}
+                      </a>
+                    )
+                  }
                   return (
-                    <a
+                    <Link
                       key={i}
-                      href={link.href}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                      aria-disabled={link.disabled}
-                      tabIndex={link.disabled ? -1 : undefined}
+                      to={link.href}
+                      disabled={link.disabled}
                       onClick={(event) => handleNavLinkClick(event, link)}
                       className={cn(
-                        'text-muted-foreground hover:text-foreground rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                        'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                        isActive
+                          ? 'text-foreground'
+                          : 'text-muted-foreground hover:text-foreground',
                         link.disabled && 'pointer-events-none opacity-50'
                       )}
                     >
                       {t(link.title)}
-                    </a>
+                    </Link>
                   )
-                }
-                return (
-                  <Link
-                    key={i}
-                    to={link.href}
-                    disabled={link.disabled}
-                    onClick={(event) => handleNavLinkClick(event, link)}
-                    className={cn(
-                      'rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors duration-200',
-                      isActive
-                        ? 'text-foreground'
-                        : 'text-muted-foreground hover:text-foreground',
-                      link.disabled && 'pointer-events-none opacity-50'
+                })}
+
+                {(showLanguageSwitcher ||
+                  showThemeSwitch ||
+                  showNotifications) && (
+                  <div className='bg-border/40 mx-2 h-4 w-px' />
+                )}
+
+                {showLanguageSwitcher && <LanguageSwitcher />}
+                {showThemeSwitch && <ThemeSwitch />}
+                {showNotifications && (
+                  <NotificationPopover
+                    open={notifications.popoverOpen}
+                    onOpenChange={notifications.setPopoverOpen}
+                    unreadCount={notifications.unreadCount}
+                    activeTab={notifications.activeTab}
+                    onTabChange={notifications.setActiveTab}
+                    notice={notifications.notice}
+                    announcements={notifications.announcements}
+                    loading={notifications.loading}
+                  />
+                )}
+
+                {showAuthButtons && (
+                  <>
+                    <div className='bg-border/40 mx-1 h-4 w-px' />
+                    {loading ? (
+                      <Skeleton className='h-8 w-20 rounded-lg' />
+                    ) : isAuthenticated ? (
+                      <ProfileDropdown />
+                    ) : (
+                      <Button
+                        size='sm'
+                        className='h-8 rounded-lg px-3.5 text-xs font-medium'
+                        render={<Link to='/sign-in' />}
+                      >
+                        {t('Sign in')}
+                      </Button>
                     )}
-                  >
-                    {t(link.title)}
-                  </Link>
-                )
-              })}
-
-              {(showLanguageSwitcher ||
-                showThemeSwitch ||
-                showNotifications) && (
-                <div className='bg-border/40 mx-2 h-4 w-px' />
-              )}
-
-              {showLanguageSwitcher && <LanguageSwitcher />}
-              {showThemeSwitch && <ThemeSwitch />}
-              {showNotifications && (
-                <NotificationPopover
-                  open={notifications.popoverOpen}
-                  onOpenChange={notifications.setPopoverOpen}
-                  unreadCount={notifications.unreadCount}
-                  activeTab={notifications.activeTab}
-                  onTabChange={notifications.setActiveTab}
-                  notice={notifications.notice}
-                  announcements={notifications.announcements}
-                  loading={notifications.loading}
-                />
-              )}
-
-              {showAuthButtons && (
-                <>
-                  <div className='bg-border/40 mx-1 h-4 w-px' />
-                  {loading ? (
-                    <Skeleton className='h-8 w-20 rounded-lg' />
-                  ) : isAuthenticated ? (
-                    <ProfileDropdown />
-                  ) : (
-                    <Button
-                      size='sm'
-                      className='h-8 rounded-lg px-3.5 text-xs font-medium'
-                      render={<Link to='/sign-in' />}
-                    >
-                      {t('Sign in')}
-                    </Button>
-                  )}
-                </>
-              )}
-            </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Mobile: compact actions + hamburger */}
             <div className='flex items-center gap-2 sm:hidden'>
@@ -339,6 +401,7 @@ export function PublicHeader(props: PublicHeaderProps) {
       <div
         className={cn(
           'bg-background/98 fixed inset-0 z-40 backdrop-blur-2xl transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] sm:pointer-events-none sm:hidden',
+          props.className,
           mobileOpen
             ? 'pointer-events-auto opacity-100'
             : 'pointer-events-none opacity-0'
@@ -346,7 +409,7 @@ export function PublicHeader(props: PublicHeaderProps) {
       >
         <div className='flex h-full flex-col justify-between px-8 pt-20 pb-10'>
           <nav className='flex flex-col gap-1'>
-            {links.map((link, i) => {
+            {mobileLinks.map((link, i) => {
               const isActive = pathname === link.href
               const linkClassName = cn(
                 'flex items-center gap-3 py-3 text-base font-medium tracking-tight transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]',
@@ -366,6 +429,21 @@ export function PublicHeader(props: PublicHeaderProps) {
                     href={link.href}
                     target='_blank'
                     rel='noopener noreferrer'
+                    aria-disabled={link.disabled}
+                    tabIndex={link.disabled ? -1 : undefined}
+                    onClick={(event) => handleNavLinkClick(event, link, true)}
+                    className={linkClassName}
+                    style={transitionStyle}
+                  >
+                    {t(link.title)}
+                  </a>
+                )
+              }
+              if (isHashNavLink(link.href)) {
+                return (
+                  <a
+                    key={i}
+                    href={link.href}
                     aria-disabled={link.disabled}
                     tabIndex={link.disabled ? -1 : undefined}
                     onClick={(event) => handleNavLinkClick(event, link, true)}
@@ -402,11 +480,11 @@ export function PublicHeader(props: PublicHeaderProps) {
           >
             {showAuthButtons && (
               <Link
-                to={isAuthenticated ? '/dashboard' : '/sign-in'}
+                to={isAuthenticated ? authedTarget : '/sign-in'}
                 onClick={() => setMobileOpen(false)}
                 className='bg-foreground text-background inline-flex h-10 items-center justify-center rounded-lg text-sm font-medium transition-opacity hover:opacity-90 active:opacity-80'
               >
-                {isAuthenticated ? t('Go to Dashboard') : t('Sign in')}
+                {isAuthenticated ? t('Continue') : t('Sign in')}
               </Link>
             )}
           </div>

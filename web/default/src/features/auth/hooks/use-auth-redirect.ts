@@ -21,6 +21,7 @@ import i18n from 'i18next'
 import { useAuthStore } from '@/stores/auth-store'
 import { getSelf } from '@/lib/api'
 import type { User } from '@/features/users/types'
+import { getPostLoginPath } from '../lib/post-login-routing'
 import { saveUserId } from '../lib/storage'
 
 function getSavedLanguage(user: User): string | undefined {
@@ -62,11 +63,14 @@ export function useAuthRedirect() {
       saveUserId(userData.id)
     }
 
+    let userForRedirect: User | null = null
+
     // Fetch and set user data
     try {
       const self = await getSelf()
       if (self?.success && self.data) {
         const user = self.data as User
+        userForRedirect = user
         auth.setUser(user)
 
         // Update user ID if not already set
@@ -86,7 +90,7 @@ export function useAuthRedirect() {
     }
 
     // Navigate to target page
-    const targetPath = redirectTo || '/dashboard'
+    const targetPath = getPostLoginPath(userForRedirect, redirectTo)
     navigate({ to: targetPath, replace: true })
   }
 
@@ -100,8 +104,12 @@ export function useAuthRedirect() {
   /**
    * Redirect to login page
    */
-  const redirectToLogin = () => {
-    navigate({ to: '/sign-in', replace: true })
+  const redirectToLogin = (redirectTo?: string) => {
+    navigate({
+      to: '/sign-in',
+      search: redirectTo ? { redirect: redirectTo } : {},
+      replace: true,
+    })
   }
 
   /**

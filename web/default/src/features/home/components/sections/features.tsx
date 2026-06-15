@@ -39,7 +39,6 @@ export function Features(_props: FeaturesProps) {
   const features = [
     {
       id: 'fast',
-      num: '01',
       title: t('Lightning Fast'),
       desc: t(
         'Optimized network architecture ensures millisecond response times'
@@ -63,7 +62,6 @@ export function Features(_props: FeaturesProps) {
     },
     {
       id: 'secure',
-      num: '02',
       title: t('Secure & Reliable'),
       desc: t(
         'Enterprise-grade security with comprehensive permission management'
@@ -100,7 +98,6 @@ export function Features(_props: FeaturesProps) {
     },
     {
       id: 'global',
-      num: '03',
       title: t('Global Coverage'),
       desc: t('Multi-region deployment for stable global access'),
       span: 'md:col-span-1',
@@ -129,7 +126,6 @@ export function Features(_props: FeaturesProps) {
     },
     {
       id: 'developer',
-      num: '04',
       title: t('Developer Friendly'),
       desc: t('Compatible API routes for common AI application workflows'),
       span: 'md:col-span-2',
@@ -202,8 +198,8 @@ export function Features(_props: FeaturesProps) {
               className={`bg-background group hover:bg-muted/20 p-7 transition-colors duration-300 md:p-8 ${f.span}`}
             >
               <div className='mb-3 flex items-center gap-3'>
-                <span className='border-border/40 bg-muted text-muted-foreground flex size-7 items-center justify-center rounded-md border text-[10px] font-semibold tabular-nums'>
-                  {f.num}
+                <span className='border-border/40 bg-muted text-muted-foreground flex size-7 items-center justify-center rounded-md border'>
+                  {f.icon}
                 </span>
                 <h3 className='text-sm font-semibold'>{f.title}</h3>
               </div>

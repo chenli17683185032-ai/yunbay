@@ -27,6 +27,7 @@ import {
   ListTodo,
   MessageSquare,
   Radio,
+  Rocket,
   Settings,
   Ticket,
   User,
@@ -34,7 +35,28 @@ import {
   Wallet,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/stores/auth-store'
 import { type SidebarData } from '@/components/layout/types'
+import { buildSidebarData, type SidebarIconMap } from './sidebar-data-model'
+
+const SIDEBAR_ICONS: SidebarIconMap = {
+  activity: Activity,
+  box: Box,
+  creditCard: CreditCard,
+  fileText: FileText,
+  flask: FlaskConical,
+  key: Key,
+  layoutDashboard: LayoutDashboard,
+  listTodo: ListTodo,
+  messageSquare: MessageSquare,
+  radio: Radio,
+  rocket: Rocket,
+  settings: Settings,
+  ticket: Ticket,
+  user: User,
+  users: Users,
+  wallet: Wallet,
+}
 
 /**
  * Root navigation groups for the application sidebar.
@@ -44,111 +66,7 @@ import { type SidebarData } from '@/components/layout/types'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const userRole = useAuthStore((state) => state.auth.user?.role)
 
-  return {
-    navGroups: [
-      {
-        id: 'chat',
-        title: t('Chat'),
-        items: [
-          {
-            title: t('Playground'),
-            url: '/playground',
-            icon: FlaskConical,
-          },
-          {
-            title: t('Chat'),
-            icon: MessageSquare,
-            type: 'chat-presets',
-          },
-        ],
-      },
-      {
-        id: 'general',
-        title: t('General'),
-        items: [
-          {
-            title: t('Overview'),
-            url: '/dashboard/overview',
-            icon: Activity,
-          },
-          {
-            title: t('Dashboard'),
-            url: '/dashboard/models',
-            icon: LayoutDashboard,
-          },
-          {
-            title: t('API Keys'),
-            url: '/keys',
-            icon: Key,
-          },
-          {
-            title: t('Usage Logs'),
-            url: '/usage-logs/common',
-            icon: FileText,
-          },
-          {
-            title: t('Task Logs'),
-            url: '/usage-logs/task',
-            activeUrls: ['/usage-logs/drawing'],
-            configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
-            icon: ListTodo,
-          },
-        ],
-      },
-      {
-        id: 'personal',
-        title: t('Personal'),
-        items: [
-          {
-            title: t('Wallet'),
-            url: '/wallet',
-            icon: Wallet,
-          },
-          {
-            title: t('Profile'),
-            url: '/profile',
-            icon: User,
-          },
-        ],
-      },
-      {
-        id: 'admin',
-        title: t('Admin'),
-        items: [
-          {
-            title: t('Channels'),
-            url: '/channels',
-            icon: Radio,
-          },
-          {
-            title: t('Models'),
-            url: '/models/metadata',
-            icon: Box,
-          },
-          {
-            title: t('Users'),
-            url: '/users',
-            icon: Users,
-          },
-          {
-            title: t('Redemption Codes'),
-            url: '/redemption-codes',
-            icon: Ticket,
-          },
-          {
-            title: t('Subscription Management'),
-            url: '/subscriptions',
-            icon: CreditCard,
-          },
-          {
-            title: t('System Settings'),
-            url: '/system-settings/site',
-            activeUrls: ['/system-settings'],
-            icon: Settings,
-          },
-        ],
-      },
-    ],
-  }
+  return buildSidebarData(t, userRole, SIDEBAR_ICONS)
 }

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a homepage-only Active Theory-like point-cloud morph hero with balance-aware face state, generated black-hole and abstract 30,000-point shapes, and pointer disturbance.
+**Goal:** Build a homepage-only Active Theory-like point-cloud morph hero with balance-aware face state, generated black-hole and Lorenz-attractor 30,000-point shapes, and pointer disturbance.
 
 **Architecture:** Generate deterministic equal-count binary point-cloud assets at build-time and commit them under `web/default/public/pointclouds/`. Keep user balance state selection in a small tested helper, keep raw WebGL rendering inside a client-only homepage component, and rewrite only the public homepage hero while preserving existing auth/docs/CTA behavior.
 
@@ -15,7 +15,7 @@
 - Modify: `docs/superpowers/specs/2026-06-15-event-horizon-public-frontend-design.md`
   - Update accepted design to point-cloud morph hero.
 - Create: `web/default/scripts/pointcloud-utils.mjs`
-  - Parse OBJ vertices, normalize/resample points, generate deterministic black-hole and abstract point clouds, write binary Float32 assets.
+  - Parse OBJ vertices, normalize/resample points, generate deterministic black-hole and Lorenz-attractor point clouds, write binary Float32 assets.
 - Create: `web/default/scripts/pointcloud-utils.test.mjs`
   - Node tests for deterministic asset generation and point counts.
 - Create: `web/default/scripts/generate-pointcloud-assets.mjs`
@@ -71,37 +71,36 @@ Expected: A docs-only commit is created before production code changes.
 Create `web/default/src/features/home/point-cloud/point-cloud-state.test.ts`:
 
 ```ts
-import { describe, expect, test } from 'vitest'
+import test from 'node:test'
+import assert from 'node:assert/strict'
 import {
   getFaceStateForQuota,
   getRuntimePointCloudSequence,
 } from './point-cloud-state'
 
-describe('point cloud state selection', () => {
-  test('uses closed face when quota is missing or zero', () => {
-    expect(getFaceStateForQuota(undefined)).toBe('closed')
-    expect(getFaceStateForQuota(null)).toBe('closed')
-    expect(getFaceStateForQuota(0)).toBe('closed')
-    expect(getFaceStateForQuota(-1)).toBe('closed')
-  })
+test('uses closed face when quota is missing or zero', () => {
+  assert.equal(getFaceStateForQuota(undefined), 'closed')
+  assert.equal(getFaceStateForQuota(null), 'closed')
+  assert.equal(getFaceStateForQuota(0), 'closed')
+  assert.equal(getFaceStateForQuota(-1), 'closed')
+})
 
-  test('uses open face when quota is positive', () => {
-    expect(getFaceStateForQuota(1)).toBe('open')
-    expect(getFaceStateForQuota(2500)).toBe('open')
-  })
+test('uses open face when quota is positive', () => {
+  assert.equal(getFaceStateForQuota(1), 'open')
+  assert.equal(getFaceStateForQuota(2500), 'open')
+})
 
-  test('returns selected face, black hole, and abstract sculpture sequence', () => {
-    expect(getRuntimePointCloudSequence('closed')).toEqual([
-      'face-closed',
-      'black-hole',
-      'signal-knot',
-    ])
-    expect(getRuntimePointCloudSequence('open')).toEqual([
-      'face-open',
-      'black-hole',
-      'signal-knot',
-    ])
-  })
+test('returns selected face, black hole, and Lorenz attractor sequence', () => {
+  assert.deepEqual(getRuntimePointCloudSequence('closed'), [
+    'face-closed',
+    'black-hole',
+    'lorenz-attractor',
+  ])
+  assert.deepEqual(getRuntimePointCloudSequence('open'), [
+    'face-open',
+    'black-hole',
+    'lorenz-attractor',
+  ])
 })
 ```
 
@@ -122,14 +121,14 @@ Create `web/default/src/features/home/point-cloud/point-cloud-state.ts`:
 
 ```ts
 export type PointCloudFaceState = 'closed' | 'open'
-export type RuntimePointCloudId = 'face-closed' | 'face-open' | 'black-hole' | 'signal-knot'
+export type RuntimePointCloudId = 'face-closed' | 'face-open' | 'black-hole' | 'lorenz-attractor'
 
 export function getFaceStateForQuota(quota: number | null | undefined): PointCloudFaceState {
   return typeof quota === 'number' && quota > 0 ? 'open' : 'closed'
 }
 
 export function getRuntimePointCloudSequence(faceState: PointCloudFaceState): RuntimePointCloudId[] {
-  return [faceState === 'open' ? 'face-open' : 'face-closed', 'black-hole', 'signal-knot']
+  return [faceState === 'open' ? 'face-open' : 'face-closed', 'black-hole', 'lorenz-attractor']
 }
 ```
 
@@ -154,7 +153,7 @@ Create `web/default/scripts/pointcloud-utils.test.mjs`:
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  generateAbstractPointCloudPoints,
+  generateLorenzAttractorPoints,
   generateBlackHolePoints,
   normalizePointCount,
 } from './pointcloud-utils.mjs'
@@ -167,9 +166,9 @@ test('generated black hole has exactly requested float count and is deterministi
   assert.deepEqual(Array.from(a.slice(0, 24)), Array.from(b.slice(0, 24)))
 })
 
-test('generated abstract point cloud has exactly requested float count and is deterministic', () => {
-  const a = generateAbstractPointCloudPoints(30000)
-  const b = generateAbstractPointCloudPoints(30000)
+test('generated Lorenz attractor has exactly requested float count and is deterministic', () => {
+  const a = generateLorenzAttractorPoints(30000)
+  const b = generateLorenzAttractorPoints(30000)
   assert.equal(a.length, 90000)
   assert.equal(b.length, 90000)
   assert.deepEqual(Array.from(a.slice(0, 24)), Array.from(b.slice(0, 24)))
@@ -196,7 +195,7 @@ Expected: FAIL because `pointcloud-utils.mjs` does not exist or exports are miss
 
 - [ ] **Step 3: Implement generator utilities**
 
-Create `web/default/scripts/pointcloud-utils.mjs` with deterministic RNG, OBJ parsing, normalization, resampling, black-hole generation, abstract sculpture generation, and binary writer.
+Create `web/default/scripts/pointcloud-utils.mjs` with deterministic RNG, OBJ parsing, normalization, resampling, black-hole generation, Lorenz-attractor generation, and binary writer.
 
 The key exported API must include:
 
@@ -204,7 +203,7 @@ The key exported API must include:
 export function parseOBJVertices(objText) {}
 export function normalizePointCount(points, targetCount, seed = 1) {}
 export function generateBlackHolePoints(count) {}
-export function generateAbstractPointCloudPoints(count) {}
+export function generateLorenzAttractorPoints(count) {}
 export function writeFloat32Binary(filePath, floatArray) {}
 ```
 
@@ -235,7 +234,7 @@ Expected: two OBJ source files exist in `web/default/scripts/pointcloud-source/`
 
 - [ ] **Step 2: Create asset generation script**
 
-Create `web/default/scripts/generate-pointcloud-assets.mjs` to read both OBJ sources, derive `face-closed` and `face-open`, generate `black-hole` and `signal-knot`, normalize all to 30,000 points, and write `.bin` files plus `manifest.json`.
+Create `web/default/scripts/generate-pointcloud-assets.mjs` to read both OBJ sources, derive `face-closed` and `face-open`, generate `black-hole` and `lorenz-attractor`, normalize all to 30,000 points, and write `.bin` files plus `manifest.json`.
 
 - [ ] **Step 3: Run asset generation**
 

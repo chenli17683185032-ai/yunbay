@@ -16,9 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
+import { useAuthStore } from '@/stores/auth-store'
+import { isAdminRole } from '@/features/auth/lib/post-login-routing'
 import { About } from '@/features/about'
 
 export const Route = createFileRoute('/about/')({
+  beforeLoad: () => {
+    const { auth } = useAuthStore.getState()
+    if (auth.user && !isAdminRole(auth.user.role)) {
+      throw redirect({ to: '/quick-start' })
+    }
+  },
   component: About,
 })

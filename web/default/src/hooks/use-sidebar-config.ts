@@ -36,6 +36,10 @@ type SidebarModulesUserConfig = SidebarModulesAdminConfig | null
  * Default sidebar modules configuration
  */
 const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
+  start: {
+    enabled: true,
+    quick_start: true,
+  },
   chat: {
     enabled: true,
     playground: true,
@@ -94,6 +98,7 @@ const mergeWithDefaultSidebarModules = (
  * Mapping from URL to configuration keys
  */
 const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
+  '/quick-start': { section: 'start', module: 'quick_start' },
   '/playground': { section: 'chat', module: 'playground' },
   '/dashboard': { section: 'console', module: 'detail' },
   '/dashboard/overview': { section: 'console', module: 'detail' },

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "pointCount": 30000,
+  "format": "float32-xyz-little-endian",
+  "generatedAt": "2026-06-15",
+  "assets": [
+    {
+      "id": "face-closed",
+      "role": "face",
+      "label": "Closed eye face",
+      "file": "face-closed.bin",
+      "url": "/pointclouds/face-closed.bin",
+      "pointCount": 30000,
+      "byteLength": 360000
+    },
+    {
+      "id": "face-open",
+      "role": "face",
+      "label": "Open eye face",
+      "file": "face-open.bin",
+      "url": "/pointclouds/face-open.bin",
+      "pointCount": 30000,
+      "byteLength": 360000
+    },
+    {
+      "id": "black-hole",
+      "role": "generated",
+      "label": "Black hole point cloud",
+      "file": "black-hole.bin",
+      "url": "/pointclouds/black-hole.bin",
+      "pointCount": 30000,
+      "byteLength": 360000
+    },
+    {
+      "id": "lorenz-attractor",
+      "role": "generated",
+      "label": "Lorenz attractor point cloud",
+      "source": "Lorenz system sigma=10 rho=28 beta=8/3",
+      "file": "lorenz-attractor.bin",
+      "url": "/pointclouds/lorenz-attractor.bin",
+      "pointCount": 30000,
+      "byteLength": 360000
+    }
+  ]
+}

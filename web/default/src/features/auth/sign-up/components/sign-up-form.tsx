@@ -39,7 +39,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog } from '@/components/dialog'
 import { PasswordInput } from '@/components/password-input'
 import { Turnstile } from '@/components/turnstile'
-import { register, wechatLoginByCode } from '@/features/auth/api'
+import { login, register, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
 import { registerFormSchema } from '@/features/auth/constants'
@@ -166,8 +166,28 @@ export function SignUpForm({
       })
 
       if (res?.success) {
-        toast.success(t('Account created! Please sign in'))
-        redirectToLogin()
+        toast.success(t('Account created!'))
+
+        try {
+          const loginRes = await login({
+            username: data.username,
+            password: data.password,
+            turnstile: turnstileToken,
+          })
+
+          if (loginRes?.success && !loginRes.data?.require_2fa) {
+            await handleLoginSuccess(
+              loginRes.data as { id?: number } | null,
+              '/quick-start'
+            )
+            return
+          }
+        } catch (_loginError) {
+          // Fall through to the explicit sign-in redirect below.
+        }
+
+        toast.info(t('Please sign in with your new account.'))
+        redirectToLogin('/quick-start')
       } else {
         toast.error(res?.message || t('Failed to create account'))
       }

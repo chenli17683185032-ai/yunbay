@@ -101,6 +101,19 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 
+.yunbay-logo-marquee {
+  animation: yunbay-logo-marquee 34s linear infinite;
+}
+
+@keyframes yunbay-logo-marquee {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
 /* Override auto-skeleton-react inline styles with Vercel shimmer */
 .auto-skeleton-fade [class^='skeleton-'] {
   background: linear-gradient(
@@ -117,8 +130,13 @@ For commercial licensing, please contact support@quantumnous.com
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
-  .auto-skeleton-fade [class^='skeleton-'] {
+  .auto-skeleton-fade [class^='skeleton-'],
+  .yunbay-logo-marquee {
     animation: none !important;
+  }
+
+  .skeleton-shimmer,
+  .auto-skeleton-fade [class^='skeleton-'] {
     background: var(--skeleton-base) !important;
   }
 }

@@ -17,11 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Construction } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Markdown } from '@/components/ui/markdown'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PublicLayout } from '@/components/layout'
+import { YunbayLogo } from '@/components/layout/components/yunbay-logo'
+import { publicLandingBrand } from '@/components/layout/config/public-landing-brand.config'
+import { publicLandingNavLinks } from '@/components/layout/config/public-landing-nav.config'
 import { getAboutContent } from './api'
 
 function isValidUrl(value: string) {
@@ -43,16 +45,18 @@ function EmptyAboutState() {
 
   return (
     <div className='flex min-h-[60vh] items-center justify-center p-8'>
-      <div className='max-w-2xl space-y-6 text-center'>
-        <div className='flex justify-center'>
-          <Construction className='text-muted-foreground h-24 w-24' />
-        </div>
-        <div className='space-y-2'>
-          <h2 className='text-2xl font-bold'>{t('No About Content Set')}</h2>
-          <p className='text-muted-foreground'>
+      <div className='max-w-3xl space-y-8 text-center'>
+        <div className='space-y-4'>
+          <h2 className='text-3xl font-bold tracking-tight'>
+            {t('AI API relay website')}
+          </h2>
+          <p className='text-muted-foreground mx-auto max-w-2xl leading-relaxed'>
             {t(
-              'The administrator has not configured any about content yet. You can set it in the settings page, supporting HTML or URL.'
+              'yunbay gathers mainstream AI model APIs into one entrance for unified keys, routing, billing, quotas, and OpenAI-compatible access.'
             )}
+          </p>
+          <p className='text-muted-foreground mx-auto max-w-2xl leading-relaxed'>
+            {t(publicLandingBrand.philosophy)} {t(publicLandingBrand.mission)}
           </p>
         </div>
         <div className='space-y-4 text-sm'>
@@ -136,7 +140,11 @@ export function About() {
 
   if (isLoading) {
     return (
-      <PublicLayout>
+      <PublicLayout
+        navLinks={publicLandingNavLinks}
+        logo={<YunbayLogo />}
+        siteName={publicLandingBrand.displayName}
+      >
         <div className='mx-auto flex max-w-4xl flex-col gap-4 py-12'>
           <Skeleton className='h-8 w-[45%]' />
           <Skeleton className='h-4 w-full' />
@@ -149,7 +157,11 @@ export function About() {
 
   if (!hasContent) {
     return (
-      <PublicLayout>
+      <PublicLayout
+        navLinks={publicLandingNavLinks}
+        logo={<YunbayLogo />}
+        siteName={publicLandingBrand.displayName}
+      >
         <EmptyAboutState />
       </PublicLayout>
     )
@@ -157,7 +169,12 @@ export function About() {
 
   if (isUrl) {
     return (
-      <PublicLayout showMainContainer={false}>
+      <PublicLayout
+        showMainContainer={false}
+        navLinks={publicLandingNavLinks}
+        logo={<YunbayLogo />}
+        siteName={publicLandingBrand.displayName}
+      >
         <iframe
           src={rawContent}
           className='h-[calc(100vh-3.5rem)] w-full border-0'
@@ -168,7 +185,11 @@ export function About() {
   }
 
   return (
-    <PublicLayout>
+    <PublicLayout
+      navLinks={publicLandingNavLinks}
+      logo={<YunbayLogo />}
+      siteName={publicLandingBrand.displayName}
+    >
       <div className='mx-auto max-w-6xl px-4 py-8'>
         {isHtml ? (
           <div
