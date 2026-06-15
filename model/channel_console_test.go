@@ -29,6 +29,20 @@ func floatPtrForChannelConsoleTest(v float64) *float64 {
 	return &v
 }
 
+func TestChannelConsoleModelPriceUsesExpectedPriceColumnNames(t *testing.T) {
+	resetChannelConsoleTables(t)
+
+	for _, column := range []string{
+		"input_usd_per_1m_tokens",
+		"output_usd_per_1m_tokens",
+		"cached_input_usd_per_1m_tokens",
+		"cache_write_5m_usd_per_1m_tokens",
+		"cache_write_1h_usd_per_1m_tokens",
+	} {
+		require.Truef(t, DB.Migrator().HasColumn(&ChannelConsoleModelPrice{}, column), "expected column %q to exist", column)
+	}
+}
+
 func TestChannelConsoleModelPriceCompositeUniqueIndex(t *testing.T) {
 	resetChannelConsoleTables(t)
 

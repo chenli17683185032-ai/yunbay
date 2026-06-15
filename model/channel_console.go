@@ -62,11 +62,11 @@ type ChannelConsoleModelPrice struct {
 	ModelName                  string   `json:"model_name" gorm:"size:255;uniqueIndex:idx_channel_console_model_price,priority:2;not null"`
 	ProviderModelName          string   `json:"provider_model_name" gorm:"size:255;index"`
 	Source                     string   `json:"source" gorm:"size:64;index;not null"`
-	InputUSDPer1MTokens        *float64 `json:"input_usd_per_1m_tokens"`
-	OutputUSDPer1MTokens       *float64 `json:"output_usd_per_1m_tokens"`
-	CachedInputUSDPer1MTokens  *float64 `json:"cached_input_usd_per_1m_tokens"`
-	CacheWrite5mUSDPer1MTokens *float64 `json:"cache_write_5m_usd_per_1m_tokens"`
-	CacheWrite1hUSDPer1MTokens *float64 `json:"cache_write_1h_usd_per_1m_tokens"`
+	InputUSDPer1MTokens        *float64 `json:"input_usd_per_1m_tokens" gorm:"column:input_usd_per_1m_tokens"`
+	OutputUSDPer1MTokens       *float64 `json:"output_usd_per_1m_tokens" gorm:"column:output_usd_per_1m_tokens"`
+	CachedInputUSDPer1MTokens  *float64 `json:"cached_input_usd_per_1m_tokens" gorm:"column:cached_input_usd_per_1m_tokens"`
+	CacheWrite5mUSDPer1MTokens *float64 `json:"cache_write_5m_usd_per_1m_tokens" gorm:"column:cache_write_5m_usd_per_1m_tokens"`
+	CacheWrite1hUSDPer1MTokens *float64 `json:"cache_write_1h_usd_per_1m_tokens" gorm:"column:cache_write_1h_usd_per_1m_tokens"`
 	RequestUSDPerCall          *float64 `json:"request_usd_per_call"`
 	ImageUSDPerUnit            *float64 `json:"image_usd_per_unit"`
 	CompiledModelRatio         *float64 `json:"compiled_model_ratio"`
