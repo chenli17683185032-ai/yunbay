@@ -29,6 +29,28 @@ func floatPtrForChannelConsoleTest(v float64) *float64 {
 	return &v
 }
 
+func TestChannelConsoleModelPriceCompositeUniqueIndex(t *testing.T) {
+	resetChannelConsoleTables(t)
+
+	require.True(t, DB.Migrator().HasIndex(&ChannelConsoleModelPrice{}, "idx_channel_console_model_price"))
+
+	first := &ChannelConsoleModelPrice{
+		ChannelId:   505,
+		ModelName:   "same-model",
+		Source:      "test",
+		PriceStatus: ChannelConsolePriceStatusUnknown,
+	}
+	require.NoError(t, DB.Create(first).Error)
+
+	duplicate := &ChannelConsoleModelPrice{
+		ChannelId:   505,
+		ModelName:   "same-model",
+		Source:      "test",
+		PriceStatus: ChannelConsolePriceStatusUnknown,
+	}
+	require.Error(t, DB.Create(duplicate).Error)
+}
+
 func TestUpsertChannelConsoleChannelRejectsNil(t *testing.T) {
 	resetChannelConsoleTables(t)
 
