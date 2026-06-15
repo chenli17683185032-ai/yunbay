@@ -82,7 +82,11 @@ func TestCompileImageUnitPrice(t *testing.T) {
 		t.Fatalf("image price should be enabled")
 	}
 	assertFloatPtr(t, "model price", compiled.ModelPrice, 0.036)
-	if compiled.ModelRatio != nil || compiled.CompletionRatio != nil || compiled.CacheRatio != nil {
+	if compiled.ModelRatio != nil ||
+		compiled.CompletionRatio != nil ||
+		compiled.CacheRatio != nil ||
+		compiled.CreateCacheRatio != nil ||
+		compiled.CreateCache1hRatio != nil {
 		t.Fatalf("image fixed price should not compile token ratios: %#v", compiled)
 	}
 }
