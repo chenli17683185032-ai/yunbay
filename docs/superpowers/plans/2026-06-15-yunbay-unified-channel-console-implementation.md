@@ -912,15 +912,29 @@ git commit -m "feat: commit imported credentials to channels"
 
 Create `controller/channel_console.go`.
 
+Post-review API contract update:
+
+- Do **not** return raw `model.Channel` from channel-console list/detail responses. It contains `key` and other operational fields that must not be exposed through this admin console endpoint.
+- `ListChannelConsoleChannels` should call `channelconsole.ListManagedChannels(...)` and return a paginated payload:
+  - `items`: array of `{ channel: ManagedChannelSummary, console: ChannelConsoleChannel }`
+  - `total`
+  - `page`
+  - `page_size`
+- `GetChannelConsoleChannel` should call `channelconsole.GetManagedChannelDetail(id)` and fail when the channel has no channel-console metadata.
+- `ManagedChannelSummary` is a field whitelist. It must exclude at least:
+  - `key`
+  - `setting`
+  - `param_override`
+  - `header_override`
+  - `settings`
+
 ```go
 package controller
 
 import (
-    "net/http"
     "strconv"
 
     "github.com/QuantumNous/new-api/common"
-    "github.com/QuantumNous/new-api/model"
     "github.com/QuantumNous/new-api/service/channelconsole"
     "github.com/gin-gonic/gin"
 )
@@ -930,32 +944,30 @@ type channelConsolePreviewRequest struct { RawInput string `json:"raw_input"` }
 func PreviewChannelConsoleImport(c *gin.Context) {
     req := channelConsolePreviewRequest{}
     if err := c.ShouldBindJSON(&req); err != nil { common.ApiError(c, err); return }
-    c.JSON(http.StatusOK, gin.H{"success": true, "data": channelconsole.PreviewImport(req.RawInput)})
+    common.ApiSuccess(c, channelconsole.PreviewImport(req.RawInput))
 }
 
 func CommitChannelConsoleImport(c *gin.Context) {
     req := channelconsole.ImportCommitRequest{}
     if err := c.ShouldBindJSON(&req); err != nil { common.ApiError(c, err); return }
     result, err := channelconsole.CommitImport(req)
-    if err != nil { c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()}); return }
-    c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+    if err != nil { common.ApiErrorMsg(c, err.Error()); return }
+    common.ApiSuccess(c, result)
 }
 
 func ListChannelConsoleChannels(c *gin.Context) {
-    channels, err := model.GetAllChannels(0, 100, true, false)
-    if err != nil { c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()}); return }
-    c.JSON(http.StatusOK, gin.H{"success": true, "data": channels})
+    pageInfo := common.GetPageQuery(c)
+    channels, err := channelconsole.ListManagedChannels(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), pageInfo.GetPage())
+    if err != nil { common.ApiError(c, err); return }
+    common.ApiSuccess(c, channels)
 }
 
 func GetChannelConsoleChannel(c *gin.Context) {
     id, err := strconv.Atoi(c.Param("id"))
-    if err != nil { c.JSON(http.StatusOK, gin.H{"success": false, "message": "invalid channel id"}); return }
-    ch, err := model.GetChannelById(id, true)
-    if err != nil { c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()}); return }
-    prices, _ := model.ListChannelConsoleModelPrices(id)
-    checks, _ := model.ListChannelConsoleHealthChecks(id, 50)
-    meta, _ := model.GetChannelConsoleChannelByChannelID(id)
-    c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"channel": ch, "console": meta, "prices": prices, "health_checks": checks}})
+    if err != nil { common.ApiErrorMsg(c, "invalid channel id"); return }
+    detail, err := channelconsole.GetManagedChannelDetail(id)
+    if err != nil { common.ApiErrorMsg(c, err.Error()); return }
+    common.ApiSuccess(c, detail)
 }
 ```
 
@@ -1109,9 +1121,12 @@ git commit -m "feat: record channel console health checks"
 
 Create `web/default/src/features/channel-console/types.ts`.
 
-```ts
-import type { Channel } from '@/features/channels/types'
+Post-review API contract update:
 
+- Use a channel-console specific `ManagedChannelSummary` type instead of `Channel` from `@/features/channels/types`, because the backend intentionally does not return `key` or full channel settings.
+- `listChannelConsoleChannels()` returns `ApiResponse<ChannelConsoleListResult>`, not `ApiResponse<Channel[]>`.
+
+```ts
 export type ChannelConsoleStatus =
   | 'healthy'
   | 'warning'
@@ -1155,9 +1170,57 @@ export interface ImportCommitResult {
   price_status: string
 }
 
+export interface ManagedChannelSummary {
+  id: number
+  type: number
+  test_model?: string
+  status: number
+  name: string
+  weight?: number
+  created_time: number
+  test_time: number
+  response_time: number
+  base_url?: string
+  balance: number
+  balance_updated_time: number
+  models: string
+  group: string
+  used_quota: number
+  priority?: number
+  auto_ban?: number
+  tag?: string
+  remark?: string
+  channel_info: Record<string, unknown>
+}
+
+export interface ChannelConsoleListItem {
+  channel: ManagedChannelSummary
+  console: {
+    id: number
+    channel_id: number
+    provider: string
+    provider_kind: string
+    import_kind: string
+    price_source: string
+    health_status: ChannelConsoleStatus
+    model_sync_status: string
+    price_sync_status: string
+    last_error_message?: string
+    markup: number
+    auto_disable_policy: string
+  }
+}
+
+export interface ChannelConsoleListResult {
+  items: ChannelConsoleListItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export interface ChannelConsoleDetail {
-  channel: Channel
-  console?: {
+  channel: ManagedChannelSummary
+  console: {
     id: number
     channel_id: number
     provider: string
@@ -1167,8 +1230,8 @@ export interface ChannelConsoleDetail {
     price_sync_status: string
     last_error_message?: string
   }
-  prices?: Array<Record<string, unknown>>
-  health_checks?: Array<Record<string, unknown>>
+  prices: Array<Record<string, unknown>>
+  health_checks: Array<Record<string, unknown>>
 }
 
 export interface ApiResponse<T> {
@@ -1187,11 +1250,11 @@ import { api } from '@/lib/api'
 import type {
   ApiResponse,
   ChannelConsoleDetail,
+  ChannelConsoleListResult,
   ImportCommitRequest,
   ImportCommitResult,
   ImportPreview,
 } from './types'
-import type { Channel } from '@/features/channels/types'
 
 export async function previewChannelConsoleImport(
   rawInput: string
@@ -1210,7 +1273,7 @@ export async function commitChannelConsoleImport(
 }
 
 export async function listChannelConsoleChannels(): Promise<
-  ApiResponse<Channel[]>
+  ApiResponse<ChannelConsoleListResult>
 > {
   const res = await api.get('/api/channel-console/channels')
   return res.data
@@ -1357,7 +1420,7 @@ Create `web/default/src/features/channel-console/components/channel-console-tabl
 import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import type { Channel } from '@/features/channels/types'
+import type { ChannelConsoleListItem } from '../types'
 
 function statusVariant(status: number) {
   if (status === 1) return 'default'
@@ -1366,11 +1429,11 @@ function statusVariant(status: number) {
 }
 
 export function ChannelConsoleTable({
-  channels,
+  items,
   onOpen,
 }: {
-  channels: Channel[]
-  onOpen: (channel: Channel) => void
+  items: ChannelConsoleListItem[]
+  onOpen: (item: ChannelConsoleListItem) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -1386,7 +1449,9 @@ export function ChannelConsoleTable({
           </tr>
         </thead>
         <tbody>
-          {channels.map((channel) => (
+          {items.map((item) => {
+            const channel = item.channel
+            return (
             <tr key={channel.id} className='border-t'>
               <td className='p-3'>
                 <div className='font-medium'>{channel.name}</div>
@@ -1394,10 +1459,10 @@ export function ChannelConsoleTable({
               </td>
               <td className='p-3 max-w-72 truncate'>{channel.base_url || '-'}</td>
               <td className='p-3'>{channel.models ? channel.models.split(',').length : 0}</td>
-              <td className='p-3'><Badge variant={statusVariant(channel.status)}>{channel.status === 1 ? t('Healthy') : t('Needs attention')}</Badge></td>
-              <td className='p-3'><Button size='sm' variant='outline' onClick={() => onOpen(channel)}>{t('Details')}</Button></td>
+              <td className='p-3'><Badge variant={statusVariant(channel.status)}>{item.console.health_status || (channel.status === 1 ? t('Healthy') : t('Needs attention'))}</Badge></td>
+              <td className='p-3'><Button size='sm' variant='outline' onClick={() => onOpen(item)}>{t('Details')}</Button></td>
             </tr>
-          ))}
+          )})}
         </tbody>
       </table>
     </div>
@@ -1416,13 +1481,13 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
-import type { Channel } from '@/features/channels/types'
 import { checkChannelConsoleHealth, getChannelConsoleDetail } from '../api'
-import type { ChannelConsoleDetail } from '../types'
+import type { ChannelConsoleDetail, ChannelConsoleListItem } from '../types'
 
-export function ChannelDetailDrawer({ channel, open, onOpenChange }: { channel: Channel | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function ChannelDetailDrawer({ item, open, onOpenChange }: { item: ChannelConsoleListItem | null; open: boolean; onOpenChange: (open: boolean) => void }) {
   const { t } = useTranslation()
   const [detail, setDetail] = useState<ChannelConsoleDetail | null>(null)
+  const channel = item?.channel || null
 
   useEffect(() => {
     if (!channel || !open) return
@@ -1472,20 +1537,20 @@ Create `web/default/src/features/channel-console/index.tsx`.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
-import type { Channel } from '@/features/channels/types'
 import { listChannelConsoleChannels } from './api'
 import { ChannelDetailDrawer } from './components/channel-detail-drawer'
 import { ChannelConsoleTable } from './components/channel-console-table'
 import { ImportPanel } from './components/import-panel'
+import type { ChannelConsoleListItem } from './types'
 
 export function ChannelConsole() {
   const { t } = useTranslation()
-  const [channels, setChannels] = useState<Channel[]>([])
-  const [selected, setSelected] = useState<Channel | null>(null)
+  const [items, setItems] = useState<ChannelConsoleListItem[]>([])
+  const [selected, setSelected] = useState<ChannelConsoleListItem | null>(null)
 
   async function loadChannels() {
     const res = await listChannelConsoleChannels()
-    setChannels(res.data || [])
+    setItems(res.data?.items || [])
   }
 
   useEffect(() => { void loadChannels() }, [])
@@ -1495,10 +1560,10 @@ export function ChannelConsole() {
       <SectionPageLayout.Title>{t('Unified Channel Console')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='grid gap-4 xl:grid-cols-[1fr_380px]'>
-          <ChannelConsoleTable channels={channels} onOpen={setSelected} />
+          <ChannelConsoleTable items={items} onOpen={setSelected} />
           <ImportPanel onImported={loadChannels} />
         </div>
-        <ChannelDetailDrawer channel={selected} open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)} />
+        <ChannelDetailDrawer item={selected} open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)} />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

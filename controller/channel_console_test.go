@@ -18,8 +18,16 @@ import (
 func setupChannelConsoleControllerTestDB(t *testing.T) {
 	t.Helper()
 
-	initModelListColumnNames(t)
 	gin.SetMode(gin.TestMode)
+
+	originalDB := model.DB
+	originalLOGDB := model.LOG_DB
+	originalUsingSQLite := common.UsingSQLite
+	originalUsingMySQL := common.UsingMySQL
+	originalUsingPostgreSQL := common.UsingPostgreSQL
+	originalRedisEnabled := common.RedisEnabled
+	originalBatchUpdateEnabled := common.BatchUpdateEnabled
+
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
@@ -45,6 +53,13 @@ func setupChannelConsoleControllerTestDB(t *testing.T) {
 		if err == nil {
 			_ = sqlDB.Close()
 		}
+		model.DB = originalDB
+		model.LOG_DB = originalLOGDB
+		common.UsingSQLite = originalUsingSQLite
+		common.UsingMySQL = originalUsingMySQL
+		common.UsingPostgreSQL = originalUsingPostgreSQL
+		common.RedisEnabled = originalRedisEnabled
+		common.BatchUpdateEnabled = originalBatchUpdateEnabled
 	})
 }
 
@@ -69,6 +84,16 @@ func TestChannelConsolePreviewHandler(t *testing.T) {
 func TestChannelConsoleCommitListAndDetailHandlers(t *testing.T) {
 	setupChannelConsoleControllerTestDB(t)
 
+	regularChannel := &model.Channel{
+		Type:   1,
+		Key:    "sk-regular-channel-should-not-leak",
+		Name:   "regular channel",
+		Status: common.ChannelStatusEnabled,
+		Models: "gpt-4o-mini",
+		Group:  "default",
+	}
+	require.NoError(t, model.DB.Create(regularChannel).Error)
+
 	commitRecorder := httptest.NewRecorder()
 	commitCtx, _ := gin.CreateTestContext(commitRecorder)
 	commitCtx.Request = httptest.NewRequest(http.MethodPost, "/api/channel-console/import/commit", strings.NewReader(`{"raw_input":"sk-redacted-example","group":"vip","models":["gpt-4o-mini"]}`))
@@ -92,8 +117,21 @@ func TestChannelConsoleCommitListAndDetailHandlers(t *testing.T) {
 	require.Equal(t, http.StatusOK, listRecorder.Code)
 	listBody := decodeChannelConsoleResponse(t, listRecorder)
 	require.Equal(t, true, listBody["success"])
-	channels := listBody["data"].([]interface{})
-	require.Len(t, channels, 1)
+	listData := listBody["data"].(map[string]interface{})
+	require.Equal(t, float64(1), listData["total"])
+	require.Equal(t, float64(1), listData["page"])
+	require.NotZero(t, listData["page_size"])
+	items := listData["items"].([]interface{})
+	require.Len(t, items, 1)
+	listItem := items[0].(map[string]interface{})
+	listChannel := listItem["channel"].(map[string]interface{})
+	require.Equal(t, float64(channelID), listChannel["id"])
+	require.NotContains(t, listChannel, "key")
+	require.NotContains(t, listChannel, "setting")
+	require.NotContains(t, listChannel, "param_override")
+	require.NotContains(t, listChannel, "header_override")
+	require.NotContains(t, listChannel, "settings")
+	require.NotNil(t, listItem["console"])
 
 	detailRecorder := httptest.NewRecorder()
 	detailCtx, _ := gin.CreateTestContext(detailRecorder)
@@ -106,10 +144,28 @@ func TestChannelConsoleCommitListAndDetailHandlers(t *testing.T) {
 	detailBody := decodeChannelConsoleResponse(t, detailRecorder)
 	require.Equal(t, true, detailBody["success"])
 	detailData := detailBody["data"].(map[string]interface{})
-	require.NotNil(t, detailData["channel"])
+	detailChannel := detailData["channel"].(map[string]interface{})
+	require.Equal(t, float64(channelID), detailChannel["id"])
+	require.NotContains(t, detailChannel, "key")
+	require.NotContains(t, detailChannel, "setting")
+	require.NotContains(t, detailChannel, "param_override")
+	require.NotContains(t, detailChannel, "header_override")
+	require.NotContains(t, detailChannel, "settings")
 	require.NotNil(t, detailData["console"])
 	require.NotNil(t, detailData["prices"])
 	require.NotNil(t, detailData["health_checks"])
+
+	regularDetailRecorder := httptest.NewRecorder()
+	regularDetailCtx, _ := gin.CreateTestContext(regularDetailRecorder)
+	regularDetailCtx.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", regularChannel.Id)}}
+	regularDetailCtx.Request = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/channel-console/channels/%d", regularChannel.Id), nil)
+
+	GetChannelConsoleChannel(regularDetailCtx)
+
+	require.Equal(t, http.StatusOK, regularDetailRecorder.Code)
+	regularDetailBody := decodeChannelConsoleResponse(t, regularDetailRecorder)
+	require.Equal(t, false, regularDetailBody["success"])
+	require.Contains(t, regularDetailBody["message"], "渠道控制台元数据不存在")
 }
 
 func TestChannelConsoleCommitHandlerReturnsServiceError(t *testing.T) {
