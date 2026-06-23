@@ -1,0 +1,28 @@
+{
+    email admin@yunbay.xyz
+}
+
+(security_headers) {
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "SAMEORIGIN"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+}
+
+yunbay.xyz, www.yunbay.xyz {
+    encode zstd gzip
+    import security_headers
+
+    reverse_proxy new-api:3000
+}
+
+sub2api.yunbay.xyz, sub2api.13.140.180.223.sslip.io {
+    encode zstd gzip
+    import security_headers
+
+    reverse_proxy sub2api:8080
+}

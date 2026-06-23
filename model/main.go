@@ -257,11 +257,6 @@ func migrateDB() error {
 
 	err := DB.AutoMigrate(
 		&Channel{},
-		&ChannelConsoleChannel{},
-		&ChannelConsolePool{},
-		&ChannelConsoleCredential{},
-		&ChannelConsoleModelPrice{},
-		&ChannelConsoleHealthCheck{},
 		&Token{},
 		&User{},
 		&PasskeyCredential{},
@@ -311,11 +306,6 @@ func migrateDBFast() error {
 		name  string
 	}{
 		{&Channel{}, "Channel"},
-		{&ChannelConsoleChannel{}, "ChannelConsoleChannel"},
-		{&ChannelConsolePool{}, "ChannelConsolePool"},
-		{&ChannelConsoleCredential{}, "ChannelConsoleCredential"},
-		{&ChannelConsoleModelPrice{}, "ChannelConsoleModelPrice"},
-		{&ChannelConsoleHealthCheck{}, "ChannelConsoleHealthCheck"},
 		{&Token{}, "Token"},
 		{&User{}, "User"},
 		{&PasskeyCredential{}, "PasskeyCredential"},

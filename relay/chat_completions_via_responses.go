@@ -69,6 +69,43 @@ func applySystemPromptIfNeeded(c *gin.Context, info *relaycommon.RelayInfo, requ
 	}
 }
 
+func shouldUseCodexCompatibleResponsesHeaders(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if modelName == "" {
+		return false
+	}
+	if strings.Contains(modelName, "codex") {
+		return true
+	}
+	return strings.HasPrefix(modelName, "gpt-5") || strings.Contains(modelName, "/gpt-5")
+}
+
+func applyCodexCompatibleResponsesHeaders(c *gin.Context, info *relaycommon.RelayInfo) {
+	if c == nil || info == nil || !shouldUseCodexCompatibleResponsesHeaders(info.OriginModelName) {
+		return
+	}
+	requestID := "chat-compat-" + common.GetUUID()
+	if c.Request != nil {
+		c.Request.Header.Set("Accept", "application/json")
+	}
+	if info.RuntimeHeadersOverride == nil {
+		info.RuntimeHeadersOverride = map[string]interface{}{}
+	}
+	setDefault := func(key string, value string) {
+		if _, exists := info.RuntimeHeadersOverride[key]; !exists {
+			info.RuntimeHeadersOverride[key] = value
+		}
+	}
+	setDefault("originator", "Codex Desktop")
+	setDefault("x-codex-beta-features", "remote_compaction_v2")
+	setDefault("x-openai-internal-codex-responses-lite", "true")
+	setDefault("x-client-request-id", requestID)
+	setDefault("session-id", requestID)
+	setDefault("thread-id", requestID)
+	setDefault("x-codex-turn-metadata", `{"request_kind":"chat_compat"}`)
+	info.UseRuntimeHeadersOverride = true
+}
+
 func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor, request *dto.GeneralOpenAIRequest) (*dto.Usage, *types.NewAPIError) {
 	chatJSON, err := common.Marshal(request)
 	if err != nil {
@@ -107,6 +144,7 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 
 	info.RelayMode = relayconstant.RelayModeResponses
 	info.RequestURLPath = "/v1/responses"
+	applyCodexCompatibleResponsesHeaders(c, info)
 
 	convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *responsesReq)
 	if err != nil {

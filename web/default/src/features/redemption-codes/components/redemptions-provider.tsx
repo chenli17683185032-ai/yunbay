@@ -18,7 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import React, { useState } from 'react'
 import useDialogState from '@/hooks/use-dialog'
+import { useTopupInfo } from '@/features/wallet/hooks'
 import { type Redemption, type RedemptionsDialogType } from '../types'
+
+const CURRENT_COMPLIANCE_TERMS_VERSION = 'v1'
 
 type RedemptionsContextType = {
   open: RedemptionsDialogType | null
@@ -27,6 +30,7 @@ type RedemptionsContextType = {
   setCurrentRow: React.Dispatch<React.SetStateAction<Redemption | null>>
   refreshTrigger: number
   triggerRefresh: () => void
+  complianceConfirmed: boolean
 }
 
 const RedemptionsContext = React.createContext<RedemptionsContextType | null>(
@@ -41,6 +45,10 @@ export function RedemptionsProvider({
   const [open, setOpen] = useDialogState<RedemptionsDialogType>(null)
   const [currentRow, setCurrentRow] = useState<Redemption | null>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const { topupInfo } = useTopupInfo()
+  const complianceConfirmed =
+    topupInfo?.payment_compliance_confirmed === true &&
+    topupInfo?.payment_compliance_terms_version === CURRENT_COMPLIANCE_TERMS_VERSION
 
   const triggerRefresh = () => setRefreshTrigger((prev) => prev + 1)
 
@@ -53,6 +61,7 @@ export function RedemptionsProvider({
         setCurrentRow,
         refreshTrigger,
         triggerRefresh,
+        complianceConfirmed,
       }}
     >
       {children}

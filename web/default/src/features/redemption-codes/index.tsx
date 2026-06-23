@@ -17,11 +17,61 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
+import { Link } from '@tanstack/react-router'
+import { AlertTriangle } from 'lucide-react'
 import { SectionPageLayout } from '@/components/layout'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { useAuthStore } from '@/stores/auth-store'
+import { ROLE } from '@/lib/roles'
 import { RedemptionsDialogs } from './components/redemptions-dialogs'
 import { RedemptionsPrimaryButtons } from './components/redemptions-primary-buttons'
-import { RedemptionsProvider } from './components/redemptions-provider'
+import {
+  RedemptionsProvider,
+  useRedemptions,
+} from './components/redemptions-provider'
 import { RedemptionsTable } from './components/redemptions-table'
+
+function RedemptionComplianceNotice() {
+  const { t } = useTranslation()
+  const { complianceConfirmed } = useRedemptions()
+  const userRole = useAuthStore((state) => state.auth.user?.role)
+  const canOpenPaymentSettings = userRole === ROLE.SUPER_ADMIN
+
+  if (complianceConfirmed) return null
+
+  return (
+    <Alert className='mb-4 border-amber-500/30 bg-amber-500/10'>
+      <AlertTriangle className='h-4 w-4' />
+      <AlertTitle>{t('Redemption code creation is not enabled')}</AlertTitle>
+      <AlertDescription className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+        <span>
+          {canOpenPaymentSettings
+            ? t(
+                'Confirm compliance terms in Payment Gateway settings before creating redemption codes.'
+              )
+            : t(
+                'Contact the root administrator to confirm compliance terms in Payment Gateway settings before creating redemption codes.'
+              )}
+        </span>
+        {canOpenPaymentSettings ? (
+          <Button
+            size='sm'
+            variant='outline'
+            render={
+              <Link
+                to='/system-settings/billing/$section'
+                params={{ section: 'payment' }}
+              />
+            }
+          >
+            {t('Go to Payment Gateway settings')}
+          </Button>
+        ) : null}
+      </AlertDescription>
+    </Alert>
+  )
+}
 
 export function Redemptions() {
   const { t } = useTranslation()
@@ -35,6 +85,7 @@ export function Redemptions() {
           <RedemptionsPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
+          <RedemptionComplianceNotice />
           <RedemptionsTable />
         </SectionPageLayout.Content>
       </SectionPageLayout>

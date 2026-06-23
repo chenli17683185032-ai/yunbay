@@ -73,6 +73,46 @@ func convertChatResponseFormatToResponsesText(reqFormat *dto.ResponseFormat) jso
 	return textRaw
 }
 
+func shouldUseCodexCompatibleResponsesShape(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if modelName == "" {
+		return false
+	}
+	if strings.Contains(modelName, "codex") {
+		return true
+	}
+	return strings.HasPrefix(modelName, "gpt-5") || strings.Contains(modelName, "/gpt-5")
+}
+
+func applyCodexCompatibleResponsesShape(out *dto.OpenAIResponsesRequest) {
+	if out == nil || !shouldUseCodexCompatibleResponsesShape(out.Model) {
+		return
+	}
+	if len(out.Instructions) == 0 {
+		out.Instructions = json.RawMessage(`""`)
+	}
+	out.Store = json.RawMessage("false")
+	if len(out.PromptCacheKey) == 0 {
+		promptCacheKey, _ := common.Marshal("chat-compat-" + common.GetUUID())
+		out.PromptCacheKey = promptCacheKey
+	}
+	if len(out.Include) == 0 {
+		out.Include = json.RawMessage(`["reasoning.encrypted_content"]`)
+	}
+	if out.Reasoning == nil {
+		out.Reasoning = &dto.Reasoning{
+			Effort:  "minimal",
+			Summary: "auto",
+		}
+	}
+	if len(out.ToolChoice) == 0 {
+		out.ToolChoice = json.RawMessage(`"auto"`)
+	}
+	if len(out.ParallelToolCalls) == 0 {
+		out.ParallelToolCalls = json.RawMessage("false")
+	}
+}
+
 func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*dto.OpenAIResponsesRequest, error) {
 	if req == nil {
 		return nil, errors.New("request is nil")
@@ -397,6 +437,8 @@ func ChatCompletionsRequestToResponsesRequest(req *dto.GeneralOpenAIRequest) (*d
 			Summary: "detailed",
 		}
 	}
+
+	applyCodexCompatibleResponsesShape(out)
 
 	return out, nil
 }

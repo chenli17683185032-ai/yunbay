@@ -23,10 +23,21 @@ import { useRedemptions } from './redemptions-provider'
 
 export function RedemptionsPrimaryButtons() {
   const { t } = useTranslation()
-  const { setOpen } = useRedemptions()
+  const { setOpen, complianceConfirmed } = useRedemptions()
   return (
     <div className='flex gap-2'>
-      <Button size='sm' onClick={() => setOpen('create')}>
+      <Button
+        disabled={!complianceConfirmed}
+        size='sm'
+        title={
+          complianceConfirmed
+            ? undefined
+            : t(
+                'Confirm compliance terms in Payment Gateway settings before creating redemption codes.'
+              )
+        }
+        onClick={() => setOpen('create')}
+      >
         <Plus className='h-4 w-4' />
         {t('Create Code')}
       </Button>

@@ -94,15 +94,28 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		var matchName string
 		modelRatio, success, matchName = ratio_setting.GetModelRatio(info.OriginModelName)
 		if !success {
-			acceptUnsetRatio := false
-			if info.UserSetting.AcceptUnsetRatioModel {
-				acceptUnsetRatio = true
-			}
-			if !acceptUnsetRatio {
-				return types.PriceData{}, modelPriceNotConfiguredError(matchName, info.UserId)
+			// Channel tests are health probes, not billable user traffic.  They
+			// must reach the upstream even before a newly discovered provider
+			// model has been mapped to an official billing entry.  Real user
+			// requests still take the strict error path below.
+			if info.IsChannelTest {
+				modelRatio = 0
+				completionRatio = 1
+				preConsumedQuota = 0
+				freeModel = true
+			} else {
+				acceptUnsetRatio := false
+				if info.UserSetting.AcceptUnsetRatioModel {
+					acceptUnsetRatio = true
+				}
+				if !acceptUnsetRatio {
+					return types.PriceData{}, modelPriceNotConfiguredError(matchName, info.UserId)
+				}
 			}
 		}
-		completionRatio = ratio_setting.GetCompletionRatio(info.OriginModelName)
+		if completionRatio == 0 {
+			completionRatio = ratio_setting.GetCompletionRatio(info.OriginModelName)
+		}
 		cacheRatio, _ = ratio_setting.GetCacheRatio(info.OriginModelName)
 		cacheCreationRatio, _ = ratio_setting.GetCreateCacheRatio(info.OriginModelName)
 		cacheCreationRatio5m = cacheCreationRatio

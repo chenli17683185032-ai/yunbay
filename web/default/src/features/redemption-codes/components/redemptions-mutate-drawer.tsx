@@ -113,6 +113,8 @@ export function RedemptionsMutateDrawer({
           toast.success(t(SUCCESS_MESSAGES.REDEMPTION_UPDATED))
           onOpenChange(false)
           triggerRefresh()
+        } else {
+          toast.error(result.message || t('Failed to update redemption code'))
         }
       } else {
         // Create mode
@@ -128,6 +130,8 @@ export function RedemptionsMutateDrawer({
           )
           onOpenChange(false)
           triggerRefresh()
+        } else {
+          toast.error(result.message || t('Failed to create redemption code'))
         }
       }
     } finally {

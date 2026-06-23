@@ -39,18 +39,49 @@ func InitChannelCache() {
 	for group := range groups {
 		newGroup2model2channels[group] = make(map[string][]int)
 	}
+	for _, ability := range abilities {
+		if !ability.Enabled || ability.Group == "" || ability.Model == "" {
+			continue
+		}
+		channel, ok := newChannelId2channel[ability.ChannelId]
+		if !ok || channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		if _, ok := newGroup2model2channels[ability.Group]; !ok {
+			newGroup2model2channels[ability.Group] = make(map[string][]int)
+		}
+		if _, ok := newGroup2model2channels[ability.Group][ability.Model]; !ok {
+			newGroup2model2channels[ability.Group][ability.Model] = make([]int, 0)
+		}
+		newGroup2model2channels[ability.Group][ability.Model] = append(newGroup2model2channels[ability.Group][ability.Model], ability.ChannelId)
+	}
+	// Backward compatibility: if a channel has not been repaired into abilities
+	// yet, keep its declared models routable in cache mode.
 	for _, channel := range channels {
 		if channel.Status != common.ChannelStatusEnabled {
 			continue // skip disabled channels
 		}
 		groups := strings.Split(channel.Group, ",")
 		for _, group := range groups {
+			group = strings.TrimSpace(group)
+			if group == "" {
+				continue
+			}
 			models := strings.Split(channel.Models, ",")
 			for _, model := range models {
+				model = strings.TrimSpace(model)
+				if model == "" {
+					continue
+				}
+				if _, ok := newGroup2model2channels[group]; !ok {
+					newGroup2model2channels[group] = make(map[string][]int)
+				}
 				if _, ok := newGroup2model2channels[group][model]; !ok {
 					newGroup2model2channels[group][model] = make([]int, 0)
 				}
-				newGroup2model2channels[group][model] = append(newGroup2model2channels[group][model], channel.Id)
+				if !containsInt(newGroup2model2channels[group][model], channel.Id) {
+					newGroup2model2channels[group][model] = append(newGroup2model2channels[group][model], channel.Id)
+				}
 			}
 		}
 	}
@@ -84,6 +115,15 @@ func InitChannelCache() {
 	channelsIDM = newChannelId2channel
 	channelSyncLock.Unlock()
 	common.SysLog("channels synced from database")
+}
+
+func containsInt(values []int, target int) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func SyncChannelCache(frequency int) {

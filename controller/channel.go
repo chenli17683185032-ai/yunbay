@@ -17,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -185,6 +186,8 @@ func GetAllChannels(c *gin.Context) {
 	return
 }
 
+const defaultFetchModelsUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+
 func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, error) {
 	var headers http.Header
 	switch channel.Type {
@@ -207,6 +210,9 @@ func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, e
 			str = strings.ReplaceAll(str, "{api_key}", key)
 		}
 		headers.Set(k, str)
+	}
+	if strings.TrimSpace(headers.Get("User-Agent")) == "" {
+		headers.Set("User-Agent", defaultFetchModelsUserAgent)
 	}
 
 	return headers, nil
@@ -1120,8 +1126,16 @@ func FetchModels(c *gin.Context) {
 		return
 	}
 
-	client := &http.Client{}
 	url := fmt.Sprintf("%s/v1/models", baseURL)
+	fetchSetting := system_setting.GetFetchSetting()
+	if err := common.ValidateURLWithFetchSetting(url, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "URL 被 SSRF 防护拦截: " + err.Error(),
+		})
+		return
+	}
+	client := &http.Client{Timeout: 20 * time.Second}
 
 	request, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -1142,6 +1156,7 @@ func FetchModels(c *gin.Context) {
 		})
 		return
 	}
+	defer response.Body.Close()
 	//check status code
 	if response.StatusCode != http.StatusOK {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -1150,7 +1165,6 @@ func FetchModels(c *gin.Context) {
 		})
 		return
 	}
-	defer response.Body.Close()
 
 	var result struct {
 		Data []struct {

@@ -125,6 +125,10 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 }
 
 func RequestStripeAmount(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
+
 	var req StripePayRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
@@ -135,6 +139,10 @@ func RequestStripeAmount(c *gin.Context) {
 }
 
 func RequestStripePay(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
+
 	var req StripePayRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
@@ -160,7 +168,7 @@ func StripeWebhook(c *gin.Context) {
 	}
 
 	signature := c.GetHeader("Stripe-Signature")
-	logger.LogInfo(ctx, fmt.Sprintf("Stripe webhook 收到请求 path=%q client_ip=%s signature=%q body=%q", c.Request.RequestURI, c.ClientIP(), signature, string(payload)))
+	logger.LogInfo(ctx, fmt.Sprintf("Stripe webhook 收到请求 path=%q client_ip=%s signature_present=%t body_bytes=%d", c.Request.RequestURI, c.ClientIP(), signature != "", len(payload)))
 	event, err := webhook.ConstructEventWithOptions(payload, signature, setting.StripeWebhookSecret, webhook.ConstructEventOptions{
 		IgnoreAPIVersionMismatch: true,
 	})

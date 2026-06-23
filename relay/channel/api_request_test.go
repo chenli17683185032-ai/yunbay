@@ -191,3 +191,27 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Equal(t, "sess-123", upstreamReq.Header.Get("Session_id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
 }
+
+func TestApplyDefaultUpstreamUserAgentSetsNonGoDefault(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/v1/chat/completions", nil)
+	req.Header.Del("User-Agent")
+
+	applyDefaultUpstreamUserAgent(req)
+
+	require.NotEmpty(t, req.Header.Get("User-Agent"))
+	require.NotEqual(t, "Go-http-client/2.0", req.Header.Get("User-Agent"))
+	require.Contains(t, req.Header.Get("User-Agent"), "Mozilla/5.0")
+}
+
+func TestApplyDefaultUpstreamUserAgentKeepsExplicitHeader(t *testing.T) {
+	t.Parallel()
+
+	req := httptest.NewRequest(http.MethodPost, "https://example.com/v1/chat/completions", nil)
+	req.Header.Set("User-Agent", "Custom-UA/9.9")
+
+	applyDefaultUpstreamUserAgent(req)
+
+	require.Equal(t, "Custom-UA/9.9", req.Header.Get("User-Agent"))
+}
