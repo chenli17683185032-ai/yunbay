@@ -310,6 +310,12 @@ cb7ea3c9 fix: replace macos codex download bundle
   5. 没有任何可用分组时直接报错，不创建不可用 key。
 - 兑换码页面支持在快速启动页内直接粘贴并兑换，不跳转到控制台兑换码页面。
 - 新手引导 2~5 页中文文案已补齐，不应回退到英文界面。
+- 下载页新增与当前视觉风格协调的 `CC Switch` 小窗口式导入栏，展示：
+  1. 当前站点 API endpoint（自动规范化为 `<server>/v1`）；
+  2. 当前已选模型；
+  3. 当前已生成 API Key 的脱敏值。
+- 只要用户点击一次 `一键导入`，浏览器就会直接打开 `ccswitch://v1/import?...`，把 `app=codex`、`name=Yunbay Codex`、`endpoint`、`apiKey`、`model`、`homepage` 与 `enabled=true` 一并传给本地 CC Switch。
+- 若尚未生成 API Key，导入按钮禁用并提示先生成 API Key；若没有可用模型，则提示未选择模型。
 - 主页宣传标语已去掉“不封号”。
 - macOS 下载入口指向云贝 Codex 构建产物；由于当前没有 Apple Developer ID / notarization，如 Gatekeeper 提示 App 损坏，引导用户使用页面中的 `xattr` 修复命令。
 
@@ -321,6 +327,8 @@ web/default/src/features/quick-start/quick-start-api-key.ts
 web/default/src/features/quick-start/quick-start-api-key.test.ts
 web/default/src/features/quick-start/quick-start-data.ts
 web/default/src/features/quick-start/quick-start-redemption.ts
+web/default/src/features/quick-start/quick-start-cc-switch.ts
+web/default/src/features/quick-start/quick-start-cc-switch.test.ts
 web/default/src/i18n/locales/{en,zh,fr,ru,ja,vi}.json
 web/default/src/components/layout/config/public-landing-brand.ts
 ```
@@ -341,24 +349,27 @@ npx --yes tsx --test \
   src/features/quick-start/quick-start-data.test.ts \
   src/features/quick-start/quick-start-redemption.test.ts \
   src/features/quick-start/quick-start-locales.test.ts \
+  src/features/quick-start/quick-start-cc-switch.test.ts \
   src/components/layout/config/public-landing-brand.test.ts \
   src/i18n/public-landing-locales.test.ts
 ```
 
-2026-06-24 验证结果：
+2026-06-25 验证结果：
 
 ```text
-25 tests
-25 pass
+31 tests
+31 pass
 0 fail
 ```
 
 类型检查和构建：
 
 ```bash
-npm run typecheck
-npm run build
+node /Users/ethan/Documents/yunbay/web/default/node_modules/typescript/bin/tsc -b
+node /Users/ethan/Documents/yunbay/web/default/node_modules/@rsbuild/core/bin/rsbuild.js build
 ```
+
+2026-06-25 验证结果：均通过。
 
 2026-06-24 验证结果：二者均通过。
 

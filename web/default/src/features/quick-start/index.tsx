@@ -26,6 +26,7 @@ import {
 import { useNavigate } from '@tanstack/react-router'
 import {
   ArrowRight,
+  ArrowUpRight,
   CheckCircle2,
   Code2,
   Copy,
@@ -34,6 +35,7 @@ import {
   KeyRound,
   Loader2,
   MessageSquare,
+  MonitorCog,
   Sparkles,
   Terminal,
   WalletCards,
@@ -68,6 +70,13 @@ import {
   getQuickStartApiKeyGroup,
 } from './quick-start-api-key'
 import {
+  buildQuickStartCCSwitchImportURL,
+  getQuickStartCCSwitchImportState,
+  maskQuickStartApiKey,
+  normalizeQuickStartCodexEndpoint,
+  normalizeQuickStartServerAddress,
+} from './quick-start-cc-switch'
+import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
   codexDownloadCards,
@@ -96,6 +105,22 @@ const COSMIC_AUTH_SURFACE_CLASS =
   'bg-[#030409] text-white [--accent:#121827] [--accent-foreground:#eef4ff] [--background:#030409] [--border:#1e2638] [--card:#070a14] [--card-foreground:#f7fbff] [--foreground:#f7fbff] [--muted:#0c1020] [--muted-foreground:#8f9bb8] [--primary:#eef4ff] [--primary-foreground:#030409] [--secondary:#121827] [--secondary-foreground:#eef4ff]'
 
 type QuickStartNavigationPath = QuickStartEnterDashboardPath | '/wallet'
+
+function extractQuickStartServerAddress(
+  status: Record<string, unknown> | null
+): string {
+  const fromStatus =
+    (status?.server_address as string | undefined) ??
+    (status?.serverAddress as string | undefined) ??
+    (status?.data as Record<string, unknown> | undefined)?.server_address ??
+    (status?.data as Record<string, unknown> | undefined)?.serverAddress
+
+  if (typeof fromStatus === 'string' && fromStatus) {
+    return fromStatus
+  }
+
+  return window.location.origin
+}
 
 export function QuickStart() {
   const { t } = useTranslation()
@@ -133,6 +158,22 @@ export function QuickStart() {
   const selectedModel =
     modelList.find((model) => model.model_name === activeModelName) ||
     modelList[0]
+  const quickStartServerAddress = normalizeQuickStartServerAddress(
+    extractQuickStartServerAddress(status as Record<string, unknown> | null)
+  )
+  const quickStartCodexEndpoint = normalizeQuickStartCodexEndpoint(
+    quickStartServerAddress
+  )
+  const quickStartCCSwitchState = getQuickStartCCSwitchImportState({
+    apiKey: generatedApiKey,
+    model: selectedModel?.model_name || '',
+  })
+  const quickStartCCSwitchDisabledReason =
+    quickStartCCSwitchState.reason === 'api-key'
+      ? t('Generate an API key first')
+      : quickStartCCSwitchState.reason === 'model'
+        ? t('No model selected')
+        : null
   const currentBalance = Math.max(Number(user?.quota) || 0, 0)
   const faceState = getFaceStateForQuota(user?.quota)
   const handlePageChange = useCallback(
@@ -250,6 +291,22 @@ export function QuickStart() {
 
   const handleDownload = (card: CodexDownloadCard) => {
     window.location.assign(card.downloadHref)
+  }
+
+  const handleImportToCCSwitch = () => {
+    if (!quickStartCCSwitchState.canImport || !selectedModel?.model_name) {
+      toast.warning(quickStartCCSwitchDisabledReason || t('No model selected'))
+      return
+    }
+
+    const url = buildQuickStartCCSwitchImportURL({
+      serverAddress: quickStartServerAddress,
+      apiKey: generatedApiKey,
+      model: selectedModel.model_name,
+    })
+
+    window.open(url, '_blank')
+    toast.message(t('Trying to open CC Switch'))
   }
 
   const handleCopyCommand = async (command: string) => {
@@ -626,6 +683,71 @@ export function QuickStart() {
               </div>
             ))}
           </div>
+          <div className='mt-4 overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+            <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
+              <div className='flex items-center gap-2'>
+                <span className='size-2.5 rounded-full bg-[#ff5f57]' />
+                <span className='size-2.5 rounded-full bg-[#febc2e]' />
+                <span className='size-2.5 rounded-full bg-[#28c840]' />
+              </div>
+              <div className='font-mono text-[10px] font-semibold tracking-[0.18em] text-white/36 uppercase'>
+                CC Switch
+              </div>
+            </div>
+            <div className='grid gap-4 p-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-center'>
+              <div className='min-w-0'>
+                <div className='flex items-center gap-3'>
+                  <div className='grid size-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.07]'>
+                    <MonitorCog className='size-5 text-white/72' />
+                  </div>
+                  <div className='min-w-0'>
+                    <h2 className='text-lg font-semibold tracking-tight text-white'>
+                      {t('Import current setup to CC Switch')}
+                    </h2>
+                    <p className='mt-1 text-sm leading-6 text-white/52'>
+                      {t(
+                        'Launch CC Switch from your browser with this API and model prefilled.'
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className='mt-5 grid gap-2 sm:grid-cols-3'>
+                  <QuickStartConfigPill
+                    label={t('Configured API')}
+                    value={quickStartCodexEndpoint}
+                  />
+                  <QuickStartConfigPill
+                    label={t('Configured model')}
+                    value={selectedModel?.model_name || t('No model selected')}
+                  />
+                  <QuickStartConfigPill
+                    label={t('Generated API key')}
+                    value={maskQuickStartApiKey(generatedApiKey)}
+                  />
+                </div>
+              </div>
+
+              <div className='rounded-2xl border border-white/10 bg-black/20 p-4'>
+                <div className='flex items-start gap-3 text-xs leading-6 text-white/52'>
+                  <CheckCircle2 className='mt-0.5 size-4 shrink-0 text-white/58' />
+                  <p>
+                    {t(
+                      'CC Switch will import this Codex provider and enable it automatically.'
+                    )}
+                  </p>
+                </div>
+                <Button
+                  className='mt-4 w-full gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88 disabled:bg-white/22 disabled:text-white/42'
+                  disabled={!quickStartCCSwitchState.canImport}
+                  onClick={handleImportToCCSwitch}
+                >
+                  <ArrowUpRight className='size-4' />
+                  {quickStartCCSwitchDisabledReason || t('One-click import')}
+                </Button>
+              </div>
+            </div>
+          </div>
           <p className='mt-4 text-xs leading-6 text-white/42'>
             {t(
               'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.'
@@ -713,6 +835,19 @@ function QuickStartControls(props: {
       >
         {nextLabel}
       </button>
+    </div>
+  )
+}
+
+function QuickStartConfigPill(props: { label: string; value: string }) {
+  return (
+    <div className='min-w-0 rounded-2xl border border-white/10 bg-black/18 px-3 py-2'>
+      <div className='font-mono text-[10px] font-semibold tracking-[0.14em] text-white/34 uppercase'>
+        {props.label}
+      </div>
+      <div className='mt-1 truncate text-sm font-medium text-white/76'>
+        {props.value}
+      </div>
     </div>
   )
 }

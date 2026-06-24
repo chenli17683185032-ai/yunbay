@@ -28,6 +28,7 @@ import {
 
 const LOCALE_NAMES = ['en', 'zh', 'fr', 'ru', 'ja', 'vi'] as const
 const LOCALIZED_LOCALE_NAMES = ['zh', 'fr', 'ru', 'ja', 'vi'] as const
+const FULLY_LOCALIZED_LOCALE_NAMES = ['fr', 'ru', 'ja', 'vi'] as const
 const LOCALE_DIR = join(import.meta.dirname, '../../i18n/locales')
 
 const MODEL_TAG_KEYS = [
@@ -83,6 +84,16 @@ const QUICK_START_COMPONENT_KEYS = [
   'Official Codex',
   'Download Codex',
   'Download Yunbay Codex and connect it to your Yunbay API key.',
+  'Import current setup to CC Switch',
+  'Launch CC Switch from your browser with this API and model prefilled.',
+  'Configured API',
+  'Configured model',
+  'Generated API key',
+  'One-click import',
+  'Generate an API key first',
+  'No model selected',
+  'CC Switch will import this Codex provider and enable it automatically.',
+  'Trying to open CC Switch',
   'If macOS says the app is damaged',
   'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.',
   'Copy repair command',
@@ -155,6 +166,37 @@ test('Chinese quick start copy does not fall back to English for the guided flow
       key,
       `zh: quick-start translation falls back to English for ${key}`
     )
+  }
+})
+
+test('download-page quick start copy does not fall back to English in localized non-Chinese locales', () => {
+  const keys = [
+    'Official Codex',
+    'Download Codex',
+    'Download Yunbay Codex and connect it to your Yunbay API key.',
+    'Import current setup to CC Switch',
+    'Launch CC Switch from your browser with this API and model prefilled.',
+    'Configured API',
+    'Configured model',
+    'Generated API key',
+    'One-click import',
+    'Generate an API key first',
+    'No model selected',
+    'CC Switch will import this Codex provider and enable it automatically.',
+    'Trying to open CC Switch',
+    'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.',
+  ] as const
+
+  for (const localeName of FULLY_LOCALIZED_LOCALE_NAMES) {
+    const locale = readLocale(localeName)
+
+    for (const key of keys) {
+      assert.notEqual(
+        locale.translation[key],
+        key,
+        `${localeName}: download-page quick-start translation falls back to English for ${key}`
+      )
+    }
   }
 })
 
