@@ -103,7 +103,8 @@ export const codexDownloadCards: CodexDownloadCard[] = [
     platform: 'macOS',
     descriptionKey: 'Download starts now.',
     buttonLabelKey: 'Download Codex for macOS',
-    downloadHref: '/downloads/yunbay-codex-macos.zip',
+    downloadHref:
+      '/downloads/yunbay-codex-macos-20260624-162009-0e884319fdfb.zip',
   },
   {
     platform: 'Windows',

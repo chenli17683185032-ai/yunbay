@@ -68,7 +68,11 @@ test('Codex download cards point to official macOS and Windows downloads', () =>
   const windows = codexDownloadCards.find((item) => item.platform === 'Windows')
   assert.equal(macos?.descriptionKey, 'Download starts now.')
   assert.equal(windows?.descriptionKey, 'Download starts now.')
-  assert.equal(macos?.downloadHref, '/downloads/yunbay-codex-macos.zip')
+  assert.match(
+    macos?.downloadHref ?? '',
+    /^\/downloads\/yunbay-codex-macos-\d{8}-\d{6}-[a-f0-9]{12}\.zip$/
+  )
+  assert.notEqual(macos?.downloadHref, '/downloads/yunbay-codex-macos.zip')
   assert.equal(
     windows?.downloadHref,
     'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi'
