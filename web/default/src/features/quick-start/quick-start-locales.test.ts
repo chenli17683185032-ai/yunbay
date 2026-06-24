@@ -75,6 +75,7 @@ const QUICK_START_COMPONENT_KEYS = [
   'Already copied to clipboard',
   'Failed to copy API key',
   'Failed to create API key',
+  'No available group for the new API key',
   'Click generate. The new API key will be copied to your clipboard.',
   'Generating...',
   'Copy API key again',

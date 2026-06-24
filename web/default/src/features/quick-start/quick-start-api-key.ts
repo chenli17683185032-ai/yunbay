@@ -25,7 +25,7 @@ type ApiResult = {
 
 type QuickStartApiKeyDependencies = {
   now?: () => number
-  defaultGroup?: string
+  defaultGroup: string
   crossGroupRetry?: boolean
   createApiKey: (payload: ApiKeyFormData) => Promise<ApiResult>
   searchApiKeys: (params: {
@@ -41,15 +41,50 @@ type QuickStartApiKeyDependencies = {
   copyToClipboard: (text: string) => Promise<boolean>
 }
 
-const DEFAULT_QUICK_START_API_KEY_GROUP = 'default'
+export function getQuickStartApiKeyGroup(options: {
+  defaultUseAutoGroup: boolean
+  availableGroups: string[]
+  preferredGroup?: string
+}): { group: string; crossGroupRetry: boolean } {
+  const availableGroups = options.availableGroups
+    .map((group) => group.trim())
+    .filter(Boolean)
+  const preferredGroup = options.preferredGroup?.trim()
+
+  if (
+    preferredGroup &&
+    availableGroups.some((group) => group === preferredGroup)
+  ) {
+    return { group: preferredGroup, crossGroupRetry: false }
+  }
+
+  if (
+    options.defaultUseAutoGroup &&
+    availableGroups.some((group) => group === 'auto')
+  ) {
+    return { group: 'auto', crossGroupRetry: true }
+  }
+
+  const defaultGroup = availableGroups.find((group) => group === 'default')
+  if (defaultGroup) {
+    return { group: defaultGroup, crossGroupRetry: false }
+  }
+
+  return {
+    group: availableGroups[0] || '',
+    crossGroupRetry: false,
+  }
+}
 
 export async function generateAndCopyQuickStartApiKey(
   dependencies: QuickStartApiKeyDependencies
 ): Promise<{ name: string; fullKey: string }> {
   const now = dependencies.now || Date.now
   const name = `yunbay-quick-start-${now()}`
-  const group =
-    dependencies.defaultGroup?.trim() || DEFAULT_QUICK_START_API_KEY_GROUP
+  const group = dependencies.defaultGroup.trim()
+  if (!group) {
+    throw new Error('No available group for the new API key')
+  }
 
   const created = await dependencies.createApiKey({
     name,

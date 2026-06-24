@@ -4738,6 +4738,7 @@
     "Copy repair command": "Copier la commande de réparation",
     "Copy one-line terminal install": "Copier l’installation Terminal en une ligne",
     "Terminal command copied": "Commande Terminal copiée",
-    "Failed to copy terminal command": "Impossible de copier la commande Terminal"
+    "Failed to copy terminal command": "Impossible de copier la commande Terminal",
+    "No available group for the new API key": "Aucun groupe disponible pour la nouvelle clé API"
   }
 }

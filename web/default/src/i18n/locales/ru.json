@@ -4738,6 +4738,7 @@
     "Copy repair command": "Скопировать команду исправления",
     "Copy one-line terminal install": "Скопировать установку одной командой Terminal",
     "Terminal command copied": "Команда Terminal скопирована",
-    "Failed to copy terminal command": "Не удалось скопировать команду Terminal"
+    "Failed to copy terminal command": "Не удалось скопировать команду Terminal",
+    "No available group for the new API key": "Нет доступной группы для нового API ключа"
   }
 }

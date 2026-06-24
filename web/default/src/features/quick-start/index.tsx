@@ -41,7 +41,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
-import { getSelf } from '@/lib/api'
+import { getSelf, getUserGroups } from '@/lib/api'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -63,7 +63,10 @@ import {
 import { createApiKey, fetchTokenKey, searchApiKeys } from '@/features/keys/api'
 import { usePricingData } from '@/features/pricing/hooks'
 import { redeemTopupCode } from '@/features/wallet/api'
-import { generateAndCopyQuickStartApiKey } from './quick-start-api-key'
+import {
+  generateAndCopyQuickStartApiKey,
+  getQuickStartApiKeyGroup,
+} from './quick-start-api-key'
 import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
@@ -132,9 +135,6 @@ export function QuickStart() {
     modelList[0]
   const currentBalance = Math.max(Number(user?.quota) || 0, 0)
   const faceState = getFaceStateForQuota(user?.quota)
-  const defaultApiKeyGroup =
-    status?.default_use_auto_group === true ? 'auto' : 'default'
-
   const handlePageChange = useCallback(
     (activeIndex: number, previousIndex: number) => {
       setMorphSignal((signal) =>
@@ -185,13 +185,22 @@ export function QuickStart() {
 
     setIsGeneratingApiKey(true)
     try {
+      const groupsResponse = await getUserGroups()
+      if (!groupsResponse.success) {
+        throw new Error(groupsResponse.message || t('Failed to create API key'))
+      }
+      const quickStartGroup = getQuickStartApiKeyGroup({
+        defaultUseAutoGroup: status?.default_use_auto_group === true,
+        availableGroups: Object.keys(groupsResponse.data || {}),
+        preferredGroup: user?.group,
+      })
       const result = await generateAndCopyQuickStartApiKey({
         createApiKey,
         searchApiKeys,
         fetchTokenKey,
         copyToClipboard,
-        defaultGroup: defaultApiKeyGroup,
-        crossGroupRetry: defaultApiKeyGroup === 'auto',
+        defaultGroup: quickStartGroup.group,
+        crossGroupRetry: quickStartGroup.crossGroupRetry,
       })
       setGeneratedApiKey(result.fullKey)
       toast.success(t('Already copied to clipboard'))

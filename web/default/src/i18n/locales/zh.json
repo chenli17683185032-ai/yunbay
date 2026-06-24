@@ -4738,6 +4738,7 @@
     "Copy repair command": "复制修复命令",
     "Copy one-line terminal install": "复制一行终端安装命令",
     "Terminal command copied": "终端命令已复制",
-    "Failed to copy terminal command": "复制终端命令失败"
+    "Failed to copy terminal command": "复制终端命令失败",
+    "No available group for the new API key": "当前账号没有可用于新 API key 的分组"
   }
 }

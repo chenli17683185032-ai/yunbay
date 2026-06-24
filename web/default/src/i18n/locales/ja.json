@@ -4738,6 +4738,7 @@
     "Copy repair command": "修復コマンドをコピー",
     "Copy one-line terminal install": "1 行のターミナルインストールをコピー",
     "Terminal command copied": "ターミナルコマンドをコピーしました",
-    "Failed to copy terminal command": "ターミナルコマンドのコピーに失敗しました"
+    "Failed to copy terminal command": "ターミナルコマンドのコピーに失敗しました",
+    "No available group for the new API key": "新しいAPIキーに使用できるグループがありません"
   }
 }

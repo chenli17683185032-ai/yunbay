@@ -4738,6 +4738,7 @@
     "Copy repair command": "Sao chép lệnh sửa lỗi",
     "Copy one-line terminal install": "Sao chép lệnh cài đặt Terminal một dòng",
     "Terminal command copied": "Đã sao chép lệnh Terminal",
-    "Failed to copy terminal command": "Không thể sao chép lệnh Terminal"
+    "Failed to copy terminal command": "Không thể sao chép lệnh Terminal",
+    "No available group for the new API key": "Không có nhóm khả dụng cho API key mới"
   }
 }
