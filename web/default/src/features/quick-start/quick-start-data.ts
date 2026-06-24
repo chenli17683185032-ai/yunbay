@@ -17,29 +17,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 export type QuickStartPurposeId = 'web-coding' | 'chat' | 'other'
-export type QuickStartNextActionPath = '/keys' | '/chat2link' | '/playground'
 export type QuickStartFullscreenPageId =
   | 'purpose'
   | 'model'
-  | 'balance'
-  | 'download'
-  | 'finish'
+  | 'wallet'
+  | 'api-key'
+  | 'codex'
 export type QuickStartEnterDashboardPath = '/dashboard/overview'
 
 export type QuickStartPurpose = {
   id: QuickStartPurposeId
   titleKey: string
   descriptionKey: string
-  nextActionLabelKey: string
-  nextActionPath: QuickStartNextActionPath
 }
 
-export type QuickStartDownloadCard = {
+export type CodexDownloadCard = {
   platform: 'macOS' | 'Windows'
   descriptionKey: string
   buttonLabelKey: string
-  available: boolean
-  downloadHref?: string
+  downloadHref: string
 }
 
 export type QuickStartFullscreenPage = {
@@ -62,15 +58,24 @@ export type QuickStartModelLike = {
 export const QUICK_START_DEFAULT_PURPOSE: QuickStartPurposeId = 'web-coding'
 export const QUICK_START_ENTER_DASHBOARD_PATH: QuickStartEnterDashboardPath =
   '/dashboard/overview'
-export const QUICK_START_MINIMUM_QUOTA = 50_000
 
 export const quickStartFullscreenPages: QuickStartFullscreenPage[] = [
   { id: 'purpose' },
   { id: 'model' },
-  { id: 'balance' },
-  { id: 'download' },
-  { id: 'finish' },
+  { id: 'wallet' },
+  { id: 'api-key' },
+  { id: 'codex' },
 ]
+
+export const nextStepGuideKeys: Record<
+  Exclude<QuickStartFullscreenPageId, 'codex'>,
+  string
+> = {
+  purpose: 'Next: choose a model and review its price.',
+  model: 'Next: check your wallet or redeem a code.',
+  wallet: 'Next: generate an API key and copy it automatically.',
+  'api-key': 'Next: download the official Codex app for your computer.',
+}
 
 export const purposeOptions: QuickStartPurpose[] = [
   {
@@ -78,91 +83,38 @@ export const purposeOptions: QuickStartPurpose[] = [
     titleKey: 'Web Coding',
     descriptionKey:
       'Use it for code generation, web development, debugging, and project collaboration.',
-    nextActionLabelKey: 'Create API Key',
-    nextActionPath: '/keys',
   },
   {
     id: 'chat',
     titleKey: 'Chat',
     descriptionKey:
       'Use it for daily conversations, writing, summaries, translation, and knowledge Q&A.',
-    nextActionLabelKey: 'Open Chat',
-    nextActionPath: '/chat2link',
   },
   {
     id: 'other',
     titleKey: 'Image and more',
     descriptionKey:
       'Use it for image generation, multimodal creation, creative exploration, and other model capabilities.',
-    nextActionLabelKey: 'Open Playground',
-    nextActionPath: '/playground',
   },
 ]
 
-export const downloadCards: QuickStartDownloadCard[] = [
+export const codexDownloadCards: CodexDownloadCard[] = [
   {
     platform: 'macOS',
-    descriptionKey: 'For Apple Silicon and Intel Mac',
-    buttonLabelKey: 'Download for macOS',
-    available: true,
-    downloadHref: '/downloads/yunbei-macos.zip',
+    descriptionKey: 'Download starts now.',
+    buttonLabelKey: 'Download Codex for macOS',
+    downloadHref: '/downloads/yunbay-codex-macos.zip',
   },
   {
     platform: 'Windows',
-    descriptionKey: 'For Windows 10 / 11',
-    buttonLabelKey: 'Download for Windows',
-    available: false,
+    descriptionKey: 'Download starts now.',
+    buttonLabelKey: 'Download Codex for Windows',
+    downloadHref:
+      'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi',
   },
 ]
 
-export const fallbackModels: QuickStartModelLike[] = [
-  {
-    model_name: 'openai/gpt-4o-mini',
-    vendor_name: 'OpenAI',
-    tags: 'chat code vision',
-    supported_endpoint_types: ['openai'],
-    quota_type: 0,
-    model_ratio: 0.075,
-    completion_ratio: 4,
-    enable_groups: ['default'],
-    group_ratio: { default: 1 },
-  },
-  {
-    model_name: 'deepseek/deepseek-chat',
-    vendor_name: 'DeepSeek',
-    tags: 'chat code',
-    supported_endpoint_types: ['openai'],
-    quota_type: 0,
-    model_ratio: 0.07,
-    completion_ratio: 4,
-    enable_groups: ['default'],
-    group_ratio: { default: 1 },
-  },
-  {
-    model_name: 'stability/sdxl',
-    vendor_name: 'Image',
-    tags: 'image',
-    supported_endpoint_types: ['image-generation'],
-    quota_type: 0,
-    model_ratio: 0.4,
-    completion_ratio: 1,
-    enable_groups: ['default'],
-    group_ratio: { default: 1 },
-  },
-]
-
-export function getBalanceState(quota: number | null | undefined): {
-  quota: number
-  requiredQuota: number
-  isEnough: boolean
-} {
-  const safeQuota = Math.max(Number(quota) || 0, 0)
-  return {
-    quota: safeQuota,
-    requiredQuota: QUICK_START_MINIMUM_QUOTA,
-    isEnough: safeQuota >= QUICK_START_MINIMUM_QUOTA,
-  }
-}
+export const fallbackModels: QuickStartModelLike[] = []
 
 function includesAny(value: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(value))

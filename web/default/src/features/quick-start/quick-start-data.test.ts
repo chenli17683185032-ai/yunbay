@@ -21,19 +21,30 @@ import test from 'node:test'
 import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
-  QUICK_START_MINIMUM_QUOTA,
-  downloadCards,
+  codexDownloadCards,
+  fallbackModels,
   quickStartFullscreenPages,
-  getBalanceState,
   getModelTags,
+  nextStepGuideKeys,
   purposeOptions,
 } from './quick-start-data'
 
-test('quick start fullscreen flow exposes exactly five pages in order', () => {
+test('quick start fullscreen flow exposes the requested five pages in order', () => {
   assert.deepEqual(
     quickStartFullscreenPages.map((page) => page.id),
-    ['purpose', 'model', 'balance', 'download', 'finish']
+    ['purpose', 'model', 'wallet', 'api-key', 'codex']
   )
+})
+
+test('every non-final page explains what the next page does', () => {
+  assert.deepEqual(Object.keys(nextStepGuideKeys), [
+    'purpose',
+    'model',
+    'wallet',
+    'api-key',
+  ])
+  assert.equal(nextStepGuideKeys.purpose.length > 0, true)
+  assert.equal(nextStepGuideKeys['api-key'].length > 0, true)
 })
 
 test('quick start enter dashboard target points to dashboard overview', () => {
@@ -46,28 +57,26 @@ test('quick start exposes exactly the three requested purposes', () => {
     ['web-coding', 'chat', 'other']
   )
   assert.equal(QUICK_START_DEFAULT_PURPOSE, 'web-coding')
-  assert.equal(
-    purposeOptions.find((item) => item.id === 'chat')?.nextActionPath,
-    '/chat2link'
-  )
 })
 
-test('download cards expose macOS package and Windows placeholder', () => {
+test('Codex download cards point to official macOS and Windows downloads', () => {
   assert.deepEqual(
-    downloadCards.map((item) => item.platform),
+    codexDownloadCards.map((item) => item.platform),
     ['macOS', 'Windows']
   )
-  const macos = downloadCards.find((item) => item.platform === 'macOS')
-  const windows = downloadCards.find((item) => item.platform === 'Windows')
-  assert.equal(macos?.available, true)
-  assert.equal(macos?.downloadHref, '/downloads/yunbei-macos.zip')
-  assert.equal(windows?.available, false)
+  const macos = codexDownloadCards.find((item) => item.platform === 'macOS')
+  const windows = codexDownloadCards.find((item) => item.platform === 'Windows')
+  assert.equal(macos?.descriptionKey, 'Download starts now.')
+  assert.equal(windows?.descriptionKey, 'Download starts now.')
+  assert.equal(macos?.downloadHref, '/downloads/yunbay-codex-macos.zip')
+  assert.equal(
+    windows?.downloadHref,
+    'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi'
+  )
 })
 
-test('balance state compares quota against the minimum startup quota', () => {
-  assert.equal(QUICK_START_MINIMUM_QUOTA, 50000)
-  assert.equal(getBalanceState(50000).isEnough, true)
-  assert.equal(getBalanceState(49999).isEnough, false)
+test('quick start does not synthesize fallback models when backend model square is empty', () => {
+  assert.deepEqual(fallbackModels, [])
 })
 
 test('model tags include coding, image, and reasoning hints', () => {

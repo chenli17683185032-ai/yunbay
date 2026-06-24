@@ -25,19 +25,22 @@ import {
 } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import {
+  ArrowRight,
   CheckCircle2,
   Code2,
+  Copy,
   Download,
   ImageIcon,
+  KeyRound,
+  Loader2,
   MessageSquare,
-  Play,
-  Rocket,
   Sparkles,
   WalletCards,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
@@ -53,20 +56,20 @@ import {
   PointCloudMorphCanvas,
   getFaceStateForQuota,
 } from '@/features/home/point-cloud'
+import { createApiKey, fetchTokenKey, searchApiKeys } from '@/features/keys/api'
 import { usePricingData } from '@/features/pricing/hooks'
+import { generateAndCopyQuickStartApiKey } from './quick-start-api-key'
 import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
-  downloadCards,
-  fallbackModels,
-  getBalanceState,
+  codexDownloadCards,
   getModelRateLabels,
   getModelTags,
+  nextStepGuideKeys,
   purposeOptions,
   quickStartFullscreenPages,
+  type CodexDownloadCard,
   type QuickStartEnterDashboardPath,
-  type QuickStartNextActionPath,
-  type QuickStartDownloadCard,
   type QuickStartModelLike,
   type QuickStartPurposeId,
 } from './quick-start-data'
@@ -83,14 +86,9 @@ const COSMIC_AUTH_SURFACE_CLASS =
   'bg-[#030409] text-white [--accent:#121827] [--accent-foreground:#eef4ff] [--background:#030409] [--border:#1e2638] [--card:#070a14] [--card-foreground:#f7fbff] [--foreground:#f7fbff] [--muted:#0c1020] [--muted-foreground:#8f9bb8] [--primary:#eef4ff] [--primary-foreground:#030409] [--secondary:#121827] [--secondary-foreground:#eef4ff]'
 
 type QuickStartNavigationPath =
-  | QuickStartNextActionPath
   | QuickStartEnterDashboardPath
   | '/wallet'
   | '/wallet?section=redeem'
-
-function toModelList(models: QuickStartModelLike[]): QuickStartModelLike[] {
-  return models.length > 0 ? models : fallbackModels
-}
 
 export function QuickStart() {
   const { t } = useTranslation()
@@ -99,11 +97,13 @@ export function QuickStart() {
   const [selectedPurposeId, setSelectedPurposeId] =
     useState<QuickStartPurposeId>(QUICK_START_DEFAULT_PURPOSE)
   const [selectedModelName, setSelectedModelName] = useState<string>('')
+  const [generatedApiKey, setGeneratedApiKey] = useState('')
+  const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
   const [morphSignal, setMorphSignal] = useState(0)
   const pricing = usePricingData()
 
   const modelList = useMemo(
-    () => toModelList(pricing.models as QuickStartModelLike[]),
+    () => pricing.models as QuickStartModelLike[],
     [pricing.models]
   )
 
@@ -114,7 +114,7 @@ export function QuickStart() {
   const selectedModel =
     modelList.find((model) => model.model_name === activeModelName) ||
     modelList[0]
-  const balance = getBalanceState(user?.quota)
+  const currentBalance = Math.max(Number(user?.quota) || 0, 0)
   const faceState = getFaceStateForQuota(user?.quota)
 
   const handlePageChange = useCallback(
@@ -129,15 +129,6 @@ export function QuickStart() {
   const navigateToPath = useCallback(
     (path: QuickStartNavigationPath) => {
       switch (path) {
-        case '/chat2link':
-          navigate({ to: '/chat2link' })
-          return
-        case '/keys':
-          navigate({ to: '/keys' })
-          return
-        case '/playground':
-          navigate({ to: '/playground' })
-          return
         case QUICK_START_ENTER_DASHBOARD_PATH:
           navigate({
             to: '/dashboard/$section',
@@ -166,15 +157,38 @@ export function QuickStart() {
     [enterDashboard]
   )
 
-  const handleDownload = (card: QuickStartDownloadCard) => {
-    if (card.available && card.downloadHref) {
-      window.location.href = card.downloadHref
+  const handleGenerateApiKey = async () => {
+    if (generatedApiKey) {
+      const copied = await copyToClipboard(generatedApiKey)
+      if (copied) {
+        toast.success(t('Already copied to clipboard'))
+      } else {
+        toast.error(t('Failed to copy API key'))
+      }
       return
     }
 
-    toast.info(
-      t('Download resources are being configured. Please check back later.')
-    )
+    setIsGeneratingApiKey(true)
+    try {
+      const result = await generateAndCopyQuickStartApiKey({
+        createApiKey,
+        searchApiKeys,
+        fetchTokenKey,
+        copyToClipboard,
+      })
+      setGeneratedApiKey(result.fullKey)
+      toast.success(t('Already copied to clipboard'))
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t('Failed to create API key')
+      )
+    } finally {
+      setIsGeneratingApiKey(false)
+    }
+  }
+
+  const handleDownload = (card: CodexDownloadCard) => {
+    window.location.assign(card.downloadHref)
   }
 
   return (
@@ -212,6 +226,7 @@ export function QuickStart() {
           eyebrow={t('Quick Start')}
           title={t('Choose how you will use AI')}
           description={t('This helps Yunbay recommend a practical first path.')}
+          nextGuide={t(nextStepGuideKeys.purpose)}
         >
           <div className='grid gap-3 md:grid-cols-3'>
             {purposeOptions.map((purpose) => {
@@ -253,6 +268,7 @@ export function QuickStart() {
           description={t(
             'All supported models are listed with OpenRouter-style rates.'
           )}
+          nextGuide={t(nextStepGuideKeys.model)}
         >
           {pricing.isLoading ? (
             <div className='grid max-h-[52vh] gap-3 overflow-hidden md:grid-cols-2 xl:grid-cols-3'>
@@ -262,6 +278,12 @@ export function QuickStart() {
                   className='h-36 rounded-[1.5rem] bg-white/10'
                 />
               ))}
+            </div>
+          ) : modelList.length === 0 ? (
+            <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/50 p-6 text-sm leading-7 text-white/54 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+              {t(
+                'No models are currently enabled in the model square. Configure backend channels and model access first.'
+              )}
             </div>
           ) : (
             <div className='grid max-h-[52vh] gap-3 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3'>
@@ -320,69 +342,134 @@ export function QuickStart() {
         </QuickStartPage>
 
         <QuickStartPage
-          eyebrow={t('Current Balance')}
-          title={t('Check account balance')}
+          eyebrow={t('Wallet')}
+          title={t('Wallet and redemption code')}
           description={t(
-            'Yunbay checks whether your balance is enough to start safely.'
+            'Add balance in the wallet or redeem a code before you begin.'
           )}
+          nextGuide={t(nextStepGuideKeys.wallet)}
         >
-          <div className='grid gap-3 lg:grid-cols-3'>
+          <div className='grid gap-3 md:grid-cols-2'>
             <Metric
               label={t('Current Balance')}
-              value={formatQuota(balance.quota)}
-            />
-            <Metric
-              label={t('Minimum to start')}
-              value={formatQuota(balance.requiredQuota)}
+              value={formatQuota(currentBalance)}
             />
             <Metric
               label={t('Selected model')}
               value={selectedModel?.model_name || '-'}
             />
           </div>
-          <div className='mt-5 rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 backdrop-blur-2xl'>
-            <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-              <p className='max-w-2xl text-sm leading-7 text-white/62'>
-                {balance.isEnough
-                  ? t('Your balance is enough. You can continue directly.')
-                  : t(
-                      'Your balance is low. Please top up or redeem a code first.'
-                    )}
+          <div className='mt-5 grid gap-3 md:grid-cols-2'>
+            <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+              <WalletCards className='size-5 text-white/50' />
+              <h2 className='mt-5 text-lg font-semibold tracking-tight'>
+                {t('Open wallet')}
+              </h2>
+              <p className='mt-2 text-sm leading-7 text-white/54'>
+                {t('View your balance and choose a top-up method.')}
               </p>
-              <div className='flex flex-wrap gap-2'>
-                {!balance.isEnough && (
-                  <>
-                    <Button
-                      className='gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88'
-                      onClick={() => navigateToPath('/wallet')}
-                    >
-                      <WalletCards className='size-4' />
-                      {t('Top up')}
-                    </Button>
-                    <Button
-                      variant='outline'
-                      className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-                      onClick={() => navigateToPath('/wallet?section=redeem')}
-                    >
-                      <Sparkles className='size-4' />
-                      {t('Use redemption code')}
-                    </Button>
-                  </>
-                )}
-              </div>
+              <Button
+                className='mt-6 w-full gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88'
+                onClick={() => navigateToPath('/wallet')}
+              >
+                <WalletCards className='size-4' />
+                {t('Top up')}
+              </Button>
+            </div>
+            <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+              <Sparkles className='size-5 text-white/50' />
+              <h2 className='mt-5 text-lg font-semibold tracking-tight'>
+                {t('Redeem a code')}
+              </h2>
+              <p className='mt-2 text-sm leading-7 text-white/54'>
+                {t('Use a redemption code to add balance to your account.')}
+              </p>
+              <Button
+                variant='outline'
+                className='mt-6 w-full gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
+                onClick={() => navigateToPath('/wallet?section=redeem')}
+              >
+                <Sparkles className='size-4' />
+                {t('Use redemption code')}
+              </Button>
             </div>
           </div>
         </QuickStartPage>
 
         <QuickStartPage
-          eyebrow={t('Download')}
-          title={t('Download Yunbay to start easily')}
+          eyebrow='API KEY'
+          title={t('Generate your first API key')}
           description={t(
-            'The macOS package is ready. Windows package will be connected later.'
+            'Create a ready-to-use key with one click. Yunbay copies it automatically.'
+          )}
+          nextGuide={t(nextStepGuideKeys['api-key'])}
+        >
+          <div className='rounded-[1.75rem] border border-white/10 bg-[#030409]/58 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+            <div className='grid gap-3 md:grid-cols-2'>
+              <Metric
+                label={t('Selected purpose')}
+                value={t(selectedPurpose.titleKey)}
+              />
+              <Metric
+                label={t('Selected model')}
+                value={selectedModel?.model_name || '-'}
+              />
+            </div>
+            <div className='mt-5 flex flex-col gap-5 rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-5 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex min-w-0 items-start gap-4'>
+                <span className='flex size-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
+                  {generatedApiKey ? (
+                    <CheckCircle2 className='size-5 text-emerald-300' />
+                  ) : (
+                    <KeyRound className='size-5 text-white/72' />
+                  )}
+                </span>
+                <div className='min-w-0'>
+                  <h2 className='font-semibold tracking-tight text-white'>
+                    {generatedApiKey
+                      ? t('API key is ready')
+                      : t('One-click API key')}
+                  </h2>
+                  <p className='mt-2 text-sm leading-7 text-white/54'>
+                    {generatedApiKey
+                      ? t('Already copied to clipboard')
+                      : t(
+                          'Click generate. The new API key will be copied to your clipboard.'
+                        )}
+                  </p>
+                </div>
+              </div>
+              <Button
+                className='shrink-0 gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88'
+                disabled={isGeneratingApiKey}
+                onClick={handleGenerateApiKey}
+              >
+                {isGeneratingApiKey ? (
+                  <Loader2 className='size-4 animate-spin' />
+                ) : generatedApiKey ? (
+                  <Copy className='size-4' />
+                ) : (
+                  <KeyRound className='size-4' />
+                )}
+                {isGeneratingApiKey
+                  ? t('Generating...')
+                  : generatedApiKey
+                    ? t('Copy API key again')
+                    : t('Generate API key')}
+              </Button>
+            </div>
+          </div>
+        </QuickStartPage>
+
+        <QuickStartPage
+          eyebrow={t('Official Codex')}
+          title={t('Download Codex')}
+          description={t(
+            'Choose your operating system and continue to the official OpenAI Codex download.'
           )}
         >
           <div className='grid gap-3 md:grid-cols-2'>
-            {downloadCards.map((card) => (
+            {codexDownloadCards.map((card) => (
               <div
                 key={card.platform}
                 className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'
@@ -409,55 +496,11 @@ export function QuickStart() {
               </div>
             ))}
           </div>
-        </QuickStartPage>
-
-        <QuickStartPage
-          eyebrow={t('Finish and launch')}
-          title={t('Finish and launch')}
-          description={t(
-            'Use the selected path to start your first Yunbay workflow.'
-          )}
-        >
-          <div className='rounded-[1.75rem] border border-white/10 bg-[#030409]/58 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-            <div className='grid gap-3 lg:grid-cols-3'>
-              <Metric
-                label={t('Quick Start')}
-                value={t(selectedPurpose.titleKey)}
-              />
-              <Metric
-                label={t('Selected model')}
-                value={selectedModel?.model_name || '-'}
-              />
-              <Metric
-                label={t('Current Balance')}
-                value={formatQuota(balance.quota)}
-              />
-            </div>
-            <div className='mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-              <p className='max-w-xl text-sm leading-7 text-white/56'>
-                {t(
-                  'Use the selected path to start your first Yunbay workflow.'
-                )}
-              </p>
-              <div className='flex flex-wrap gap-2'>
-                <Button
-                  className='gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88'
-                  onClick={() => navigateToPath(selectedPurpose.nextActionPath)}
-                >
-                  <Rocket className='size-4' />
-                  {t(selectedPurpose.nextActionLabelKey)}
-                </Button>
-                <Button
-                  variant='outline'
-                  className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-                  onClick={enterDashboard}
-                >
-                  <Play className='size-4' />
-                  {t('Enter dashboard')}
-                </Button>
-              </div>
-            </div>
-          </div>
+          <p className='mt-4 text-xs leading-6 text-white/42'>
+            {t(
+              'The download opens the official OpenAI installer for the selected platform.'
+            )}
+          </p>
         </QuickStartPage>
       </LandingSnapFrame>
     </main>
@@ -468,6 +511,7 @@ function QuickStartPage(props: {
   eyebrow: string
   title: string
   description: string
+  nextGuide?: string
   children: ReactNode
 }) {
   return (
@@ -483,6 +527,12 @@ function QuickStartPage(props: {
           <p className='mt-6 max-w-md text-sm leading-7 text-white/58 sm:text-base sm:leading-8'>
             {props.description}
           </p>
+          {props.nextGuide ? (
+            <div className='mt-6 flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4 text-sm leading-6 text-white/66 backdrop-blur-xl'>
+              <ArrowRight className='mt-0.5 size-4 shrink-0 text-white/48' />
+              <span>{props.nextGuide}</span>
+            </div>
+          ) : null}
         </div>
         <div className='min-h-0 lg:col-span-6 lg:col-start-7'>
           {props.children}
