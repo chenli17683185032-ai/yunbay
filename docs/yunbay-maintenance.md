@@ -48,7 +48,7 @@ Sub2API 后台入口：
 
 ```text
 https://sub2api.yunbay.xyz
-https://sub2api.13.140.180.223.sslip.io
+https://sub2api.<server-ip>.sslip.io
 ```
 
 ## 当前工作区原则
@@ -89,7 +89,7 @@ yunbay.xyz, www.yunbay.xyz {
     reverse_proxy new-api:3000
 }
 
-sub2api.yunbay.xyz, sub2api.13.140.180.223.sslip.io {
+sub2api.yunbay.xyz, sub2api.<server-ip>.sslip.io {
     encode zstd gzip
     import security_headers
 
@@ -166,19 +166,19 @@ rsync -az \
   --exclude='logs/' \
   --exclude='tmp/' \
   --exclude='.DS_Store' \
-  -e "ssh -i '/Users/ethan/Desktop/云贝/服务器相关/ssh/newapi_vps_ed25519' -o IdentitiesOnly=yes -o UserKnownHostsFile='/Users/ethan/Desktop/云贝/服务器相关/ssh/known_hosts' -o StrictHostKeyChecking=yes" \
+  -e "ssh -i '<private-key-path>' -o IdentitiesOnly=yes -o UserKnownHostsFile='<known-hosts-path>' -o StrictHostKeyChecking=yes" \
   /Users/ethan/Desktop/云贝/云贝网站/new-api/ \
-  deploy@13.140.180.223:/opt/new-api/app/
+  deploy@<server-host>:/opt/new-api/app/
 ```
 
 ## 生产构建与启动
 
 ```bash
-ssh -i '/Users/ethan/Desktop/云贝/服务器相关/ssh/newapi_vps_ed25519' \
+ssh -i '<private-key-path>' \
   -o IdentitiesOnly=yes \
-  -o UserKnownHostsFile='/Users/ethan/Desktop/云贝/服务器相关/ssh/known_hosts' \
+  -o UserKnownHostsFile='<known-hosts-path>' \
   -o StrictHostKeyChecking=yes \
-  deploy@13.140.180.223 '
+  deploy@<server-host> '
 set -e
 cd /opt/new-api/app
 docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api
@@ -189,11 +189,11 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 若 `Caddyfile` 有变化，再额外执行：
 
 ```bash
-ssh -i '/Users/ethan/Desktop/云贝/服务器相关/ssh/newapi_vps_ed25519' \
+ssh -i '<private-key-path>' \
   -o IdentitiesOnly=yes \
-  -o UserKnownHostsFile='/Users/ethan/Desktop/云贝/服务器相关/ssh/known_hosts' \
+  -o UserKnownHostsFile='<known-hosts-path>' \
   -o StrictHostKeyChecking=yes \
-  deploy@13.140.180.223 '
+  deploy@<server-host> '
 set -e
 cd /opt/new-api/app
 docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate caddy
@@ -203,11 +203,11 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ## 生产冒烟检查
 
 ```bash
-ssh -i '/Users/ethan/Desktop/云贝/服务器相关/ssh/newapi_vps_ed25519' \
+ssh -i '<private-key-path>' \
   -o IdentitiesOnly=yes \
-  -o UserKnownHostsFile='/Users/ethan/Desktop/云贝/服务器相关/ssh/known_hosts' \
+  -o UserKnownHostsFile='<known-hosts-path>' \
   -o StrictHostKeyChecking=yes \
-  deploy@13.140.180.223 '
+  deploy@<server-host> '
 set -e
 cd /opt/new-api/app
 docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml ps new-api caddy
@@ -468,6 +468,42 @@ npm run build
 ```text
 /usage-logs/common?username=root&type=7&channel=123&model=gpt-test&token=tok&group=grp&requestId=req-1&startTime=1782316800000&endTime=1782324000000
 ```
+
+
+### 2026-06-25 生产同步补充：消除使用日志 404
+
+生产同步时发现一个额外问题：生产目录曾混入一版尚未完整落地的 Sub2API usage billing 前端改动，common usage logs 会额外请求：
+
+```text
+/api/sub2api/billing/self
+/api/sub2api/billing/self/stat
+```
+
+当前公开仓库基线并没有这些后端路由；生产容器日志显示这些请求返回 404。为避免用户打开使用日志时继续报错，生产处理采用最小回滚策略：将 `web/default/src/features/usage-logs/`、`web/default/src/routes/_authenticated/usage-logs/` 和 `web/default/src/routes/console/log.tsx` 回同步到当前 GitHub 修复版本，使 common usage logs 继续使用已有稳定接口：
+
+```text
+/api/log/self
+/api/log/self/stat
+/api/log
+/api/log/stat
+```
+
+生产重建后的公开验证结果：
+
+```text
+https://yunbay.xyz/                      HTTP 200
+前端入口 JS: /static/js/index.a32ecc1640.js
+运行中镜像: sha256:c949075ae8e925739...
+yunbay-new-api: healthy
+生产前端 JS 包含 /api/log
+生产前端 JS 不再包含 /api/sub2api/billing
+```
+
+后续维护要求：
+
+- 在后端正式补齐 `/api/sub2api/billing*` 控制器和路由前，不要把 common usage logs 切到该接口。
+- 如果将来重新启用 Sub2API usage billing 真源，必须同一 PR 内包含后端路由、控制器、权限校验、前端调用和端到端验证；不能只提交前端接口切换。
+- 生产目录 `.git` 当前不可作为可信发布源，少量补丁继续使用精确文件 `rsync`，并在同步前创建 `/opt/new-api/backups/...` 备份。
 
 ## 结论
 
