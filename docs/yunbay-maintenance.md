@@ -401,6 +401,74 @@ GET https://yunbay.xyz/quick-start: HTTP 200
 当前入口 JS: /static/js/index.e8f3d7a543.js
 ```
 
+## 2026-06-25 使用日志兼容入口维护记录
+
+本节记录 default 主题下使用日志入口的兼容规则。此处只记录公开代码行为，不记录后台账号、cookie、session 或服务器密钥。
+
+### 根因与预期
+
+历史 classic 页面、支付回跳和部分后端返回路径仍可能生成 `/console/log` 或 `/console/log?...` 链接。default 主题会将该入口切到新版使用日志页：
+
+```text
+/console/log?... -> /usage-logs/common?...
+```
+
+维护要求：
+
+- 旧参数必须保留并转换为新版 usage logs search 参数，不能只跳到空的 `/usage-logs/common`。
+- `start_timestamp` / `end_timestamp` 是秒级时间戳，新版 URL 的 `startTime` / `endTime` 是毫秒级时间戳。
+- 旧参数 `model_name`、`token_name`、`request_id`、`upstream_request_id` 分别对应新版 `model`、`token`、`requestId`、`upstreamRequestId`。
+- 后端已有登录日志 `type=7`，default 前端的 common logs search schema 和筛选器都必须允许 `type=7`，否则旧链接里的登录日志筛选会被丢弃。
+- `/usage-logs` 索引路由也要保留参数再跳到 `/usage-logs/common`，因为后端 `ThemeAwarePath` 可能先把 `/console/log?...` 重写为 `/usage-logs?...`。
+
+### 关键源码位置
+
+```text
+web/default/src/routes/console/log.tsx
+web/default/src/routes/_authenticated/usage-logs/index.tsx
+web/default/src/routes/_authenticated/usage-logs/$section.tsx
+web/default/src/features/usage-logs/lib/legacy-console-log-route.ts
+web/default/src/features/usage-logs/lib/legacy-console-log-route.test.ts
+web/default/src/features/usage-logs/constants.ts
+web/default/src/features/usage-logs/components/common-logs-filter-bar.tsx
+common/constants.go
+```
+
+### 本地验证命令
+
+默认前端目录：
+
+```bash
+cd /Users/ethan/Desktop/云贝/云贝网站/new-api/web/default
+```
+
+兼容参数转换测试：
+
+```bash
+node --test src/features/usage-logs/lib/legacy-console-log-route.test.ts
+```
+
+类型检查和构建：
+
+```bash
+npm run typecheck
+npm run build
+```
+
+### 回归检查示例
+
+登录 default 主题后打开旧链接：
+
+```text
+/console/log?username=root&type=7&channel=123&model_name=gpt-test&token_name=tok&group=grp&request_id=req-1&start_timestamp=1782316800&end_timestamp=1782324000
+```
+
+预期最终进入新版 common 使用日志页，并保留筛选条件：
+
+```text
+/usage-logs/common?username=root&type=7&channel=123&model=gpt-test&token=tok&group=grp&requestId=req-1&startTime=1782316800000&endTime=1782324000000
+```
+
 ## 结论
 
 当前维护基线是：
