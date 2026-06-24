@@ -73,6 +73,19 @@ test('Codex download cards point to official macOS and Windows downloads', () =>
     /^\/downloads\/yunbay-codex-macos-\d{8}-\d{6}-[a-f0-9]{12}\.zip$/
   )
   assert.notEqual(macos?.downloadHref, '/downloads/yunbay-codex-macos.zip')
+
+  assert.equal(
+    macos?.quarantineFixCommand,
+    'xattr -dr com.apple.quarantine "$HOME/Downloads/Yunbay Codex.app" && open "$HOME/Downloads/Yunbay Codex.app"'
+  )
+  assert.match(
+    macos?.terminalInstallCommand ?? '',
+    /^curl -L "https:\/\/yunbay\.xyz\/downloads\/yunbay-codex-macos-\d{8}-\d{6}-[a-f0-9]{12}\.zip" -o \/tmp\/yunbay-codex\.zip && rm -rf "\$HOME\/Downloads\/Yunbay Codex\.app" && ditto -x -k \/tmp\/yunbay-codex\.zip "\$HOME\/Downloads" && xattr -dr com\.apple\.quarantine "\$HOME\/Downloads\/Yunbay Codex\.app" && open "\$HOME\/Downloads\/Yunbay Codex\.app"$/
+  )
+  assert.equal(
+    macos?.terminalInstallCommand?.includes(`https://yunbay.xyz${macos?.downloadHref}`),
+    true
+  )
   assert.equal(
     windows?.downloadHref,
     'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi'

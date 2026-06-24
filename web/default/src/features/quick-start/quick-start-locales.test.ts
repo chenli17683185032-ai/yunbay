@@ -30,6 +30,16 @@ const LOCALE_NAMES = ['en', 'zh', 'fr', 'ru', 'ja', 'vi'] as const
 const LOCALIZED_LOCALE_NAMES = ['zh', 'fr', 'ru', 'ja', 'vi'] as const
 const LOCALE_DIR = join(import.meta.dirname, '../../i18n/locales')
 
+const MODEL_TAG_KEYS = [
+  'Coding',
+  'Image',
+  'Reasoning',
+  'Vision',
+  'Audio',
+  'Video',
+  'Chat',
+] as const
+
 const QUICK_START_COMPONENT_KEYS = [
   'Quick Start Yunbay',
   'Quick Start',
@@ -67,8 +77,14 @@ const QUICK_START_COMPONENT_KEYS = [
   'Generate API key',
   'Official Codex',
   'Download Codex',
-  'Choose your operating system and continue to the official OpenAI Codex download.',
-  'The download opens the official OpenAI installer for the selected platform.',
+  'Download Yunbay Codex and connect it to your Yunbay API key.',
+  'If macOS says the app is damaged',
+  'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.',
+  'Copy repair command',
+  'Copy one-line terminal install',
+  'Terminal command copied',
+  'Failed to copy terminal command',
+  'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.',
   'Previous',
   'Next',
   'Enter dashboard',
@@ -93,6 +109,7 @@ test('quick start copy has translations in every supported locale', () => {
       option.titleKey,
       option.descriptionKey,
     ]),
+    ...MODEL_TAG_KEYS,
     ...codexDownloadCards.flatMap((card) => [
       card.descriptionKey,
       card.buttonLabelKey,
@@ -108,6 +125,31 @@ test('quick start copy has translations in every supported locale', () => {
         `${localeName}: missing quick-start translation key ${key}`
       )
     }
+  }
+})
+
+test('Chinese quick start copy does not fall back to English for the guided flow', () => {
+  const locale = readLocale('zh')
+  const keys = [
+    ...QUICK_START_COMPONENT_KEYS,
+    ...Object.values(nextStepGuideKeys),
+    ...purposeOptions.flatMap((option) => [
+      option.titleKey,
+      option.descriptionKey,
+    ]),
+    ...MODEL_TAG_KEYS,
+    ...codexDownloadCards.flatMap((card) => [
+      card.descriptionKey,
+      card.buttonLabelKey,
+    ]),
+  ]
+
+  for (const key of keys) {
+    assert.notEqual(
+      locale.translation[key],
+      key,
+      `zh: quick-start translation falls back to English for ${key}`
+    )
   }
 })
 

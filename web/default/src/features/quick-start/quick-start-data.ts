@@ -36,6 +36,8 @@ export type CodexDownloadCard = {
   descriptionKey: string
   buttonLabelKey: string
   downloadHref: string
+  quarantineFixCommand?: string
+  terminalInstallCommand?: string
 }
 
 export type QuickStartFullscreenPage = {
@@ -98,13 +100,20 @@ export const purposeOptions: QuickStartPurpose[] = [
   },
 ]
 
+const YUNBAY_CODEX_MACOS_DOWNLOAD_HREF =
+  '/downloads/yunbay-codex-macos-20260624-174731-53933cc047c3.zip'
+const YUNBAY_CODEX_MACOS_DOWNLOAD_URL = `https://yunbay.xyz${YUNBAY_CODEX_MACOS_DOWNLOAD_HREF}`
+const YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH =
+  '$HOME/Downloads/Yunbay Codex.app'
+
 export const codexDownloadCards: CodexDownloadCard[] = [
   {
     platform: 'macOS',
     descriptionKey: 'Download starts now.',
     buttonLabelKey: 'Download Codex for macOS',
-    downloadHref:
-      '/downloads/yunbay-codex-macos-20260624-162009-0e884319fdfb.zip',
+    downloadHref: YUNBAY_CODEX_MACOS_DOWNLOAD_HREF,
+    quarantineFixCommand: `xattr -dr com.apple.quarantine "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && open "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}"`,
+    terminalInstallCommand: `curl -L "${YUNBAY_CODEX_MACOS_DOWNLOAD_URL}" -o /tmp/yunbay-codex.zip && rm -rf "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && ditto -x -k /tmp/yunbay-codex.zip "$HOME/Downloads" && xattr -dr com.apple.quarantine "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && open "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}"`,
   },
   {
     platform: 'Windows',

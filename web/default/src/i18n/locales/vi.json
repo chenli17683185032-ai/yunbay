@@ -4677,7 +4677,7 @@
     "AI Usage": "AI Usage",
     "Account": "Account",
     "Quick Start": "Quick Start",
-    "Enter dashboard": "Enter dashboard",
+    "Enter dashboard": "Vào bảng điều khiển",
     "Wallet / Top up": "Wallet / Top up",
     "Quick Start Yunbay": "Quick Start Yunbay",
     "Current step": "Current step",
@@ -4730,6 +4730,14 @@
     "Download Codex for macOS": "Download Codex for macOS",
     "Download Codex for Windows": "Download Codex for Windows",
     "The download opens the official OpenAI installer for the selected platform.": "The download opens the official OpenAI installer for the selected platform.",
-    "No models are currently enabled in the model square. Configure backend channels and model access first.": "Hiện chưa có mô hình nào được bật trong quảng trường mô hình phía backend. Trước tiên hãy cấu hình kênh backend và quyền truy cập mô hình."
+    "No models are currently enabled in the model square. Configure backend channels and model access first.": "Hiện chưa có mô hình nào được bật trong quảng trường mô hình phía backend. Trước tiên hãy cấu hình kênh backend và quyền truy cập mô hình.",
+    "Download Yunbay Codex and connect it to your Yunbay API key.": "Tải Yunbay Codex và kết nối với khóa API Yunbay của bạn.",
+    "The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.": "Bản tải macOS là bản dựng Yunbay Codex. Nút Windows mở trình cài đặt chính thức trên Microsoft Store.",
+    "If macOS says the app is damaged": "Nếu macOS báo ứng dụng bị hỏng",
+    "This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.": "Bản dựng này chưa được Apple công chứng. Nếu Gatekeeper chặn, hãy chạy lệnh Terminal bên dưới sau khi tải xuống.",
+    "Copy repair command": "Sao chép lệnh sửa lỗi",
+    "Copy one-line terminal install": "Sao chép lệnh cài đặt Terminal một dòng",
+    "Terminal command copied": "Đã sao chép lệnh Terminal",
+    "Failed to copy terminal command": "Không thể sao chép lệnh Terminal"
   }
 }

@@ -4677,7 +4677,7 @@
     "AI Usage": "AI Usage",
     "Account": "Account",
     "Quick Start": "Quick Start",
-    "Enter dashboard": "Enter dashboard",
+    "Enter dashboard": "ダッシュボードへ移動",
     "Wallet / Top up": "Wallet / Top up",
     "Quick Start Yunbay": "Quick Start Yunbay",
     "Current step": "Current step",
@@ -4730,6 +4730,14 @@
     "Download Codex for macOS": "Download Codex for macOS",
     "Download Codex for Windows": "Download Codex for Windows",
     "The download opens the official OpenAI installer for the selected platform.": "The download opens the official OpenAI installer for the selected platform.",
-    "No models are currently enabled in the model square. Configure backend channels and model access first.": "現在、バックエンドのモデル広場で有効なモデルはありません。先にバックエンドのチャンネルとモデルアクセスを設定してください。"
+    "No models are currently enabled in the model square. Configure backend channels and model access first.": "現在、バックエンドのモデル広場で有効なモデルはありません。先にバックエンドのチャンネルとモデルアクセスを設定してください。",
+    "Download Yunbay Codex and connect it to your Yunbay API key.": "Yunbay Codex をダウンロードして、Yunbay API Key に接続します。",
+    "The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.": "macOS 版は Yunbay Codex ビルドです。Windows ボタンは公式 Microsoft Store インストーラーを開きます。",
+    "If macOS says the app is damaged": "macOS でアプリが破損していると表示される場合",
+    "This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.": "このビルドはまだ Apple 公証を受けていません。Gatekeeper にブロックされた場合は、ダウンロード後に下のターミナルコマンドを実行してください。",
+    "Copy repair command": "修復コマンドをコピー",
+    "Copy one-line terminal install": "1 行のターミナルインストールをコピー",
+    "Terminal command copied": "ターミナルコマンドをコピーしました",
+    "Failed to copy terminal command": "ターミナルコマンドのコピーに失敗しました"
   }
 }

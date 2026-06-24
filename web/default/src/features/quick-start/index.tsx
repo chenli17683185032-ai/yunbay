@@ -35,6 +35,7 @@ import {
   Loader2,
   MessageSquare,
   Sparkles,
+  Terminal,
   WalletCards,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -189,6 +190,15 @@ export function QuickStart() {
 
   const handleDownload = (card: CodexDownloadCard) => {
     window.location.assign(card.downloadHref)
+  }
+
+  const handleCopyCommand = async (command: string) => {
+    const copied = await copyToClipboard(command)
+    if (copied) {
+      toast.success(t('Terminal command copied'))
+    } else {
+      toast.error(t('Failed to copy terminal command'))
+    }
   }
 
   return (
@@ -465,7 +475,7 @@ export function QuickStart() {
           eyebrow={t('Official Codex')}
           title={t('Download Codex')}
           description={t(
-            'Choose your operating system and continue to the official OpenAI Codex download.'
+            'Download Yunbay Codex and connect it to your Yunbay API key.'
           )}
         >
           <div className='grid gap-3 md:grid-cols-2'>
@@ -493,12 +503,53 @@ export function QuickStart() {
                   <Download className='size-4' />
                   {t(card.buttonLabelKey)}
                 </Button>
+                {card.platform === 'macOS' && card.quarantineFixCommand ? (
+                  <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
+                    <div className='font-semibold text-amber-50/90'>
+                      {t('If macOS says the app is damaged')}
+                    </div>
+                    <p className='mt-1'>
+                      {t(
+                        'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.'
+                      )}
+                    </p>
+                    <code className='mt-3 block overflow-x-auto rounded-xl border border-white/10 bg-black/36 px-3 py-2 font-mono text-[11px] leading-5 text-white/78'>
+                      {card.quarantineFixCommand}
+                    </code>
+                    <div className='mt-3 grid gap-2'>
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
+                        onClick={() =>
+                          handleCopyCommand(card.quarantineFixCommand || '')
+                        }
+                      >
+                        <Copy className='size-3.5' />
+                        {t('Copy repair command')}
+                      </Button>
+                      {card.terminalInstallCommand ? (
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
+                          onClick={() =>
+                            handleCopyCommand(card.terminalInstallCommand || '')
+                          }
+                        >
+                          <Terminal className='size-3.5' />
+                          {t('Copy one-line terminal install')}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
           <p className='mt-4 text-xs leading-6 text-white/42'>
             {t(
-              'The download opens the official OpenAI installer for the selected platform.'
+              'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.'
             )}
           </p>
         </QuickStartPage>

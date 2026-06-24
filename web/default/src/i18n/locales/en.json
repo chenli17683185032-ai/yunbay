@@ -4730,6 +4730,14 @@
     "Download Codex for macOS": "Download Codex for macOS",
     "Download Codex for Windows": "Download Codex for Windows",
     "The download opens the official OpenAI installer for the selected platform.": "The download opens the official OpenAI installer for the selected platform.",
-    "No models are currently enabled in the model square. Configure backend channels and model access first.": "No models are currently enabled in the model square. Configure backend channels and model access first."
+    "No models are currently enabled in the model square. Configure backend channels and model access first.": "No models are currently enabled in the model square. Configure backend channels and model access first.",
+    "Download Yunbay Codex and connect it to your Yunbay API key.": "Download Yunbay Codex and connect it to your Yunbay API key.",
+    "The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.": "The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.",
+    "If macOS says the app is damaged": "If macOS says the app is damaged",
+    "This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.": "This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.",
+    "Copy repair command": "Copy repair command",
+    "Copy one-line terminal install": "Copy one-line terminal install",
+    "Terminal command copied": "Terminal command copied",
+    "Failed to copy terminal command": "Failed to copy terminal command"
   }
 }

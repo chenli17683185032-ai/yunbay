@@ -4677,7 +4677,7 @@
     "AI Usage": "AI Usage",
     "Account": "Account",
     "Quick Start": "Quick Start",
-    "Enter dashboard": "Enter dashboard",
+    "Enter dashboard": "Перейти в панель управления",
     "Wallet / Top up": "Wallet / Top up",
     "Quick Start Yunbay": "Quick Start Yunbay",
     "Current step": "Current step",
@@ -4730,6 +4730,14 @@
     "Download Codex for macOS": "Download Codex for macOS",
     "Download Codex for Windows": "Download Codex for Windows",
     "The download opens the official OpenAI installer for the selected platform.": "The download opens the official OpenAI installer for the selected platform.",
-    "No models are currently enabled in the model square. Configure backend channels and model access first.": "В серверной витрине моделей сейчас нет включённых моделей. Сначала настройте серверные каналы и доступ к моделям."
+    "No models are currently enabled in the model square. Configure backend channels and model access first.": "В серверной витрине моделей сейчас нет включённых моделей. Сначала настройте серверные каналы и доступ к моделям.",
+    "Download Yunbay Codex and connect it to your Yunbay API key.": "Скачайте Yunbay Codex и подключите его к вашему API-ключу Yunbay.",
+    "The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.": "Файл для macOS — сборка Yunbay Codex. Кнопка Windows открывает официальный установщик Microsoft Store.",
+    "If macOS says the app is damaged": "Если macOS сообщает, что приложение повреждено",
+    "This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.": "Эта сборка пока не заверена Apple. Если Gatekeeper блокирует запуск, выполните команду Terminal ниже после скачивания.",
+    "Copy repair command": "Скопировать команду исправления",
+    "Copy one-line terminal install": "Скопировать установку одной командой Terminal",
+    "Terminal command copied": "Команда Terminal скопирована",
+    "Failed to copy terminal command": "Не удалось скопировать команду Terminal"
   }
 }
