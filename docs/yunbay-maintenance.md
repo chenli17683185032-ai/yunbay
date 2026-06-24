@@ -274,6 +274,133 @@ sub2api_root=200
   - 否则直接用：`https://sub2api.yunbay.xyz`
 - Key：Sub2API 的普通 API Key，不是 admin key
 
+
+## 2026-06-24 快速启动与生产部署维护记录
+
+本节记录 2026-06-24 对云贝网站快速启动流程、下载引导和生产部署方式的维护基线。此处只记录可公开的代码与运维事实，不记录后台密码、SSH 私钥、VNC 密码、API key、cookie 或 session。
+
+### 网站代码变更基线
+
+目标仓库：
+
+```text
+chenli17683185032-ai/yunbay
+```
+
+当前已推送到 `main` 的相关提交：
+
+```text
+da64a13b fix: prefer actual quick start api key group
+dd2d4422 fix: use available quick start api key group
+cd6b2e65 fix: polish quick start onboarding
+592887c1 fix: localize quick start and macos download help
+cb7ea3c9 fix: replace macos codex download bundle
+```
+
+当前快速启动页面的预期行为：
+
+- 模型页只使用后端真实模型广场 / pricing 数据，不再前端合成 `claude` / `gemini` 等 fallback 模型。
+- 模型默认选择 `GPT-5.5`；如果后端模型广场没有 `GPT-5.5`，默认选择后端返回的第一个模型。
+- 一键生成 API key 前会实时刷新 `/api/user/self`，再读取 `/api/user/self/groups`。
+- API key 分组选择顺序为：
+  1. 当前用户真实分组（例如 `plus`），且该分组在当前用户可用分组中；
+  2. 站点启用 `default_use_auto_group` 且当前用户可选 `auto` 时，使用 `auto` 并开启 `cross_group_retry`；
+  3. 第一个非 `default` 的用户可用分组；
+  4. 只有没有其它可用分组时才使用 `default`；
+  5. 没有任何可用分组时直接报错，不创建不可用 key。
+- 兑换码页面支持在快速启动页内直接粘贴并兑换，不跳转到控制台兑换码页面。
+- 新手引导 2~5 页中文文案已补齐，不应回退到英文界面。
+- 主页宣传标语已去掉“不封号”。
+- macOS 下载入口指向云贝 Codex 构建产物；由于当前没有 Apple Developer ID / notarization，如 Gatekeeper 提示 App 损坏，引导用户使用页面中的 `xattr` 修复命令。
+
+### 关键源码位置
+
+```text
+web/default/src/features/quick-start/index.tsx
+web/default/src/features/quick-start/quick-start-api-key.ts
+web/default/src/features/quick-start/quick-start-api-key.test.ts
+web/default/src/features/quick-start/quick-start-data.ts
+web/default/src/features/quick-start/quick-start-redemption.ts
+web/default/src/i18n/locales/{en,zh,fr,ru,ja,vi}.json
+web/default/src/components/layout/config/public-landing-brand.ts
+```
+
+### 本地验证命令
+
+默认前端目录：
+
+```bash
+cd /Users/ethan/Desktop/云贝/云贝网站/new-api/web/default
+```
+
+快速启动相关测试：
+
+```bash
+npx --yes tsx --test \
+  src/features/quick-start/quick-start-api-key.test.ts \
+  src/features/quick-start/quick-start-data.test.ts \
+  src/features/quick-start/quick-start-redemption.test.ts \
+  src/features/quick-start/quick-start-locales.test.ts \
+  src/components/layout/config/public-landing-brand.test.ts \
+  src/i18n/public-landing-locales.test.ts
+```
+
+2026-06-24 验证结果：
+
+```text
+25 tests
+25 pass
+0 fail
+```
+
+类型检查和构建：
+
+```bash
+npm run typecheck
+npm run build
+```
+
+2026-06-24 验证结果：二者均通过。
+
+### 生产部署注意事项
+
+2026-06-24 生产机 `/opt/new-api/app/.git` 被确认是一个失效的 worktree 指针：
+
+```text
+gitdir: /Users/ethan/Desktop/云贝/云贝网站/new-api/.git/worktrees/sub2api-gateway
+```
+
+因此生产机上不要依赖：
+
+```bash
+git pull
+git status
+git rev-parse
+```
+
+当前建议：
+
+- 少量补丁优先使用精确文件列表 `rsync` 到 `/opt/new-api/app`；
+- 大范围同步继续使用非删除式 `rsync`，并排除 `.git/`、`node_modules/`、`dist/`、运行日志和数据目录；
+- 同步后在生产机执行 `docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api`；
+- 重启时优先使用 `up -d --force-recreate new-api`，确保新镜像被容器实际采用。
+
+2026-06-24 最后一轮 API key 分组补丁只同步了以下 3 个文件：
+
+```text
+web/default/src/features/quick-start/index.tsx
+web/default/src/features/quick-start/quick-start-api-key.ts
+web/default/src/features/quick-start/quick-start-api-key.test.ts
+```
+
+生产重建后状态：
+
+```text
+yunbay-new-api: healthy
+GET https://yunbay.xyz/quick-start: HTTP 200
+当前入口 JS: /static/js/index.e8f3d7a543.js
+```
+
 ## 结论
 
 当前维护基线是：
