@@ -4739,6 +4739,16 @@
     "Copy one-line terminal install": "1 行のターミナルインストールをコピー",
     "Terminal command copied": "ターミナルコマンドをコピーしました",
     "Failed to copy terminal command": "ターミナルコマンドのコピーに失敗しました",
-    "No available group for the new API key": "新しいAPIキーに使用できるグループがありません"
+    "No available group for the new API key": "新しいAPIキーに使用できるグループがありません",
+    "Data": "データ",
+    "Codex one-click launcher": "Codex ワンクリック起動ソフト",
+    "Codex one-click setup": "Codex ワンクリック設定",
+    "Download the Codex one-click launcher and connect it to your Yunbay API key.": "Codex ワンクリック起動ソフトをダウンロードし、Yunbay API Key に接続します。",
+    "Download one-click launcher": "ワンクリック起動ソフトをダウンロード",
+    "What the Windows one-click launcher can do": "Windows ワンクリック起動ソフトでできること",
+    "After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.": "インストーラーをダウンロードして実行した後、Yunbay Codex を開き、Quick Start に Yunbay API Key を貼り付けます。アプリはカスタム API 設定を自動で書き込み、https://yunbay.xyz/v1 に接続します。さらに、モデルプロバイダー管理、接続テスト、残高・使用量照会、Codex セッション管理にも対応しています。",
+    "Download and run the Windows installer.": "Windows インストーラーをダウンロードして実行します。",
+    "Open Yunbay Codex and paste your Yunbay API key into Quick Start.": "Yunbay Codex を開き、Quick Start に Yunbay API Key を貼り付けます。",
+    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "保存して有効化したら、Codex を起動し、モデル接続をテストして履歴セッションを管理します。"
   }
 }

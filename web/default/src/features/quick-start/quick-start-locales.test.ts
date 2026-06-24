@@ -80,16 +80,15 @@ const QUICK_START_COMPONENT_KEYS = [
   'Generating...',
   'Copy API key again',
   'Generate API key',
-  'Official Codex',
-  'Download Codex',
-  'Download Yunbay Codex and connect it to your Yunbay API key.',
+  'Codex one-click launcher',
+  'Codex one-click setup',
+  'Download the Codex one-click launcher and connect it to your Yunbay API key.',
   'If macOS says the app is damaged',
   'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.',
   'Copy repair command',
   'Copy one-line terminal install',
   'Terminal command copied',
   'Failed to copy terminal command',
-  'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.',
   'Previous',
   'Next',
   'Enter dashboard',
@@ -118,6 +117,9 @@ test('quick start copy has translations in every supported locale', () => {
     ...codexDownloadCards.flatMap((card) => [
       card.descriptionKey,
       card.buttonLabelKey,
+      ...(card.guideTitleKey ? [card.guideTitleKey] : []),
+      ...(card.guideDescriptionKey ? [card.guideDescriptionKey] : []),
+      ...(card.guideStepKeys ?? []),
     ]),
   ]
 
@@ -146,6 +148,9 @@ test('Chinese quick start copy does not fall back to English for the guided flow
     ...codexDownloadCards.flatMap((card) => [
       card.descriptionKey,
       card.buttonLabelKey,
+      ...(card.guideTitleKey ? [card.guideTitleKey] : []),
+      ...(card.guideDescriptionKey ? [card.guideDescriptionKey] : []),
+      ...(card.guideStepKeys ?? []),
     ]),
   ]
 

@@ -551,10 +551,10 @@ export function QuickStart() {
         </QuickStartPage>
 
         <QuickStartPage
-          eyebrow={t('Official Codex')}
-          title={t('Download Codex')}
+          eyebrow={t('Codex one-click launcher')}
+          title={t('Codex one-click setup')}
           description={t(
-            'Download Yunbay Codex and connect it to your Yunbay API key.'
+            'Download the Codex one-click launcher and connect it to your Yunbay API key.'
           )}
         >
           <div className='grid gap-3 md:grid-cols-2'>
@@ -623,14 +623,26 @@ export function QuickStart() {
                     </div>
                   </div>
                 ) : null}
+                {card.platform === 'Windows' && card.guideTitleKey ? (
+                  <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
+                    <div className='font-semibold text-amber-50/90'>
+                      {t(card.guideTitleKey)}
+                    </div>
+                    {card.guideDescriptionKey ? (
+                      <p className='mt-1'>{t(card.guideDescriptionKey)}</p>
+                    ) : null}
+                    {card.guideStepKeys?.length ? (
+                      <ol className='mt-3 list-decimal space-y-1 pl-4'>
+                        {card.guideStepKeys.map((step) => (
+                          <li key={step}>{t(step)}</li>
+                        ))}
+                      </ol>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
-          <p className='mt-4 text-xs leading-6 text-white/42'>
-            {t(
-              'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.'
-            )}
-          </p>
         </QuickStartPage>
       </LandingSnapFrame>
     </main>

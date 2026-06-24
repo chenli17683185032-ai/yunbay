@@ -4739,6 +4739,16 @@
     "Copy one-line terminal install": "复制一行终端安装命令",
     "Terminal command copied": "终端命令已复制",
     "Failed to copy terminal command": "复制终端命令失败",
-    "No available group for the new API key": "当前账号没有可用于新 API key 的分组"
+    "No available group for the new API key": "当前账号没有可用于新 API key 的分组",
+    "Data": "数据",
+    "Codex one-click launcher": "Codex 一键启动软件",
+    "Codex one-click setup": "Codex 一键配置",
+    "Download the Codex one-click launcher and connect it to your Yunbay API key.": "下载 Codex 一键启动软件，并连接到你的云贝 API Key。",
+    "Download one-click launcher": "下载一键启动软件",
+    "What the Windows one-click launcher can do": "Windows 一键启动软件能做什么",
+    "After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.": "下载并运行安装包后，打开 Yunbay Codex，在快速启动页粘贴你的云贝 API Key，即可自动写入自定 API 配置并连接 https://yunbay.xyz/v1。软件还支持模型供应商管理、连接测试、余额/用量查询和 Codex 会话管理。",
+    "Download and run the Windows installer.": "下载并运行 Windows 安装包。",
+    "Open Yunbay Codex and paste your Yunbay API key into Quick Start.": "打开 Yunbay Codex，在快速启动页粘贴云贝 API Key。",
+    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "保存并启用后，即可启动 Codex、测试模型连接并管理历史会话。"
   }
 }

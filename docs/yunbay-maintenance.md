@@ -512,3 +512,111 @@ yunbay-new-api: healthy
 - **不要再回到 Channel Console / Cliproxy / Sub2API 深嵌 adapter 方案**；
 - 只维护 `new-api` 原生渠道管理 + `sub2api` 独立上游模式；
 - 涉及 `Caddyfile` 改动时，要记得 **force-recreate caddy**，不要只靠宿主机文件覆盖后假设容器会自动看到。
+
+
+## 2026-06-25 控制台收敛与 Windows Codex 下载维护记录
+
+本节记录 2026-06-25 对云贝 default 前端控制台、快速启动第 5 页和 Yunbay Codex Windows 下载入口的维护结果。此处只记录公开代码与公开运维事实，不记录后台密码、SSH 私钥、cookie、session 或 API key。
+
+### 本轮功能收敛结果
+
+- 顶部导航收敛为：`Home / Console / Model Square`。
+- 普通用户侧边栏新增 `Dashboard -> /dashboard/models` 入口。
+- 普通用户与管理员都移除了 `chat-presets` 聊天小组件，仅保留 `Playground`。
+- `/dashboard/overview` 底部只保留 `AnnouncementsPanel` 公告卡片；不再渲染 `SummaryCards`、`ApiInfoPanel`、`UptimePanel`、`FAQPanel`、`PerformanceHealthPanel`。
+- 快速启动第 5 页主题改为：
+  - `Codex one-click launcher`
+  - `Codex one-click setup`
+- macOS 与 Windows 下载按钮统一为：`Download one-click launcher`。
+- Windows 下载不再跳转 Microsoft Store，改为云贝站内静态文件：
+  - `/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe`
+- Windows 卡片新增与 macOS 相同风格的说明块，介绍 Yunbay Codex 的 API Key 导入、`https://yunbay.xyz/v1` 连接、模型供应商管理、连接测试、余额/用量查询与会话管理能力。
+
+### Windows 安装包来源与校验
+
+本轮 Windows 安装包来源：
+
+```text
+repo:      chenli17683185032-ai/yunbay-codex
+workflow:  Build Windows
+run id:    28121301588
+artifact:  yunbay-codex-windows
+source:    nsis/Yunbay Codex_0.1.0_x64-setup.exe
+sha256:    f5121184b0496cd978eb32f97d1def4a2dc7cbb2cc997189ee428fcd8c9fc5da
+```
+
+站内静态文件位置：
+
+```text
+web/default/public/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe
+web/default/dist/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe
+```
+
+### 本轮关键源码位置
+
+```text
+web/default/src/features/quick-start/index.tsx
+web/default/src/features/quick-start/quick-start-data.ts
+web/default/src/features/quick-start/quick-start-data.test.ts
+web/default/src/features/quick-start/quick-start-locales.test.ts
+web/default/src/hooks/sidebar-data-model.ts
+web/default/src/hooks/sidebar-data-model.test.ts
+web/default/src/hooks/top-nav-link-policy.ts
+web/default/src/hooks/top-nav-link-policy.test.ts
+web/default/src/hooks/use-top-nav-links.ts
+web/default/src/features/dashboard/components/overview/overview-dashboard.tsx
+web/default/src/i18n/locales/{en,zh,fr,ja,ru,vi}.json
+```
+
+### 本地验证命令与结果
+
+默认前端目录：
+
+```bash
+cd /Users/ethan/Documents/yunbay/web/default
+```
+
+测试：
+
+```bash
+bun test src/features/quick-start/quick-start-data.test.ts   src/features/quick-start/quick-start-locales.test.ts   src/hooks/sidebar-data-model.test.ts   src/hooks/top-nav-link-policy.test.ts
+```
+
+结果：
+
+```text
+16 pass
+0 fail
+```
+
+类型检查：
+
+```bash
+bun run typecheck
+```
+
+构建：
+
+```bash
+bun run build
+```
+
+构建后 Windows 安装包 hash：
+
+```text
+f5121184b0496cd978eb32f97d1def4a2dc7cbb2cc997189ee428fcd8c9fc5da
+```
+
+### 生产同步要求
+
+- 生产目录 `.git` 仍不可信，不要在服务器上依赖 `git pull`。
+- 本轮改动涉及前端源码、locale 和新增 `public/downloads` 大文件，继续使用**非删除式 rsync** 精确同步到 `/opt/new-api/app`。
+- 同步后执行：
+
+```bash
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api
+```
+
+- 本轮未修改 `Caddyfile`，因此无需 `force-recreate caddy`。

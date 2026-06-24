@@ -76,10 +76,21 @@ export function buildSidebarData(
               url: '/playground',
               icon: icons.flask,
             },
+          ],
+        },
+        {
+          id: 'data',
+          title: t('Data'),
+          items: [
             {
-              title: t('Chat'),
-              icon: icons.messageSquare,
-              type: 'chat-presets',
+              title: t('Dashboard'),
+              url: '/dashboard/models',
+              icon: icons.layoutDashboard,
+            },
+            {
+              title: t('Usage Logs'),
+              url: '/usage-logs/common',
+              icon: icons.fileText,
             },
           ],
         },
@@ -91,11 +102,6 @@ export function buildSidebarData(
               title: t('API Keys'),
               url: '/keys',
               icon: icons.key,
-            },
-            {
-              title: t('Usage Logs'),
-              url: '/usage-logs/common',
-              icon: icons.fileText,
             },
           ],
         },
@@ -134,18 +140,13 @@ export function buildSidebarData(
   return {
     navGroups: [
       {
-        id: 'chat',
-        title: t('Chat'),
+        id: 'ai-usage',
+        title: t('AI Usage'),
         items: [
           {
             title: t('Playground'),
             url: '/playground',
             icon: icons.flask,
-          },
-          {
-            title: t('Chat'),
-            icon: icons.messageSquare,
-            type: 'chat-presets',
           },
         ],
       },

@@ -4739,6 +4739,16 @@
     "Copy one-line terminal install": "Sao chép lệnh cài đặt Terminal một dòng",
     "Terminal command copied": "Đã sao chép lệnh Terminal",
     "Failed to copy terminal command": "Không thể sao chép lệnh Terminal",
-    "No available group for the new API key": "Không có nhóm khả dụng cho API key mới"
+    "No available group for the new API key": "Không có nhóm khả dụng cho API key mới",
+    "Data": "Dữ liệu",
+    "Codex one-click launcher": "Trình khởi động Codex một chạm",
+    "Codex one-click setup": "Thiết lập Codex một chạm",
+    "Download the Codex one-click launcher and connect it to your Yunbay API key.": "Tải trình khởi động Codex một chạm và kết nối nó với khóa API Yunbay của bạn.",
+    "Download one-click launcher": "Tải trình khởi động một chạm",
+    "What the Windows one-click launcher can do": "Trình khởi động Windows một chạm có thể làm gì",
+    "After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.": "Sau khi tải xuống và chạy bộ cài, hãy mở Yunbay Codex và dán khóa API Yunbay của bạn vào Quick Start. Ứng dụng sẽ tự động ghi cấu hình API tùy chỉnh và kết nối tới https://yunbay.xyz/v1. Ứng dụng cũng hỗ trợ quản lý nhà cung cấp mô hình, kiểm tra kết nối, truy vấn số dư/mức sử dụng và quản lý phiên Codex.",
+    "Download and run the Windows installer.": "Tải xuống và chạy bộ cài Windows.",
+    "Open Yunbay Codex and paste your Yunbay API key into Quick Start.": "Mở Yunbay Codex và dán khóa API Yunbay của bạn vào Quick Start.",
+    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "Lưu và bật, sau đó khởi động Codex, kiểm tra kết nối mô hình và quản lý các phiên lịch sử."
   }
 }
