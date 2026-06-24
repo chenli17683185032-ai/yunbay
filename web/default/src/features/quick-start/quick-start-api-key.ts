@@ -65,9 +65,9 @@ export function getQuickStartApiKeyGroup(options: {
     return { group: 'auto', crossGroupRetry: true }
   }
 
-  const defaultGroup = availableGroups.find((group) => group === 'default')
-  if (defaultGroup) {
-    return { group: defaultGroup, crossGroupRetry: false }
+  const nonDefaultGroup = availableGroups.find((group) => group !== 'default')
+  if (nonDefaultGroup) {
+    return { group: nonDefaultGroup, crossGroupRetry: false }
   }
 
   return {

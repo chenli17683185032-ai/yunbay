@@ -75,14 +75,14 @@ test('quick start API key group keeps the current user group ahead of auto', () 
   )
 })
 
-test('quick start API key group prefers default only when the user can select it', () => {
+test('quick start API key group prefers a non-default available group over default fallback', () => {
   assert.deepEqual(
     getQuickStartApiKeyGroup({
       defaultUseAutoGroup: false,
-      availableGroups: ['plus', 'default'],
+      availableGroups: ['default', 'plus'],
     }),
     {
-      group: 'default',
+      group: 'plus',
       crossGroupRetry: false,
     }
   )

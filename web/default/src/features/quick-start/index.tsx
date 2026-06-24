@@ -185,6 +185,13 @@ export function QuickStart() {
 
     setIsGeneratingApiKey(true)
     try {
+      let preferredGroup = user?.group
+      const selfResponse = await getSelf()
+      if (selfResponse?.success && selfResponse.data) {
+        setUser(selfResponse.data)
+        preferredGroup = selfResponse.data.group || preferredGroup
+      }
+
       const groupsResponse = await getUserGroups()
       if (!groupsResponse.success) {
         throw new Error(groupsResponse.message || t('Failed to create API key'))
@@ -192,7 +199,7 @@ export function QuickStart() {
       const quickStartGroup = getQuickStartApiKeyGroup({
         defaultUseAutoGroup: status?.default_use_auto_group === true,
         availableGroups: Object.keys(groupsResponse.data || {}),
-        preferredGroup: user?.group,
+        preferredGroup,
       })
       const result = await generateAndCopyQuickStartApiKey({
         createApiKey,
