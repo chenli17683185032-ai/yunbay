@@ -314,7 +314,7 @@ cb7ea3c9 fix: replace macos codex download bundle
   1. 当前站点 API endpoint（自动规范化为 `<server>/v1`）；
   2. 当前已选模型；
   3. 当前已生成 API Key 的脱敏值。
-- 只要用户点击一次 `一键导入`，浏览器就会直接打开 `ccswitch://v1/import?...`，把 `app=codex`、`name=Yunbay Codex`、`endpoint`、`apiKey`、`model`、`homepage` 与 `enabled=true` 一并传给本地 CC Switch。
+- 只要用户点击一次 `一键导入`，浏览器就会直接尝试打开 `ccswitch://v1/import?...`，把 `app=codex`、`name=Yunbay Codex`、`endpoint`、`apiKey`、`model`、`homepage` 与 `enabled=true` 一并传给本地 CC Switch。
 - 若尚未生成 API Key，导入按钮禁用并提示先生成 API Key；若没有可用模型，则提示未选择模型。
 - 主页宣传标语已去掉“不封号”。
 - macOS 下载入口指向云贝 Codex 构建产物；由于当前没有 Apple Developer ID / notarization，如 Gatekeeper 提示 App 损坏，引导用户使用页面中的 `xattr` 修复命令。
@@ -357,8 +357,8 @@ npx --yes tsx --test \
 2026-06-25 验证结果：
 
 ```text
-31 tests
-31 pass
+32 tests
+32 pass
 0 fail
 ```
 
