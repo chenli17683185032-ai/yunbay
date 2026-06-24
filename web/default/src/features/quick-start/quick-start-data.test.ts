@@ -23,6 +23,7 @@ import {
   QUICK_START_ENTER_DASHBOARD_PATH,
   codexDownloadCards,
   fallbackModels,
+  getDefaultQuickStartModelName,
   quickStartFullscreenPages,
   getModelTags,
   nextStepGuideKeys,
@@ -83,7 +84,9 @@ test('Codex download cards point to official macOS and Windows downloads', () =>
     /^curl -L "https:\/\/yunbay\.xyz\/downloads\/yunbay-codex-macos-\d{8}-\d{6}-[a-f0-9]{12}\.zip" -o \/tmp\/yunbay-codex\.zip && rm -rf "\$HOME\/Downloads\/Yunbay Codex\.app" && ditto -x -k \/tmp\/yunbay-codex\.zip "\$HOME\/Downloads" && xattr -dr com\.apple\.quarantine "\$HOME\/Downloads\/Yunbay Codex\.app" && open "\$HOME\/Downloads\/Yunbay Codex\.app"$/
   )
   assert.equal(
-    macos?.terminalInstallCommand?.includes(`https://yunbay.xyz${macos?.downloadHref}`),
+    macos?.terminalInstallCommand?.includes(
+      `https://yunbay.xyz${macos?.downloadHref}`
+    ),
     true
   )
   assert.equal(
@@ -94,6 +97,27 @@ test('Codex download cards point to official macOS and Windows downloads', () =>
 
 test('quick start does not synthesize fallback models when backend model square is empty', () => {
   assert.deepEqual(fallbackModels, [])
+})
+
+test('quick start defaults to GPT-5.5 when it is available', () => {
+  assert.equal(
+    getDefaultQuickStartModelName([
+      { model_name: 'deepseek-chat' },
+      { model_name: 'GPT-5.5' },
+      { model_name: 'gpt-4.1' },
+    ]),
+    'GPT-5.5'
+  )
+})
+
+test('quick start defaults to the first backend model when GPT-5.5 is unavailable', () => {
+  assert.equal(
+    getDefaultQuickStartModelName([
+      { model_name: 'deepseek-chat' },
+      { model_name: 'gpt-4.1' },
+    ]),
+    'deepseek-chat'
+  )
 })
 
 test('model tags include coding, image, and reasoning hints', () => {

@@ -103,8 +103,7 @@ export const purposeOptions: QuickStartPurpose[] = [
 const YUNBAY_CODEX_MACOS_DOWNLOAD_HREF =
   '/downloads/yunbay-codex-macos-20260624-174731-53933cc047c3.zip'
 const YUNBAY_CODEX_MACOS_DOWNLOAD_URL = `https://yunbay.xyz${YUNBAY_CODEX_MACOS_DOWNLOAD_HREF}`
-const YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH =
-  '$HOME/Downloads/Yunbay Codex.app'
+const YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH = '$HOME/Downloads/Yunbay Codex.app'
 
 export const codexDownloadCards: CodexDownloadCard[] = [
   {
@@ -125,6 +124,25 @@ export const codexDownloadCards: CodexDownloadCard[] = [
 ]
 
 export const fallbackModels: QuickStartModelLike[] = []
+
+function normalizeModelNameForDefault(modelName: string): string {
+  return modelName.toLowerCase().replace(/[\s_-]+/g, '')
+}
+
+export function isPreferredQuickStartModel(modelName: string): boolean {
+  return normalizeModelNameForDefault(modelName).includes('gpt5.5')
+}
+
+export function getDefaultQuickStartModelName(
+  models: QuickStartModelLike[]
+): string {
+  return (
+    models.find((model) => isPreferredQuickStartModel(model.model_name))
+      ?.model_name ||
+    models[0]?.model_name ||
+    ''
+  )
+}
 
 function includesAny(value: string, patterns: RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(value))

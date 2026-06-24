@@ -54,8 +54,36 @@ test('one-click API key creation reveals and copies the new key', async () => {
 
   assert.equal(createdPayload?.name, 'yunbay-quick-start-1700000000000')
   assert.equal(createdPayload?.unlimited_quota, true)
+  assert.equal(createdPayload?.group, 'default')
+  assert.equal(createdPayload?.cross_group_retry, false)
   assert.equal(result.fullKey, 'sk-generated-key')
   assert.equal(copiedText, 'sk-generated-key')
+})
+
+test('one-click API key creation follows the site auto-group default', async () => {
+  let createdPayload: ApiKeyFormData | undefined
+
+  await generateAndCopyQuickStartApiKey({
+    now: () => 1_700_000_000_000,
+    defaultGroup: 'auto',
+    crossGroupRetry: true,
+    createApiKey: async (payload) => {
+      createdPayload = payload
+      return { success: true }
+    },
+    searchApiKeys: async ({ keyword }) => ({
+      success: true,
+      data: { items: [{ id: 42, name: keyword || '' }] },
+    }),
+    fetchTokenKey: async () => ({
+      success: true,
+      data: { key: 'generated-key' },
+    }),
+    copyToClipboard: async () => true,
+  })
+
+  assert.equal(createdPayload?.group, 'auto')
+  assert.equal(createdPayload?.cross_group_retry, true)
 })
 
 test('one-click API key creation reports clipboard failure', async () => {

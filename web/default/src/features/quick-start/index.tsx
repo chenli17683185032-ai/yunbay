@@ -41,11 +41,14 @@ import {
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
+import { getSelf } from '@/lib/api'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { useStatus } from '@/hooks/use-status'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { YunbayLogo } from '@/components/layout/components/yunbay-logo'
 import {
@@ -59,11 +62,13 @@ import {
 } from '@/features/home/point-cloud'
 import { createApiKey, fetchTokenKey, searchApiKeys } from '@/features/keys/api'
 import { usePricingData } from '@/features/pricing/hooks'
+import { redeemTopupCode } from '@/features/wallet/api'
 import { generateAndCopyQuickStartApiKey } from './quick-start-api-key'
 import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
   codexDownloadCards,
+  getDefaultQuickStartModelName,
   getModelRateLabels,
   getModelTags,
   nextStepGuideKeys,
@@ -74,6 +79,7 @@ import {
   type QuickStartModelLike,
   type QuickStartPurposeId,
 } from './quick-start-data'
+import { redeemQuickStartCode } from './quick-start-redemption'
 
 const PURPOSE_ICONS = {
   'web-coding': Code2,
@@ -86,21 +92,22 @@ const QUICK_START_SECTION_IDS = quickStartFullscreenPages.map((page) => page.id)
 const COSMIC_AUTH_SURFACE_CLASS =
   'bg-[#030409] text-white [--accent:#121827] [--accent-foreground:#eef4ff] [--background:#030409] [--border:#1e2638] [--card:#070a14] [--card-foreground:#f7fbff] [--foreground:#f7fbff] [--muted:#0c1020] [--muted-foreground:#8f9bb8] [--primary:#eef4ff] [--primary-foreground:#030409] [--secondary:#121827] [--secondary-foreground:#eef4ff]'
 
-type QuickStartNavigationPath =
-  | QuickStartEnterDashboardPath
-  | '/wallet'
-  | '/wallet?section=redeem'
+type QuickStartNavigationPath = QuickStartEnterDashboardPath | '/wallet'
 
 export function QuickStart() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const user = useAuthStore((state) => state.auth.user)
+  const setUser = useAuthStore((state) => state.auth.setUser)
   const [selectedPurposeId, setSelectedPurposeId] =
     useState<QuickStartPurposeId>(QUICK_START_DEFAULT_PURPOSE)
   const [selectedModelName, setSelectedModelName] = useState<string>('')
   const [generatedApiKey, setGeneratedApiKey] = useState('')
   const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
+  const [redemptionCode, setRedemptionCode] = useState('')
+  const [isRedeemingCode, setIsRedeemingCode] = useState(false)
   const [morphSignal, setMorphSignal] = useState(0)
+  const { status } = useStatus()
   const pricing = usePricingData()
 
   const modelList = useMemo(
@@ -111,12 +118,22 @@ export function QuickStart() {
   const selectedPurpose =
     purposeOptions.find((item) => item.id === selectedPurposeId) ||
     purposeOptions[0]
-  const activeModelName = selectedModelName || modelList[0]?.model_name || ''
+  const defaultModelName = useMemo(
+    () => getDefaultQuickStartModelName(modelList),
+    [modelList]
+  )
+  const activeModelName =
+    selectedModelName &&
+    modelList.some((model) => model.model_name === selectedModelName)
+      ? selectedModelName
+      : defaultModelName
   const selectedModel =
     modelList.find((model) => model.model_name === activeModelName) ||
     modelList[0]
   const currentBalance = Math.max(Number(user?.quota) || 0, 0)
   const faceState = getFaceStateForQuota(user?.quota)
+  const defaultApiKeyGroup =
+    status?.default_use_auto_group === true ? 'auto' : 'default'
 
   const handlePageChange = useCallback(
     (activeIndex: number, previousIndex: number) => {
@@ -138,9 +155,6 @@ export function QuickStart() {
           return
         case '/wallet':
           navigate({ to: '/wallet' })
-          return
-        case '/wallet?section=redeem':
-          navigate({ to: '/wallet', search: { section: 'redeem' } })
           return
       }
     },
@@ -176,6 +190,8 @@ export function QuickStart() {
         searchApiKeys,
         fetchTokenKey,
         copyToClipboard,
+        defaultGroup: defaultApiKeyGroup,
+        crossGroupRetry: defaultApiKeyGroup === 'auto',
       })
       setGeneratedApiKey(result.fullKey)
       toast.success(t('Already copied to clipboard'))
@@ -185,6 +201,34 @@ export function QuickStart() {
       )
     } finally {
       setIsGeneratingApiKey(false)
+    }
+  }
+
+  const handleRedeemCode = async () => {
+    setIsRedeemingCode(true)
+    try {
+      const result = await redeemQuickStartCode(redemptionCode, {
+        redeemTopupCode,
+        refreshSelf: async () => {
+          const response = await getSelf()
+          if (response?.success && response.data) {
+            setUser(response.data)
+          }
+        },
+      })
+
+      toast.success(
+        t('Redemption successful! Added: {{quota}}', {
+          quota: formatQuota(result.quotaAdded),
+        })
+      )
+      setRedemptionCode('')
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? t(error.message) : t('Redemption failed')
+      )
+    } finally {
+      setIsRedeemingCode(false)
     }
   }
 
@@ -304,6 +348,7 @@ export function QuickStart() {
                   <button
                     key={model.model_name}
                     type='button'
+                    aria-pressed={selected}
                     onClick={() => setSelectedModelName(model.model_name)}
                     className={cn(
                       'rounded-[1.5rem] border p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-all duration-300 active:scale-[0.98]',
@@ -394,14 +439,32 @@ export function QuickStart() {
               <p className='mt-2 text-sm leading-7 text-white/54'>
                 {t('Use a redemption code to add balance to your account.')}
               </p>
-              <Button
-                variant='outline'
-                className='mt-6 w-full gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-                onClick={() => navigateToPath('/wallet?section=redeem')}
-              >
-                <Sparkles className='size-4' />
-                {t('Use redemption code')}
-              </Button>
+              <div className='mt-6 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]'>
+                <Input
+                  value={redemptionCode}
+                  onChange={(event) => setRedemptionCode(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !isRedeemingCode) {
+                      void handleRedeemCode()
+                    }
+                  }}
+                  placeholder={t('Enter your redemption code')}
+                  className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white placeholder:text-white/34 focus-visible:border-white/28 focus-visible:ring-white/18'
+                />
+                <Button
+                  variant='outline'
+                  className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
+                  disabled={isRedeemingCode}
+                  onClick={handleRedeemCode}
+                >
+                  {isRedeemingCode ? (
+                    <Loader2 className='size-4 animate-spin' />
+                  ) : (
+                    <Sparkles className='size-4' />
+                  )}
+                  {t('Use redemption code')}
+                </Button>
+              </div>
             </div>
           </div>
         </QuickStartPage>

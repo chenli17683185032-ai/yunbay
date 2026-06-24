@@ -21,7 +21,7 @@ export const publicLandingBrand = {
   slug: 'yunbay',
   displayName: '云贝 yunbay',
   homeHeadline: '永续的 Vibe Coding 助手',
-  homeSubheadline: '无需担心掉线、封号。',
+  homeSubheadline: '无需担心掉线。',
   philosophy: '我们不生产水，我们只是大自然的搬运工。',
   mission: '为中国的 token 出海贡献一份自己的力量。',
   harborMeaning: '云是汉字云，Bay 是英语港湾，云贝就是网上的 AI 港口。',

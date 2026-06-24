@@ -25,6 +25,8 @@ type ApiResult = {
 
 type QuickStartApiKeyDependencies = {
   now?: () => number
+  defaultGroup?: string
+  crossGroupRetry?: boolean
   createApiKey: (payload: ApiKeyFormData) => Promise<ApiResult>
   searchApiKeys: (params: {
     keyword: string
@@ -39,11 +41,15 @@ type QuickStartApiKeyDependencies = {
   copyToClipboard: (text: string) => Promise<boolean>
 }
 
+const DEFAULT_QUICK_START_API_KEY_GROUP = 'default'
+
 export async function generateAndCopyQuickStartApiKey(
   dependencies: QuickStartApiKeyDependencies
 ): Promise<{ name: string; fullKey: string }> {
   const now = dependencies.now || Date.now
   const name = `yunbay-quick-start-${now()}`
+  const group =
+    dependencies.defaultGroup?.trim() || DEFAULT_QUICK_START_API_KEY_GROUP
 
   const created = await dependencies.createApiKey({
     name,
@@ -53,8 +59,9 @@ export async function generateAndCopyQuickStartApiKey(
     model_limits_enabled: false,
     model_limits: '',
     allow_ips: '',
-    group: '',
-    cross_group_retry: false,
+    group,
+    cross_group_retry:
+      group === 'auto' ? dependencies.crossGroupRetry === true : false,
   })
 
   if (!created.success) {

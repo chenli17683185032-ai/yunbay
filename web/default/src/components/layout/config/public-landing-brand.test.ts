@@ -23,14 +23,8 @@ import { publicLandingBrand } from './public-landing-brand.config'
 test('public landing brand uses the yunbay customer-facing identity', () => {
   assert.equal(publicLandingBrand.name, '云贝')
   assert.equal(publicLandingBrand.slug, 'yunbay')
-  assert.equal(
-    publicLandingBrand.homeHeadline,
-    '永续的 Vibe Coding 助手'
-  )
-  assert.equal(
-    publicLandingBrand.homeSubheadline,
-    '无需担心掉线、封号。'
-  )
+  assert.equal(publicLandingBrand.homeHeadline, '永续的 Vibe Coding 助手')
+  assert.equal(publicLandingBrand.homeSubheadline, '无需担心掉线。')
   assert.equal(
     publicLandingBrand.philosophy,
     '我们不生产水，我们只是大自然的搬运工。'
