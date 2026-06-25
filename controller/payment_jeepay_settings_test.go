@@ -20,6 +20,13 @@ func setupJeepaySettingsTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
+	origUsingSQLite := common.UsingSQLite
+	origUsingMySQL := common.UsingMySQL
+	origUsingPostgreSQL := common.UsingPostgreSQL
+	origRedisEnabled := common.RedisEnabled
+	origDB := model.DB
+	origLOGDB := model.LOG_DB
+
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
@@ -34,6 +41,12 @@ func setupJeepaySettingsTestDB(t *testing.T) *gorm.DB {
 	model.InitOptionMap()
 
 	t.Cleanup(func() {
+		common.UsingSQLite = origUsingSQLite
+		common.UsingMySQL = origUsingMySQL
+		common.UsingPostgreSQL = origUsingPostgreSQL
+		common.RedisEnabled = origRedisEnabled
+		model.DB = origDB
+		model.LOG_DB = origLOGDB
 		sqlDB, err := db.DB()
 		if err == nil {
 			_ = sqlDB.Close()
@@ -127,4 +140,43 @@ func TestSaveJeepaySettingsKeepsExistingSecretWhenEmpty(t *testing.T) {
 	appSecret, ok := common.OptionMap["JeepayAppSecret"]
 	require.True(t, ok)
 	require.Equal(t, "old_secret", common.Interface2String(appSecret))
+}
+
+func TestSaveJeepaySettingsUpdatesSecretAtomicallyWithOtherFields(t *testing.T) {
+	setupJeepaySettingsTestDB(t)
+
+	require.NoError(t, model.UpdateOption("JeepayAppSecret", "old_secret"))
+
+	reqBody := `{
+		"JeepayEnabled": false,
+		"JeepayAlipayEnabled": true,
+		"JeepayBaseUrl": "https://atomic.example.com",
+		"JeepayMchNo": "mch_atomic",
+		"JeepayAppId": "app_atomic",
+		"JeepayAppSecret": "new_secret",
+		"JeepayNotifyUrl": "https://atomic.example.com/notify",
+		"JeepayReturnUrl": "https://atomic.example.com/return",
+		"JeepaySubject": "原子更新",
+		"JeepayBody": "原子更新正文",
+		"JeepayTimeoutMs": 12000,
+		"JeepayAliDisplayName": "支付宝原子",
+		"JeepayAliDisplayColor": "rgba(7, 8, 9, 1)"
+	}`
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/system-settings/payment/jeepay", strings.NewReader(reqBody))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	SaveJeepaySettings(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeTestResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+
+	require.Equal(t, "new_secret", setting.JeepayAppSecret)
+	require.Equal(t, "https://atomic.example.com", setting.JeepayBaseUrl)
+
+	appSecret, ok := common.OptionMap["JeepayAppSecret"]
+	require.True(t, ok)
+	require.Equal(t, "new_secret", common.Interface2String(appSecret))
 }

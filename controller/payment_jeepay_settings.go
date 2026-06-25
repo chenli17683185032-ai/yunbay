@@ -97,16 +97,13 @@ func SaveJeepaySettings(c *gin.Context) {
 		"JeepayAliDisplayColor": req.JeepayAliDisplayColor,
 	}
 
+	if strings.TrimSpace(req.JeepayAppSecret) != "" {
+		updates["JeepayAppSecret"] = req.JeepayAppSecret
+	}
+
 	if err := model.UpdateOptionsBulk(updates); err != nil {
 		common.ApiError(c, err)
 		return
-	}
-
-	if strings.TrimSpace(req.JeepayAppSecret) != "" {
-		if err := model.UpdateOption("JeepayAppSecret", req.JeepayAppSecret); err != nil {
-			common.ApiError(c, err)
-			return
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
