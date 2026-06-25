@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import * as React from 'react'
 import * as z from 'zod'
+import { Save } from 'lucide-react'
 import { useForm, type Resolver } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -38,7 +39,6 @@ import {
   SettingsForm,
   SettingsSwitchField,
 } from '../components/settings-form-layout'
-import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import type { JeepayPaymentSettings } from '../types'
 import { safeNumberFieldProps } from '../utils/numeric-field'
@@ -49,6 +49,8 @@ import {
   normalizeJeepayPaymentSettings,
   updateJeepayPaymentSettings,
 } from './jeepay-api'
+
+const APP_SECRET_CONFIGURED_HINT = '已配置，留空则不修改'
 
 const createJeepaySchema = (t: (key: string) => string) =>
   z.object({
@@ -78,6 +80,18 @@ const createJeepaySchema = (t: (key: string) => string) =>
     JeepayTimeoutMs: z.coerce.number().int().min(0),
     JeepayAliDisplayName: z.string(),
     JeepayAliDisplayColor: z.string(),
+  }).superRefine((values, ctx) => {
+    if (
+      values.JeepayEnabled &&
+      !values.JeepayAppSecretConfigured &&
+      !values.JeepayAppSecret.trim()
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JeepayAppSecret'],
+        message: t('App secret is required when enabling Jeepay'),
+      })
+    }
   })
 
 type JeepaySettingsFormValues = z.infer<ReturnType<typeof createJeepaySchema>>
@@ -113,37 +127,43 @@ export function JeepayAlipaySettingsSection() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const jeepaySchema = React.useMemo(() => createJeepaySchema(t), [t])
+  const hasInitializedRef = React.useRef(false)
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['jeepay-payment-settings'],
     queryFn: getJeepayPaymentSettings,
   })
 
-  const resolvedDefaults = React.useMemo(
+  const queryDefaults = React.useMemo(
     () => data?.data ?? defaultJeepayPaymentSettings,
     [data?.data]
   )
+  const [baselineValues, setBaselineValues] =
+    React.useState<JeepayPaymentSettings>(defaultJeepayPaymentSettings)
 
   const form = useForm<JeepaySettingsFormValues>({
     resolver: zodResolver(jeepaySchema) as Resolver<JeepaySettingsFormValues>,
-    defaultValues: resolvedDefaults,
+    defaultValues: baselineValues,
   })
 
   React.useEffect(() => {
-    form.reset(resolvedDefaults)
-  }, [form, resolvedDefaults])
+    if (!data?.data) return
+
+    if (!hasInitializedRef.current) {
+      hasInitializedRef.current = true
+      setBaselineValues(queryDefaults)
+      form.reset(queryDefaults)
+      return
+    }
+
+    if (!form.formState.isDirty) {
+      setBaselineValues(queryDefaults)
+      form.reset(queryDefaults)
+    }
+  }, [data?.data, form, form.formState.isDirty, queryDefaults])
 
   const saveMutation = useMutation({
     mutationFn: updateJeepayPaymentSettings,
-    onSuccess: (body) => {
-      if (body.success) {
-        queryClient.invalidateQueries({ queryKey: ['jeepay-payment-settings'] })
-        toast.success(t('Jeepay / Alipay recharge settings saved'))
-        return
-      }
-
-      toast.error(body.message || t('Failed to save Jeepay settings'))
-    },
     onError: (mutationError: Error) => {
       toast.error(mutationError.message || t('Failed to save Jeepay settings'))
     },
@@ -151,19 +171,40 @@ export function JeepayAlipaySettingsSection() {
 
   const onSubmit = async (values: JeepaySettingsFormValues) => {
     const current = normalizeJeepayPaymentSettings(values)
-    const initial = normalizeJeepayPaymentSettings(resolvedDefaults)
+    const initial = normalizeJeepayPaymentSettings(baselineValues)
 
     if (areJeepaySettingsUnchanged(current, initial)) {
       toast.info(t('No changes to save'))
       return
     }
 
-    await saveMutation.mutateAsync(buildJeepayPaymentSettingsPayload(current))
+    const body = await saveMutation.mutateAsync(
+      buildJeepayPaymentSettingsPayload(current)
+    )
+
+    if (!body.success) {
+      toast.error(body.message || t('Failed to save Jeepay settings'))
+      return
+    }
+
+    const nextBaseline: JeepayPaymentSettings = {
+      ...current,
+      JeepayAppSecret: '',
+      JeepayAppSecretConfigured:
+        current.JeepayAppSecretConfigured || current.JeepayAppSecret.length > 0,
+    }
+
+    setBaselineValues(nextBaseline)
+    form.reset(nextBaseline)
+    queryClient.invalidateQueries({ queryKey: ['jeepay-payment-settings'] })
+    toast.success(t('Jeepay / Alipay recharge settings saved'))
   }
 
-  const appSecretPlaceholder = resolvedDefaults.JeepayAppSecretConfigured
-    ? t('已配置，留空则不修改')
+  const appSecretPlaceholder = baselineValues.JeepayAppSecretConfigured
+    ? APP_SECRET_CONFIGURED_HINT
     : t('Enter Jeepay app secret')
+
+  const isSaving = saveMutation.isPending || form.formState.isSubmitting
 
   return (
     <SettingsSection title={t('Jeepay / Alipay Recharge')}>
@@ -209,12 +250,6 @@ export function JeepayAlipaySettingsSection() {
               onSubmit={form.handleSubmit(onSubmit)}
               autoComplete='off'
             >
-              <SettingsPageFormActions
-                onSave={form.handleSubmit(onSubmit)}
-                isSaving={saveMutation.isPending}
-                saveLabel='Save Jeepay / Alipay recharge settings'
-              />
-
               <FormField
                 control={form.control}
                 name='JeepayEnabled'
@@ -327,8 +362,8 @@ export function JeepayAlipaySettingsSection() {
                       />
                     </FormControl>
                     <FormDescription>
-                      {resolvedDefaults.JeepayAppSecretConfigured
-                        ? t('已配置，留空则不修改')
+                      {baselineValues.JeepayAppSecretConfigured
+                        ? APP_SECRET_CONFIGURED_HINT
                         : t('Required when first configuring Jeepay.')}
                     </FormDescription>
                     <FormMessage />
@@ -491,6 +526,22 @@ export function JeepayAlipaySettingsSection() {
                   </FormItem>
                 )}
               />
+
+              <div
+                data-settings-form-span='full'
+                className='flex justify-end border-t pt-4'
+              >
+                <Button type='submit' size='sm' disabled={isSaving}>
+                  <Save data-icon='inline-start' />
+                  <span>
+                    {t(
+                      isSaving
+                        ? 'Saving Jeepay / Alipay recharge settings...'
+                        : 'Save Jeepay / Alipay recharge settings'
+                    )}
+                  </span>
+                </Button>
+              </div>
             </SettingsForm>
           </Form>
         ) : null}
