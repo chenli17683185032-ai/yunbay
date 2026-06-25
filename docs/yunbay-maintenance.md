@@ -651,3 +651,28 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ```
 
 - 本轮未修改 `Caddyfile`，因此无需 `force-recreate caddy`。
+
+
+### 2026-06-25 生产同步结果
+
+本轮修复已同步到生产环境。公开记录只保留可复现事实，不记录任何 SSH 私钥、API key、cookie、session 或环境变量值。
+
+- GitHub 分支：`codex/fix-usage-logs-stat-null`
+- 回归修复提交：`a3634603 fix: restore quick start import and overview panels`
+- 生产同步基线：包含 `a3634603` 的分支 HEAD（同步时为 `fabba3b7`）
+- 同步方式：非删除式 `rsync` 到 `/opt/new-api/app/`
+- 重建方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api`
+- 重启方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api`
+
+生产冒烟结果：
+
+```text
+yunbay-caddy:   Up / healthy
+yunbay-new-api: Up / healthy
+https://yunbay.xyz/                                                         200
+https://yunbay.xyz/api/status                                              200
+https://yunbay.xyz/quick-start                                             200
+https://yunbay.xyz/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe 200
+```
+
+本次生产验证确认：快速启动页与 Windows 下载入口可访问，后端状态接口可访问，`new-api` 与 `caddy` 容器均为 healthy。
