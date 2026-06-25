@@ -46,6 +46,20 @@ func isCreemWebhookEnabled() bool {
 	return isCreemTopUpEnabled() && isCreemWebhookConfigured()
 }
 
+func isJeepayAlipayTopUpEnabled() bool {
+	if !isPaymentComplianceConfirmed() {
+		return false
+	}
+	if !setting.JeepayEnabled || !setting.JeepayAlipayEnabled {
+		return false
+	}
+
+	return strings.TrimSpace(setting.JeepayBaseUrl) != "" &&
+		strings.TrimSpace(setting.JeepayMchNo) != "" &&
+		strings.TrimSpace(setting.JeepayAppId) != "" &&
+		strings.TrimSpace(setting.JeepayAppSecret) != ""
+}
+
 func isWaffoTopUpEnabled() bool {
 	if !isPaymentComplianceConfirmed() {
 		return false

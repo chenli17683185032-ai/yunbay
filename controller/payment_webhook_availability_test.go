@@ -167,3 +167,35 @@ func TestEpayWebhookEnabledRequiresTopUpAndWebhookConfig(t *testing.T) {
 	operation_setting.PayMethods = nil
 	require.False(t, isEpayWebhookEnabled())
 }
+
+func TestJeepayAlipayTopUpEnabledRequiresConfig(t *testing.T) {
+	confirmPaymentComplianceForTest(t)
+	originalJeepayEnabled := setting.JeepayEnabled
+	originalJeepayAlipayEnabled := setting.JeepayAlipayEnabled
+	originalJeepayBaseURL := setting.JeepayBaseUrl
+	originalJeepayMchNo := setting.JeepayMchNo
+	originalJeepayAppID := setting.JeepayAppId
+	originalJeepayAppSecret := setting.JeepayAppSecret
+	t.Cleanup(func() {
+		setting.JeepayEnabled = originalJeepayEnabled
+		setting.JeepayAlipayEnabled = originalJeepayAlipayEnabled
+		setting.JeepayBaseUrl = originalJeepayBaseURL
+		setting.JeepayMchNo = originalJeepayMchNo
+		setting.JeepayAppId = originalJeepayAppID
+		setting.JeepayAppSecret = originalJeepayAppSecret
+	})
+
+	setting.JeepayEnabled = true
+	setting.JeepayAlipayEnabled = true
+	setting.JeepayBaseUrl = "https://jeepay.example.com"
+	setting.JeepayMchNo = "mch_123"
+	setting.JeepayAppId = "app_123"
+	setting.JeepayAppSecret = ""
+	require.False(t, isJeepayAlipayTopUpEnabled())
+
+	setting.JeepayAppSecret = "secret_123"
+	require.True(t, isJeepayAlipayTopUpEnabled())
+
+	setting.JeepayAppId = ""
+	require.False(t, isJeepayAlipayTopUpEnabled())
+}

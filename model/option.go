@@ -91,6 +91,19 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["JeepayEnabled"] = strconv.FormatBool(setting.JeepayEnabled)
+	common.OptionMap["JeepayAlipayEnabled"] = strconv.FormatBool(setting.JeepayAlipayEnabled)
+	common.OptionMap["JeepayBaseUrl"] = setting.JeepayBaseUrl
+	common.OptionMap["JeepayMchNo"] = setting.JeepayMchNo
+	common.OptionMap["JeepayAppId"] = setting.JeepayAppId
+	common.OptionMap["JeepayAppSecret"] = setting.JeepayAppSecret
+	common.OptionMap["JeepayNotifyUrl"] = setting.JeepayNotifyUrl
+	common.OptionMap["JeepayReturnUrl"] = setting.JeepayReturnUrl
+	common.OptionMap["JeepaySubject"] = setting.JeepaySubject
+	common.OptionMap["JeepayBody"] = setting.JeepayBody
+	common.OptionMap["JeepayTimeoutMs"] = strconv.Itoa(setting.JeepayTimeoutMs)
+	common.OptionMap["JeepayAliDisplayName"] = setting.JeepayAliDisplayName
+	common.OptionMap["JeepayAliDisplayColor"] = setting.JeepayAliDisplayColor
 	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
 	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
 	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
@@ -356,6 +369,10 @@ func updateOptionMap(key string, value string) (err error) {
 			system_setting.WorkerAllowHttpImageRequestEnabled = boolValue
 		case "DefaultUseAutoGroup":
 			setting.DefaultUseAutoGroup = boolValue
+		case "JeepayEnabled":
+			setting.JeepayEnabled = boolValue
+		case "JeepayAlipayEnabled":
+			setting.JeepayAlipayEnabled = boolValue
 		case "ExposeRatioEnabled":
 			ratio_setting.SetExposeRatioEnabled(boolValue)
 		}
@@ -418,6 +435,28 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "JeepayBaseUrl":
+		setting.JeepayBaseUrl = value
+	case "JeepayMchNo":
+		setting.JeepayMchNo = value
+	case "JeepayAppId":
+		setting.JeepayAppId = value
+	case "JeepayAppSecret":
+		setting.JeepayAppSecret = value
+	case "JeepayNotifyUrl":
+		setting.JeepayNotifyUrl = value
+	case "JeepayReturnUrl":
+		setting.JeepayReturnUrl = value
+	case "JeepaySubject":
+		setting.JeepaySubject = value
+	case "JeepayBody":
+		setting.JeepayBody = value
+	case "JeepayTimeoutMs":
+		setting.JeepayTimeoutMs, _ = strconv.Atoi(value)
+	case "JeepayAliDisplayName":
+		setting.JeepayAliDisplayName = value
+	case "JeepayAliDisplayColor":
+		setting.JeepayAliDisplayColor = value
 	case "WaffoEnabled":
 		setting.WaffoEnabled = value == "true"
 	case "WaffoApiKey":
