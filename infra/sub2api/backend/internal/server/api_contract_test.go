@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -367,6 +368,39 @@ func TestAPIContracts(t *testing.T) {
 						"updated_at": "2025-01-02T03:04:05Z"
 					}
 				]
+			}`,
+		},
+		{
+			name:       "GET /api/v1/channels/available",
+			method:     http.MethodGet,
+			path:       "/api/v1/channels/available",
+			wantStatus: http.StatusOK,
+			wantJSON: `{
+				"code": 0,
+				"message": "success",
+				"data": []
+			}`,
+		},
+		{
+			name:       "GET /api/v1/channel-monitors",
+			method:     http.MethodGet,
+			path:       "/api/v1/channel-monitors",
+			wantStatus: http.StatusOK,
+			wantJSON: `{
+				"code": 0,
+				"message": "success",
+				"data": {
+					"items": []
+				}
+			}`,
+		},
+		{
+			name:       "GET /health",
+			method:     http.MethodGet,
+			path:       "/health",
+			wantStatus: http.StatusOK,
+			wantJSON: `{
+				"status": "ok"
 			}`,
 		},
 		{
@@ -1290,12 +1324,18 @@ func newContractDeps(t *testing.T) *contractDeps {
 	redeemHandler := handler.NewRedeemHandler(redeemService)
 
 	settingRepo := newStubSettingRepo()
+	settingRepo.SetAll(map[string]string{
+		service.SettingKeyChannelMonitorEnabled:    "false",
+		service.SettingKeyAvailableChannelsEnabled: "false",
+	})
 	settingService := service.NewSettingService(settingRepo, cfg)
 
 	adminService := service.NewAdminService(userRepo, groupRepo, &accountRepo, proxyRepo, apiKeyRepo, redeemRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	authHandler := handler.NewAuthHandler(cfg, nil, userService, settingService, nil, redeemService, nil, nil)
 	apiKeyHandler := handler.NewAPIKeyHandler(apiKeyService)
 	usageHandler := handler.NewUsageHandler(usageService, apiKeyService, nil, nil)
+	availableChannelHandler := handler.NewAvailableChannelHandler(nil, apiKeyService, settingService)
+	channelMonitorUserHandler := handler.NewChannelMonitorUserHandler(nil, settingService)
 	adminSettingHandler := adminhandler.NewSettingHandler(settingService, nil, nil, nil, nil, nil, nil)
 	adminAccountHandler := adminhandler.NewAccountHandler(adminService, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
@@ -1329,6 +1369,8 @@ func newContractDeps(t *testing.T) *contractDeps {
 	v1Keys.GET("/keys", apiKeyHandler.List)
 	v1Keys.POST("/keys", apiKeyHandler.Create)
 	v1Keys.GET("/groups/available", apiKeyHandler.GetAvailableGroups)
+	v1Keys.GET("/channels/available", availableChannelHandler.List)
+	v1Keys.GET("/channel-monitors", channelMonitorUserHandler.List)
 
 	v1Usage := v1.Group("")
 	v1Usage.Use(jwtAuth)
@@ -1347,6 +1389,8 @@ func newContractDeps(t *testing.T) *contractDeps {
 	v1Admin.Use(adminAuth)
 	v1Admin.GET("/settings", adminSettingHandler.GetSettings)
 	v1Admin.POST("/accounts/bulk-update", adminAccountHandler.BulkUpdate)
+
+	routes.RegisterCommonRoutes(r)
 
 	return &contractDeps{
 		now:         now,
