@@ -162,7 +162,7 @@ export function JeepayAlipaySettingsSection() {
   }
 
   const appSecretPlaceholder = resolvedDefaults.JeepayAppSecretConfigured
-    ? t('Configured. Leave blank to keep the existing secret.')
+    ? t('已配置，留空则不修改')
     : t('Enter Jeepay app secret')
 
   return (
@@ -328,9 +328,7 @@ export function JeepayAlipaySettingsSection() {
                     </FormControl>
                     <FormDescription>
                       {resolvedDefaults.JeepayAppSecretConfigured
-                        ? t(
-                            'Configured. Leave blank to keep the existing secret.'
-                          )
+                        ? t('已配置，留空则不修改')
                         : t('Required when first configuring Jeepay.')}
                     </FormDescription>
                     <FormMessage />
