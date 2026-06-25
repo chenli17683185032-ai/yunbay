@@ -73,6 +73,24 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	if isJeepayAlipayTopUpEnabled() {
+		hasJeepayAlipay := false
+		for _, method := range payMethods {
+			if method["type"] == jeepayAliCashierMethod {
+				hasJeepayAlipay = true
+				break
+			}
+		}
+
+		if !hasJeepayAlipay {
+			payMethods = append(payMethods, map[string]string{
+				"name":  setting.JeepayAliDisplayName,
+				"type":  jeepayAliCashierMethod,
+				"color": setting.JeepayAliDisplayColor,
+			})
+		}
+	}
+
 	// 如果启用了 Waffo 支付，添加到支付方法列表
 	enableWaffo := isWaffoTopUpEnabled()
 	if enableWaffo {

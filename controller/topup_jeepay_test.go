@@ -1,0 +1,217 @@
+package controller
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+func setupJeepayTopupControllerTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	common.OptionMapRWMutex.RLock()
+	origOptionMap := common.OptionMap
+	common.OptionMapRWMutex.RUnlock()
+	origUsingSQLite := common.UsingSQLite
+	origUsingMySQL := common.UsingMySQL
+	origUsingPostgreSQL := common.UsingPostgreSQL
+	origRedisEnabled := common.RedisEnabled
+	origDB := model.DB
+	origLOGDB := model.LOG_DB
+	origJeepayEnabled := setting.JeepayEnabled
+	origJeepayAlipayEnabled := setting.JeepayAlipayEnabled
+	origJeepayBaseURL := setting.JeepayBaseUrl
+	origJeepayMchNo := setting.JeepayMchNo
+	origJeepayAppID := setting.JeepayAppId
+	origJeepayAppSecret := setting.JeepayAppSecret
+	origJeepayNotifyURL := setting.JeepayNotifyUrl
+	origJeepayReturnURL := setting.JeepayReturnUrl
+	origJeepaySubject := setting.JeepaySubject
+	origJeepayBody := setting.JeepayBody
+	origJeepayTimeoutMs := setting.JeepayTimeoutMs
+	origJeepayAliDisplayName := setting.JeepayAliDisplayName
+	origJeepayAliDisplayColor := setting.JeepayAliDisplayColor
+	origPayMethods := operation_setting.PayMethods
+	origMinTopup := operation_setting.MinTopUp
+	paymentSetting := operation_setting.GetPaymentSetting()
+	origComplianceConfirmed := paymentSetting.ComplianceConfirmed
+	origComplianceTermsVersion := paymentSetting.ComplianceTermsVersion
+
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	common.RedisEnabled = false
+
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.User{}, &model.TopUp{}, &model.Log{}))
+	model.InitOptionMap()
+	operation_setting.PayMethods = []map[string]string{}
+	operation_setting.MinTopUp = 1
+	paymentSetting.ComplianceConfirmed = true
+	paymentSetting.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+
+	t.Cleanup(func() {
+		common.UsingSQLite = origUsingSQLite
+		common.UsingMySQL = origUsingMySQL
+		common.UsingPostgreSQL = origUsingPostgreSQL
+		common.RedisEnabled = origRedisEnabled
+		model.DB = origDB
+		model.LOG_DB = origLOGDB
+		setting.JeepayEnabled = origJeepayEnabled
+		setting.JeepayAlipayEnabled = origJeepayAlipayEnabled
+		setting.JeepayBaseUrl = origJeepayBaseURL
+		setting.JeepayMchNo = origJeepayMchNo
+		setting.JeepayAppId = origJeepayAppID
+		setting.JeepayAppSecret = origJeepayAppSecret
+		setting.JeepayNotifyUrl = origJeepayNotifyURL
+		setting.JeepayReturnUrl = origJeepayReturnURL
+		setting.JeepaySubject = origJeepaySubject
+		setting.JeepayBody = origJeepayBody
+		setting.JeepayTimeoutMs = origJeepayTimeoutMs
+		setting.JeepayAliDisplayName = origJeepayAliDisplayName
+		setting.JeepayAliDisplayColor = origJeepayAliDisplayColor
+		operation_setting.PayMethods = origPayMethods
+		operation_setting.MinTopUp = origMinTopup
+		paymentSetting.ComplianceConfirmed = origComplianceConfirmed
+		paymentSetting.ComplianceTermsVersion = origComplianceTermsVersion
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = origOptionMap
+		common.OptionMapRWMutex.Unlock()
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	return db
+}
+
+func insertJeepayTopupTestUser(t *testing.T, id int, quota int) {
+	t.Helper()
+	require.NoError(t, model.DB.Create(&model.User{Id: id, Username: fmt.Sprintf("user_%d", id), Status: common.UserStatusEnabled, Quota: quota}).Error)
+}
+
+func TestRequestJeepayPayRejectsUnsupportedMethod(t *testing.T) {
+	setupJeepayTopupControllerTestDB(t)
+	insertJeepayTopupTestUser(t, 1001, 0)
+	setting.JeepayEnabled = true
+	setting.JeepayAlipayEnabled = true
+	setting.JeepayBaseUrl = "https://jeepay.example.com"
+	setting.JeepayMchNo = "mch_123"
+	setting.JeepayAppId = "app_123"
+	setting.JeepayAppSecret = "secret_123"
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1001)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/user/jeepay/pay", strings.NewReader(`{"amount":100,"payment_method":"alipay"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	RequestJeepayPay(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeTestResponse(t, recorder)
+	require.Equal(t, false, body["success"])
+	require.Equal(t, "支付方式不存在", body["message"])
+}
+
+func TestGetTopUpInfoIncludesJeepayAlipayMethod(t *testing.T) {
+	setupJeepayTopupControllerTestDB(t)
+	setting.JeepayEnabled = true
+	setting.JeepayAlipayEnabled = true
+	setting.JeepayBaseUrl = "https://jeepay.example.com"
+	setting.JeepayMchNo = "mch_123"
+	setting.JeepayAppId = "app_123"
+	setting.JeepayAppSecret = "secret_123"
+	setting.JeepayAliDisplayName = "支付宝扫码"
+	setting.JeepayAliDisplayColor = "rgba(0, 112, 255, 1)"
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/user/topup/info", nil)
+
+	GetTopUpInfo(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeTestResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+
+	data := body["data"].(map[string]interface{})
+	methods := data["pay_methods"].([]interface{})
+	found := false
+	for _, item := range methods {
+		method := item.(map[string]interface{})
+		if method["type"] == "jeepay_ali_cashier" {
+			found = true
+			require.Equal(t, "支付宝扫码", method["name"])
+			require.Equal(t, "rgba(0, 112, 255, 1)", method["color"])
+		}
+	}
+	require.True(t, found, "expected Jeepay Alipay method in topup info")
+}
+
+func TestJeepayNotifyReturnsSuccessWhenRechargeSucceeds(t *testing.T) {
+	setupJeepayTopupControllerTestDB(t)
+	insertJeepayTopupTestUser(t, 1002, 0)
+	setting.JeepayEnabled = true
+	setting.JeepayAlipayEnabled = true
+	setting.JeepayBaseUrl = "https://jeepay.example.com"
+	setting.JeepayMchNo = "mch_123"
+	setting.JeepayAppId = "app_123"
+	setting.JeepayAppSecret = "secret_123"
+
+	topUp := &model.TopUp{
+		UserId:          1002,
+		Amount:          100,
+		Money:           12.34,
+		TradeNo:         "jeepay-notify-001",
+		PaymentMethod:   "jeepay_ali_cashier",
+		PaymentProvider: model.PaymentProviderJeepay,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      time.Now().Unix(),
+	}
+	require.NoError(t, topUp.Insert())
+
+	payload := map[string]string{
+		"mchNo":      setting.JeepayMchNo,
+		"appId":      setting.JeepayAppId,
+		"mchOrderNo": topUp.TradeNo,
+		"wayCode":    "ALI_QR",
+		"state":      "2",
+		"amount":     "1234",
+	}
+	payload["sign"] = jeepaySign(payload, setting.JeepayAppSecret)
+	body := common.GetJsonString(payload)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/jeepay/notify", strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Request.RemoteAddr = "127.0.0.1:12345"
+
+	JeepayNotify(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "SUCCESS", recorder.Body.String())
+
+	stored := model.GetTopUpByTradeNo(topUp.TradeNo)
+	require.NotNil(t, stored)
+	require.Equal(t, common.TopUpStatusSuccess, stored.Status)
+}
