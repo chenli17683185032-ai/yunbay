@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -246,6 +247,50 @@ func TestRequestJeepayPayReturnsSuccessResponse(t *testing.T) {
 	data, ok := body["data"].(map[string]interface{})
 	require.True(t, ok)
 	require.NotEmpty(t, data["payment_url"])
+}
+
+func TestRequestJeepayPayUsesConfiguredNotifyAndReturnURLs(t *testing.T) {
+	setupJeepayTopupControllerTestDB(t)
+	insertJeepayTopupTestUser(t, 1004, 0)
+
+	var capturedNotifyURL string
+	var capturedReturnURL string
+
+	jeepayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/pay/unifiedOrder", r.URL.Path)
+
+		var payload map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		capturedNotifyURL = common.Interface2String(payload["notifyUrl"])
+		capturedReturnURL = common.Interface2String(payload["returnUrl"])
+
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"code":"0","data":{"payData":{"payUrl":"https://cashier.example.com/pay/JEPAY-ORDER-2"}}}`))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(jeepayServer.Close)
+
+	setting.JeepayEnabled = true
+	setting.JeepayAlipayEnabled = true
+	setting.JeepayBaseUrl = jeepayServer.URL
+	setting.JeepayMchNo = "mch_456"
+	setting.JeepayAppId = "app_456"
+	setting.JeepayAppSecret = "secret_456"
+	setting.JeepayNotifyUrl = "https://pay.yunbay.xyz/api/jeepay/notify"
+	setting.JeepayReturnUrl = "https://yunbay.xyz/wallet?show_history=true"
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1004)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/user/jeepay/pay", strings.NewReader(`{"amount":100,"payment_method":"jeepay_ali_cashier"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	RequestJeepayPay(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, setting.JeepayNotifyUrl, capturedNotifyURL)
+	require.Equal(t, setting.JeepayReturnUrl, capturedReturnURL)
 }
 
 func TestJeepayNotifyReturnsSuccessWhenRechargeSucceeds(t *testing.T) {

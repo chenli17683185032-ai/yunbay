@@ -74,14 +74,22 @@ func RequestJeepayPay(c *gin.Context) {
 	}
 
 	client := service.NewJeepayClient()
+	notifyURL := strings.TrimSpace(setting.JeepayNotifyUrl)
+	if notifyURL == "" {
+		notifyURL = strings.TrimRight(service.GetCallbackAddress(), "/") + "/api/jeepay/notify"
+	}
+	returnURL := strings.TrimSpace(setting.JeepayReturnUrl)
+	if returnURL == "" {
+		returnURL = paymentReturnPath("/console/topup?show_history=true")
+	}
 	paymentURL, err := client.CreateAliCashierOrder(c.Request.Context(), service.JeepayUnifiedOrderParams{
 		MchOrderNo: tradeNo,
 		WayCode:    "ALI_QR",
 		AmountFen:  decimal.NewFromFloat(payMoney).Mul(decimal.NewFromInt(100)).IntPart(),
 		Subject:    strings.TrimSpace(setting.JeepaySubject),
 		Body:       strings.TrimSpace(setting.JeepayBody),
-		NotifyURL:  strings.TrimRight(service.GetCallbackAddress(), "/") + "/api/jeepay/notify",
-		ReturnURL:  paymentReturnPath("/console/topup?show_history=true"),
+		NotifyURL:  notifyURL,
+		ReturnURL:  returnURL,
 	})
 	if err != nil {
 		topUp.Status = common.TopUpStatusFailed
