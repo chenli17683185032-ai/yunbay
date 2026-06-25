@@ -523,7 +523,7 @@ yunbay-new-api: healthy
 - 顶部导航收敛为：`Home / Console / Model Square`。
 - 普通用户侧边栏新增 `Dashboard -> /dashboard/models` 入口。
 - 普通用户与管理员都移除了 `chat-presets` 聊天小组件，仅保留 `Playground`。
-- `/dashboard/overview` 底部只保留 `AnnouncementsPanel` 公告卡片；不再渲染 `SummaryCards`、`ApiInfoPanel`、`UptimePanel`、`FAQPanel`、`PerformanceHealthPanel`。
+- `/dashboard/overview` 保留用户侧的 `SummaryCards` 用量概览、公告卡片，以及管理员可见的 `PerformanceHealthPanel` 性能健康卡片；继续隐藏 `ApiInfoPanel`、`UptimePanel` 和 `FAQPanel`。
 - 快速启动第 5 页主题改为：
   - `Codex one-click launcher`
   - `Codex one-click setup`
@@ -531,6 +531,26 @@ yunbay-new-api: healthy
 - Windows 下载不再跳转 Microsoft Store，改为云贝站内静态文件：
   - `/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe`
 - Windows 卡片新增与 macOS 相同风格的说明块，介绍 Yunbay Codex 的 API Key 导入、`https://yunbay.xyz/v1` 连接、模型供应商管理、连接测试、余额/用量查询与会话管理能力。
+- 快速启动第 5 页保留 `CC Switch` 导入卡片，可把当前站点 API、选中模型和已生成 API Key 通过 `ccswitch://v1/import?...` 一键导入为 Codex provider。
+
+### 2026-06-25 回归修复补充
+
+本次补充修复前一轮收敛时误删的两个前端入口：
+
+- 恢复快速启动第 5 页下载区下方的 `CC Switch` 导入卡片：
+  - 使用 `quick-start-cc-switch.ts` 生成 `ccswitch://v1/import?...`；
+  - API Key 自动补齐 `sk-` 前缀；
+  - endpoint 规范化为站点 `/v1`；
+  - 导入按钮在缺少 API Key 或模型时禁用并显示原因。
+- 恢复控制台概览页卡片组合：
+  - `SummaryCards`：保留用量概览；
+  - `AnnouncementsPanel`：保留公告；
+  - `PerformanceHealthPanel`：管理员可见，保留性能健康；
+  - `ApiInfoPanel`、`UptimePanel`、`FAQPanel` 继续不渲染。
+- 新增回归测试：
+  - `web/default/src/features/quick-start/quick-start-cc-switch.test.ts`
+  - `web/default/src/features/quick-start/quick-start-page-source.test.ts`
+  - `web/default/src/features/dashboard/components/overview/overview-dashboard-source.test.ts`
 
 ### Windows 安装包来源与校验
 
@@ -556,9 +576,13 @@ web/default/dist/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe
 
 ```text
 web/default/src/features/quick-start/index.tsx
+web/default/src/features/quick-start/quick-start-cc-switch.ts
+web/default/src/features/quick-start/quick-start-cc-switch.test.ts
+web/default/src/features/quick-start/quick-start-page-source.test.ts
 web/default/src/features/quick-start/quick-start-data.ts
 web/default/src/features/quick-start/quick-start-data.test.ts
 web/default/src/features/quick-start/quick-start-locales.test.ts
+web/default/src/features/dashboard/components/overview/overview-dashboard-source.test.ts
 web/default/src/hooks/sidebar-data-model.ts
 web/default/src/hooks/sidebar-data-model.test.ts
 web/default/src/hooks/top-nav-link-policy.ts
@@ -579,13 +603,20 @@ cd /Users/ethan/Documents/yunbay/web/default
 测试：
 
 ```bash
-bun test src/features/quick-start/quick-start-data.test.ts   src/features/quick-start/quick-start-locales.test.ts   src/hooks/sidebar-data-model.test.ts   src/hooks/top-nav-link-policy.test.ts
+bun test \
+  src/features/quick-start/quick-start-cc-switch.test.ts \
+  src/features/quick-start/quick-start-page-source.test.ts \
+  src/features/quick-start/quick-start-data.test.ts \
+  src/features/quick-start/quick-start-locales.test.ts \
+  src/features/dashboard/components/overview/overview-dashboard-source.test.ts \
+  src/hooks/sidebar-data-model.test.ts \
+  src/hooks/top-nav-link-policy.test.ts
 ```
 
 结果：
 
 ```text
-16 pass
+24 pass
 0 fail
 ```
 
