@@ -91,7 +91,13 @@ func RequestJeepayPay(c *gin.Context) {
 		return
 	}
 
-	common.ApiSuccess(c, gin.H{"payment_url": paymentURL})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "success",
+		"data": gin.H{
+			"payment_url": paymentURL,
+		},
+	})
 }
 
 func JeepayNotify(c *gin.Context) {

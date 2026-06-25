@@ -84,9 +84,10 @@ func GetTopUpInfo(c *gin.Context) {
 
 		if !hasJeepayAlipay {
 			payMethods = append(payMethods, map[string]string{
-				"name":  setting.JeepayAliDisplayName,
-				"type":  jeepayAliCashierMethod,
-				"color": setting.JeepayAliDisplayColor,
+				"name":      setting.JeepayAliDisplayName,
+				"type":      jeepayAliCashierMethod,
+				"color":     setting.JeepayAliDisplayColor,
+				"min_topup": strconv.Itoa(operation_setting.MinTopUp),
 			})
 		}
 	}

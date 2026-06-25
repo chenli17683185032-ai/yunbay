@@ -152,6 +152,63 @@ npm run typecheck
 npm run build
 ```
 
+## Jeepay 支付宝充值配置
+
+一期仅接入支付宝，不接微信。
+
+后台配置路径：
+
+```text
+System Settings → Billing → Payment Gateway → Jeepay / Alipay Recharge
+```
+
+必填项：
+
+- `Jeepay Base URL`
+- `Merchant No`
+- `App ID`
+- `App Secret`
+- `Notify URL`
+- `Return URL`
+
+建议默认值：
+
+- `Subject`: `云贝AI账户充值`
+- `Body`: `yunbay wallet topup`
+- `Display Name`: `支付宝`
+- `Display Color`: `rgba(22,119,255,1)`
+
+启用顺序：
+
+1. 先保存完整 Jeepay 配置；
+2. 打开 `Enable Jeepay`；
+3. 打开 `Enable Alipay top-up`；
+4. 前台钱包页出现支付宝入口；
+5. 用户点击充值后跳转到 Jeepay 收银台页，展示支付宝收款码。
+
+### Secret 字段说明
+
+- `JeepayAppSecret` 在后台读取接口中**不会明文回显**；
+- 管理页会显示“已配置，留空则不修改”；
+- 后续更新其他字段时，如果 secret 输入框留空，旧 secret 会保留，不会被覆盖。
+
+### Jeepay 支付联调检查单
+
+按以下顺序做手工联调：
+
+```text
+1. 管理员进入 Payment Gateway 页面
+2. 配置 Jeepay / 支付宝参数并保存
+3. 确认钱包页出现“支付宝”入口
+4. 用户选择金额并点击充值
+5. 新页面打开 Jeepay 收银台 payment_url
+6. 使用支付宝扫码完成一笔小额支付
+7. 确认 yunbay TopUp 从 pending 变为 success
+8. 确认用户 quota 已增加
+9. 重放相同回调，确认 quota 不会重复增加
+10. 清空 App Secret 输入框并保存，确认旧 secret 未丢失
+```
+
 ## 非删除式同步生产
 
 如果只是同步少量关键文件，优先**精确 rsync 文件列表**；如果必须同步目录，也要明确排除：

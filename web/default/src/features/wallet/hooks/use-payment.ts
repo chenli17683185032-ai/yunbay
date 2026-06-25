@@ -23,11 +23,13 @@ import {
   calculateAmount,
   calculateStripeAmount,
   calculateWaffoPancakeAmount,
+  requestJeepayPayment,
   requestPayment,
   requestStripePayment,
   isApiSuccess,
 } from '../api'
 import {
+  isJeepayAlipayPayment,
   isStripePayment,
   isWaffoPancakePayment,
   submitPaymentForm,
@@ -41,6 +43,26 @@ export function usePayment() {
   const [amount, setAmount] = useState<number>(0)
   const [calculating, setCalculating] = useState(false)
   const [processing, setProcessing] = useState(false)
+
+  const getStripePayLink = (
+    data: unknown
+  ): string | undefined => {
+    if (!data || typeof data !== 'object' || !('pay_link' in data)) {
+      return undefined
+    }
+    const payLink = data.pay_link
+    return typeof payLink === 'string' ? payLink : undefined
+  }
+
+  const getJeepayPaymentUrl = (
+    data: unknown
+  ): string | undefined => {
+    if (!data || typeof data !== 'object' || !('payment_url' in data)) {
+      return undefined
+    }
+    const paymentURL = data.payment_url
+    return typeof paymentURL === 'string' ? paymentURL : undefined
+  }
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
@@ -82,6 +104,7 @@ export function usePayment() {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
+        const isJeepay = isJeepayAlipayPayment(paymentType)
         const amount = Math.floor(topupAmount)
 
         const response = isStripe
@@ -89,6 +112,11 @@ export function usePayment() {
               amount,
               payment_method: 'stripe',
             })
+          : isJeepay
+            ? await requestJeepayPayment({
+                amount,
+                payment_method: paymentType,
+              })
           : await requestPayment({
               amount,
               payment_method: paymentType,
@@ -99,15 +127,22 @@ export function usePayment() {
           return false
         }
 
-        // Handle Stripe payment
-        if (isStripe && response.data?.pay_link) {
-          window.open(response.data.pay_link as string, '_blank')
+        const stripePayLink = getStripePayLink(response.data)
+        if (isStripe && stripePayLink) {
+          window.open(stripePayLink, '_blank')
+          toast.success(i18next.t('Redirecting to payment page...'))
+          return true
+        }
+
+        const jeepayPaymentURL = getJeepayPaymentUrl(response.data)
+        if (isJeepay && jeepayPaymentURL) {
+          window.open(jeepayPaymentURL, '_blank')
           toast.success(i18next.t('Redirecting to payment page...'))
           return true
         }
 
         // Handle non-Stripe payment
-        if (!isStripe && response.data) {
+        if (!isStripe && !isJeepay && response.data) {
           const url = (response as unknown as { url?: string }).url
           if (url) {
             submitPaymentForm(url, response.data)

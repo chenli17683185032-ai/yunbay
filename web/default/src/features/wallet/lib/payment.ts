@@ -76,6 +76,13 @@ export function isStripePayment(paymentType: string): boolean {
 }
 
 /**
+ * Check if payment method is Jeepay Alipay cashier
+ */
+export function isJeepayAlipayPayment(paymentType: string): boolean {
+  return paymentType === PAYMENT_TYPES.JEEPAY_ALI_CASHIER
+}
+
+/**
  * Check if payment method is Waffo Pancake
  *
  * Pancake is a metered-style payment that goes through a dedicated checkout

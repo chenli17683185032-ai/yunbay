@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +19,49 @@ import (
 	"gorm.io/gorm"
 )
 
+func initJeepayTopupModelColumns(t *testing.T) {
+	t.Helper()
+
+	originalIsMasterNode := common.IsMasterNode
+	originalSQLitePath := common.SQLitePath
+	originalUsingSQLite := common.UsingSQLite
+	originalUsingMySQL := common.UsingMySQL
+	originalUsingPostgreSQL := common.UsingPostgreSQL
+	originalSQLDSN, hadSQLDSN := os.LookupEnv("SQL_DSN")
+
+	defer func() {
+		common.IsMasterNode = originalIsMasterNode
+		common.SQLitePath = originalSQLitePath
+		common.UsingSQLite = originalUsingSQLite
+		common.UsingMySQL = originalUsingMySQL
+		common.UsingPostgreSQL = originalUsingPostgreSQL
+		if hadSQLDSN {
+			require.NoError(t, os.Setenv("SQL_DSN", originalSQLDSN))
+		} else {
+			require.NoError(t, os.Unsetenv("SQL_DSN"))
+		}
+	}()
+
+	common.IsMasterNode = false
+	common.SQLitePath = fmt.Sprintf("file:%s_init?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	common.UsingSQLite = false
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	require.NoError(t, os.Setenv("SQL_DSN", "local"))
+
+	require.NoError(t, model.InitDB())
+	if model.DB != nil {
+		sqlDB, err := model.DB.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+	}
+}
+
 func setupJeepayTopupControllerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
+
+	initJeepayTopupModelColumns(t)
 
 	gin.SetMode(gin.TestMode)
 	common.OptionMapRWMutex.RLock()
@@ -152,8 +194,9 @@ func TestGetTopUpInfoIncludesJeepayAlipayMethod(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := decodeTestResponse(t, recorder)
 	require.Equal(t, true, body["success"])
+	data, ok := body["data"].(map[string]interface{})
+	require.True(t, ok)
 
-	data := body["data"].(map[string]interface{})
 	methods := data["pay_methods"].([]interface{})
 	found := false
 	for _, item := range methods {
@@ -162,9 +205,47 @@ func TestGetTopUpInfoIncludesJeepayAlipayMethod(t *testing.T) {
 			found = true
 			require.Equal(t, "支付宝扫码", method["name"])
 			require.Equal(t, "rgba(0, 112, 255, 1)", method["color"])
+			require.Equal(t, "1", method["min_topup"])
 		}
 	}
 	require.True(t, found, "expected Jeepay Alipay method in topup info")
+}
+
+func TestRequestJeepayPayReturnsSuccessResponse(t *testing.T) {
+	setupJeepayTopupControllerTestDB(t)
+	insertJeepayTopupTestUser(t, 1003, 0)
+
+	jeepayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/api/pay/unifiedOrder", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{"code":"0","data":{"payData":{"payUrl":"https://cashier.example.com/pay/JEPAY-ORDER"}}}`))
+		require.NoError(t, err)
+	}))
+	t.Cleanup(jeepayServer.Close)
+
+	setting.JeepayEnabled = true
+	setting.JeepayAlipayEnabled = true
+	setting.JeepayBaseUrl = jeepayServer.URL
+	setting.JeepayMchNo = "mch_123"
+	setting.JeepayAppId = "app_123"
+	setting.JeepayAppSecret = "secret_123"
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 1003)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/user/jeepay/pay", strings.NewReader(`{"amount":100,"payment_method":"jeepay_ali_cashier"}`))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+
+	RequestJeepayPay(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeTestResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+	require.Equal(t, "success", body["message"])
+	data, ok := body["data"].(map[string]interface{})
+	require.True(t, ok)
+	require.NotEmpty(t, data["payment_url"])
 }
 
 func TestJeepayNotifyReturnsSuccessWhenRechargeSucceeds(t *testing.T) {
