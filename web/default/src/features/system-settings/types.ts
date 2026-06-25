@@ -56,6 +56,42 @@ export type DeleteLogsResponse = {
   data?: number
 }
 
+export type JeepayPaymentSettings = {
+  JeepayEnabled: boolean
+  JeepayAlipayEnabled: boolean
+  JeepayBaseUrl: string
+  JeepayMchNo: string
+  JeepayAppId: string
+  JeepayAppSecret: string
+  JeepayAppSecretConfigured: boolean
+  JeepayNotifyUrl: string
+  JeepayReturnUrl: string
+  JeepaySubject: string
+  JeepayBody: string
+  JeepayTimeoutMs: number
+  JeepayAliDisplayName: string
+  JeepayAliDisplayColor: string
+}
+
+export type JeepayPaymentSettingsResponse = {
+  success: boolean
+  message: string
+  data?: Partial<JeepayPaymentSettings>
+}
+
+export type UpdateJeepayPaymentSettingsRequest = Omit<
+  JeepayPaymentSettings,
+  'JeepayAppSecretConfigured' | 'JeepayAppSecret'
+> & {
+  JeepayAppSecret?: string
+}
+
+export type UpdateJeepayPaymentSettingsResponse = {
+  success: boolean
+  message: string
+  data?: Partial<JeepayPaymentSettings>
+}
+
 export type SiteSettings = {
   'theme.frontend': string
   Notice: string

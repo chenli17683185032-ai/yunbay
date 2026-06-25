@@ -21,7 +21,10 @@ import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  JeepayPaymentSettingsResponse,
   SystemOptionsResponse,
+  UpdateJeepayPaymentSettingsRequest,
+  UpdateJeepayPaymentSettingsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -35,6 +38,23 @@ export async function getSystemOptions() {
 
 export async function updateSystemOption(request: UpdateOptionRequest) {
   const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+  return res.data
+}
+
+export async function getJeepayPaymentSettings() {
+  const res = await api.get<JeepayPaymentSettingsResponse>(
+    '/api/system-settings/payment/jeepay'
+  )
+  return res.data
+}
+
+export async function updateJeepayPaymentSettings(
+  request: UpdateJeepayPaymentSettingsRequest
+) {
+  const res = await api.post<UpdateJeepayPaymentSettingsResponse>(
+    '/api/system-settings/payment/jeepay',
+    request
+  )
   return res.data
 }
 

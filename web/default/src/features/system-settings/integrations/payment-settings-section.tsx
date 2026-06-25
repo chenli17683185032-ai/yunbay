@@ -855,7 +855,7 @@ export function PaymentSettingsSection({
           <SettingsPageFormActions
             onSave={form.handleSubmit(onSubmit)}
             isSaving={updateOption.isPending || isSubmitting}
-            saveLabel='Save all settings'
+            saveLabel='Save payment gateway settings'
           />
           <div className='space-y-4'>
             <div>

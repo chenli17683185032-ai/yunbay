@@ -102,6 +102,8 @@ const defaultBillingSettings: BillingSettings = {
   WaffoPancakeReturnURL: '',
   WaffoPancakeStoreID: '',
   WaffoPancakeProductID: '',
+  // Jeepay / Alipay recharge settings are loaded from the dedicated
+  // /api/system-settings/payment/jeepay endpoint instead of system-options.
   'checkin_setting.enabled': false,
   'checkin_setting.min_quota': 1000,
   'checkin_setting.max_quota': 10000,
