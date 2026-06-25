@@ -198,6 +198,13 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/waffo-pancake/subscription-product-options", controller.ListWaffoPancakeSubscriptionProductOptions)
 		}
 
+		systemSettingsRoute := apiRouter.Group("/system-settings")
+		systemSettingsRoute.Use(middleware.RootAuth())
+		{
+			systemSettingsRoute.GET("/payment/jeepay", controller.GetJeepaySettings)
+			systemSettingsRoute.POST("/payment/jeepay", controller.SaveJeepaySettings)
+		}
+
 		// Custom OAuth provider management (root only)
 		customOAuthRoute := apiRouter.Group("/custom-oauth-provider")
 		customOAuthRoute.Use(middleware.RootAuth())
