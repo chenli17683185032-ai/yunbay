@@ -20,12 +20,28 @@ func setupJeepaySettingsTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
+	common.OptionMapRWMutex.RLock()
+	origOptionMap := common.OptionMap
+	common.OptionMapRWMutex.RUnlock()
 	origUsingSQLite := common.UsingSQLite
 	origUsingMySQL := common.UsingMySQL
 	origUsingPostgreSQL := common.UsingPostgreSQL
 	origRedisEnabled := common.RedisEnabled
 	origDB := model.DB
 	origLOGDB := model.LOG_DB
+	origJeepayEnabled := setting.JeepayEnabled
+	origJeepayAlipayEnabled := setting.JeepayAlipayEnabled
+	origJeepayBaseUrl := setting.JeepayBaseUrl
+	origJeepayMchNo := setting.JeepayMchNo
+	origJeepayAppId := setting.JeepayAppId
+	origJeepayAppSecret := setting.JeepayAppSecret
+	origJeepayNotifyUrl := setting.JeepayNotifyUrl
+	origJeepayReturnUrl := setting.JeepayReturnUrl
+	origJeepaySubject := setting.JeepaySubject
+	origJeepayBody := setting.JeepayBody
+	origJeepayTimeoutMs := setting.JeepayTimeoutMs
+	origJeepayAliDisplayName := setting.JeepayAliDisplayName
+	origJeepayAliDisplayColor := setting.JeepayAliDisplayColor
 
 	common.UsingSQLite = true
 	common.UsingMySQL = false
@@ -47,6 +63,22 @@ func setupJeepaySettingsTestDB(t *testing.T) *gorm.DB {
 		common.RedisEnabled = origRedisEnabled
 		model.DB = origDB
 		model.LOG_DB = origLOGDB
+		setting.JeepayEnabled = origJeepayEnabled
+		setting.JeepayAlipayEnabled = origJeepayAlipayEnabled
+		setting.JeepayBaseUrl = origJeepayBaseUrl
+		setting.JeepayMchNo = origJeepayMchNo
+		setting.JeepayAppId = origJeepayAppId
+		setting.JeepayAppSecret = origJeepayAppSecret
+		setting.JeepayNotifyUrl = origJeepayNotifyUrl
+		setting.JeepayReturnUrl = origJeepayReturnUrl
+		setting.JeepaySubject = origJeepaySubject
+		setting.JeepayBody = origJeepayBody
+		setting.JeepayTimeoutMs = origJeepayTimeoutMs
+		setting.JeepayAliDisplayName = origJeepayAliDisplayName
+		setting.JeepayAliDisplayColor = origJeepayAliDisplayColor
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = origOptionMap
+		common.OptionMapRWMutex.Unlock()
 		sqlDB, err := db.DB()
 		if err == nil {
 			_ = sqlDB.Close()
