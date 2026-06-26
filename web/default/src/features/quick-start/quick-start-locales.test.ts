@@ -81,9 +81,15 @@ const QUICK_START_COMPONENT_KEYS = [
   'Generating...',
   'Copy API key again',
   'Generate API key',
-  'Official Codex',
-  'Download Codex',
-  'Download Yunbay Codex and connect it to your Yunbay API key.',
+  'Codex one-click launcher',
+  'Codex one-click setup',
+  'Download the Codex one-click launcher and connect it to your Yunbay API key.',
+  'Download one-click launcher',
+  'What the Windows one-click launcher can do',
+  'After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.',
+  'Download and run the Windows installer.',
+  'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
+  'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
   'Import current setup to CC Switch',
   'Launch CC Switch from your browser with this API and model prefilled.',
   'Configured API',
@@ -100,7 +106,6 @@ const QUICK_START_COMPONENT_KEYS = [
   'Copy one-line terminal install',
   'Terminal command copied',
   'Failed to copy terminal command',
-  'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.',
   'Previous',
   'Next',
   'Enter dashboard',
@@ -171,9 +176,15 @@ test('Chinese quick start copy does not fall back to English for the guided flow
 
 test('download-page quick start copy does not fall back to English in localized non-Chinese locales', () => {
   const keys = [
-    'Official Codex',
-    'Download Codex',
-    'Download Yunbay Codex and connect it to your Yunbay API key.',
+    'Codex one-click launcher',
+    'Codex one-click setup',
+    'Download the Codex one-click launcher and connect it to your Yunbay API key.',
+    'Download one-click launcher',
+    'What the Windows one-click launcher can do',
+    'After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.',
+    'Download and run the Windows installer.',
+    'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
+    'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
     'Import current setup to CC Switch',
     'Launch CC Switch from your browser with this API and model prefilled.',
     'Configured API',
@@ -184,7 +195,6 @@ test('download-page quick start copy does not fall back to English in localized 
     'No model selected',
     'CC Switch will import this Codex provider and enable it automatically.',
     'Trying to open CC Switch',
-    'The macOS download is a Yunbay Codex build. The Windows button opens the official Microsoft Store installer.',
   ] as const
 
   for (const localeName of FULLY_LOCALIZED_LOCALE_NAMES) {

@@ -60,7 +60,7 @@ test('quick start exposes exactly the three requested purposes', () => {
   assert.equal(QUICK_START_DEFAULT_PURPOSE, 'web-coding')
 })
 
-test('Codex download cards point to official macOS and Windows downloads', () => {
+test('Codex download cards point to Yunbay-hosted macOS and Windows downloads', () => {
   assert.deepEqual(
     codexDownloadCards.map((item) => item.platform),
     ['macOS', 'Windows']
@@ -74,6 +74,7 @@ test('Codex download cards point to official macOS and Windows downloads', () =>
     /^\/downloads\/yunbay-codex-macos-\d{8}-\d{6}-[a-f0-9]{12}\.zip$/
   )
   assert.notEqual(macos?.downloadHref, '/downloads/yunbay-codex-macos.zip')
+  assert.equal(macos?.buttonLabelKey, 'Download one-click launcher')
 
   assert.equal(
     macos?.quarantineFixCommand,
@@ -89,10 +90,28 @@ test('Codex download cards point to official macOS and Windows downloads', () =>
     ),
     true
   )
-  assert.equal(
+  assert.match(
+    windows?.downloadHref ?? '',
+    /^\/downloads\/yunbay-codex-windows-\d{8}-\d{6}-[a-f0-9]{12}\.exe$/
+  )
+  assert.notEqual(
     windows?.downloadHref,
     'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi'
   )
+  assert.equal(windows?.buttonLabelKey, 'Download one-click launcher')
+  assert.equal(
+    windows?.guideTitleKey,
+    'What the Windows one-click launcher can do'
+  )
+  assert.equal(
+    windows?.guideDescriptionKey,
+    'After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.'
+  )
+  assert.deepEqual(windows?.guideStepKeys, [
+    'Download and run the Windows installer.',
+    'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
+    'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
+  ])
 })
 
 test('quick start does not synthesize fallback models when backend model square is empty', () => {

@@ -38,6 +38,9 @@ export type CodexDownloadCard = {
   downloadHref: string
   quarantineFixCommand?: string
   terminalInstallCommand?: string
+  guideTitleKey?: string
+  guideDescriptionKey?: string
+  guideStepKeys?: string[]
 }
 
 export type QuickStartFullscreenPage = {
@@ -102,6 +105,8 @@ export const purposeOptions: QuickStartPurpose[] = [
 
 const YUNBAY_CODEX_MACOS_DOWNLOAD_HREF =
   '/downloads/yunbay-codex-macos-20260624-174731-53933cc047c3.zip'
+const YUNBAY_CODEX_WINDOWS_DOWNLOAD_HREF =
+  '/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe'
 const YUNBAY_CODEX_MACOS_DOWNLOAD_URL = `https://yunbay.xyz${YUNBAY_CODEX_MACOS_DOWNLOAD_HREF}`
 const YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH = '$HOME/Downloads/Yunbay Codex.app'
 
@@ -109,7 +114,7 @@ export const codexDownloadCards: CodexDownloadCard[] = [
   {
     platform: 'macOS',
     descriptionKey: 'Download starts now.',
-    buttonLabelKey: 'Download Codex for macOS',
+    buttonLabelKey: 'Download one-click launcher',
     downloadHref: YUNBAY_CODEX_MACOS_DOWNLOAD_HREF,
     quarantineFixCommand: `xattr -dr com.apple.quarantine "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && open "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}"`,
     terminalInstallCommand: `curl -L "${YUNBAY_CODEX_MACOS_DOWNLOAD_URL}" -o /tmp/yunbay-codex.zip && rm -rf "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && ditto -x -k /tmp/yunbay-codex.zip "$HOME/Downloads" && xattr -dr com.apple.quarantine "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && open "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}"`,
@@ -117,9 +122,16 @@ export const codexDownloadCards: CodexDownloadCard[] = [
   {
     platform: 'Windows',
     descriptionKey: 'Download starts now.',
-    buttonLabelKey: 'Download Codex for Windows',
-    downloadHref:
-      'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi',
+    buttonLabelKey: 'Download one-click launcher',
+    downloadHref: YUNBAY_CODEX_WINDOWS_DOWNLOAD_HREF,
+    guideTitleKey: 'What the Windows one-click launcher can do',
+    guideDescriptionKey:
+      'After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.',
+    guideStepKeys: [
+      'Download and run the Windows installer.',
+      'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
+      'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
+    ],
   },
 ]
 
