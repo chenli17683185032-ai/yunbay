@@ -34,6 +34,9 @@ type jeepayUnifiedOrderRequest struct {
 	Body       string `json:"body,omitempty"`
 	NotifyUrl  string `json:"notifyUrl,omitempty"`
 	ReturnUrl  string `json:"returnUrl,omitempty"`
+	Version    string `json:"version"`
+	SignType   string `json:"signType"`
+	ReqTime    string `json:"reqTime"`
 	Sign       string `json:"sign"`
 }
 
@@ -77,6 +80,9 @@ func (c *JeepayClient) CreateAliCashierOrder(ctx context.Context, params JeepayU
 		Body:       params.Body,
 		NotifyUrl:  params.NotifyURL,
 		ReturnUrl:  params.ReturnURL,
+		Version:    "1.0",
+		SignType:   "MD5",
+		ReqTime:    fmt.Sprintf("%d", time.Now().Unix()),
 	}
 
 	signParams := map[string]string{
@@ -90,6 +96,9 @@ func (c *JeepayClient) CreateAliCashierOrder(ctx context.Context, params JeepayU
 		"body":       request.Body,
 		"notifyUrl":  request.NotifyUrl,
 		"returnUrl":  request.ReturnUrl,
+		"version":    request.Version,
+		"signType":   request.SignType,
+		"reqTime":    request.ReqTime,
 	}
 	request.Sign = SignJeepayParams(signParams, c.appSecret)
 
@@ -127,7 +136,7 @@ func (c *JeepayClient) CreateAliCashierOrder(ctx context.Context, params JeepayU
 		if strings.TrimSpace(msg) == "" {
 			msg = "jeepay create order failed"
 		}
-		return "", fmt.Errorf(msg)
+		return "", fmt.Errorf("%s", msg)
 	}
 
 	data, _ := payload["data"].(map[string]interface{})
