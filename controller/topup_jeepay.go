@@ -84,7 +84,7 @@ func RequestJeepayPay(c *gin.Context) {
 	}
 	paymentURL, err := client.CreateAliCashierOrder(c.Request.Context(), service.JeepayUnifiedOrderParams{
 		MchOrderNo: tradeNo,
-		WayCode:    "ALI_QR",
+		WayCode:    "QR_CASHIER",
 		AmountFen:  decimal.NewFromFloat(payMoney).Mul(decimal.NewFromInt(100)).IntPart(),
 		Subject:    strings.TrimSpace(setting.JeepaySubject),
 		Body:       strings.TrimSpace(setting.JeepayBody),

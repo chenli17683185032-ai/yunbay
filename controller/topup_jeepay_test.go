@@ -219,6 +219,9 @@ func TestRequestJeepayPayReturnsSuccessResponse(t *testing.T) {
 	jeepayServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/api/pay/unifiedOrder", r.URL.Path)
+		var payload map[string]interface{}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+		require.Equal(t, "QR_CASHIER", payload["wayCode"])
 		w.Header().Set("Content-Type", "application/json")
 		_, err := w.Write([]byte(`{"code":"0","data":{"payData":{"payUrl":"https://cashier.example.com/pay/JEPAY-ORDER"}}}`))
 		require.NoError(t, err)
