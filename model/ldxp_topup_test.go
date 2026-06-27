@@ -13,11 +13,15 @@ func setupLdxpTopupTest(t *testing.T) {
 	t.Helper()
 	require.NoError(t, DB.AutoMigrate(&LdxpTopupSession{}, &LdxpMailEvent{}))
 	cleanup := func() {
-		DB.Exec("DELETE FROM ldxp_topup_sessions")
-		DB.Exec("DELETE FROM ldxp_mail_events")
+		require.NoError(t, DB.Exec("DELETE FROM ldxp_topup_sessions").Error)
+		require.NoError(t, DB.Exec("DELETE FROM ldxp_mail_events").Error)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
+}
+
+func ldxpMessageId(value string) *string {
+	return &value
 }
 
 func TestLdxpTopupSessionModelMigratesAndPersists(t *testing.T) {
@@ -75,7 +79,7 @@ func TestLdxpMailEventDedupesByRawHash(t *testing.T) {
 	setupLdxpTopupTest(t)
 
 	first := &LdxpMailEvent{
-		MessageId:    "message-1",
+		MessageId:    ldxpMessageId("message-1"),
 		ImapUid:      "uid-1",
 		RawHash:      "same-raw-hash",
 		MailFrom:     "sender@example.test",
@@ -90,7 +94,7 @@ func TestLdxpMailEventDedupesByRawHash(t *testing.T) {
 		BodyExcerpt:  "paid successfully",
 		CreatedTime:  102,
 	}
-	duplicate := &LdxpMailEvent{MessageId: "message-2", ImapUid: "uid-2", RawHash: "same-raw-hash", OrderNo: "order-2"}
+	duplicate := &LdxpMailEvent{MessageId: ldxpMessageId("message-2"), ImapUid: "uid-2", RawHash: "same-raw-hash", OrderNo: "order-2"}
 
 	require.NoError(t, InsertLdxpMailEvent(first))
 	require.Error(t, InsertLdxpMailEvent(duplicate))
@@ -105,13 +109,13 @@ func TestLdxpMailEventDedupesByMessageId(t *testing.T) {
 	setupLdxpTopupTest(t)
 
 	first := &LdxpMailEvent{
-		MessageId: "same-message-id",
+		MessageId: ldxpMessageId("same-message-id"),
 		ImapUid:   "uid-message-1",
 		RawHash:   "message-raw-hash-1",
 		OrderNo:   "message-order-1",
 	}
 	duplicate := &LdxpMailEvent{
-		MessageId: "same-message-id",
+		MessageId: ldxpMessageId("same-message-id"),
 		ImapUid:   "uid-message-2",
 		RawHash:   "message-raw-hash-2",
 		OrderNo:   "message-order-2",
@@ -119,6 +123,60 @@ func TestLdxpMailEventDedupesByMessageId(t *testing.T) {
 
 	require.NoError(t, InsertLdxpMailEvent(first))
 	require.Error(t, InsertLdxpMailEvent(duplicate))
+}
+
+func TestLdxpMailEventAllowsMultipleMissingMessageIds(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	first := &LdxpMailEvent{RawHash: "missing-message-raw-hash-1", OrderNo: "missing-message-order-1"}
+	second := &LdxpMailEvent{RawHash: "missing-message-raw-hash-2", OrderNo: "missing-message-order-2"}
+	blank := &LdxpMailEvent{MessageId: ldxpMessageId("  	"), RawHash: "missing-message-raw-hash-3", OrderNo: "missing-message-order-3"}
+
+	require.NoError(t, InsertLdxpMailEvent(first))
+	require.NoError(t, InsertLdxpMailEvent(second))
+	require.NoError(t, InsertLdxpMailEvent(blank))
+	assert.Nil(t, blank.MessageId)
+}
+
+func TestInsertLdxpMailEventRejectsInvalidRawHash(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	require.ErrorIs(t, InsertLdxpMailEvent(nil), gorm.ErrInvalidData)
+	require.ErrorIs(t, InsertLdxpMailEvent(&LdxpMailEvent{MessageId: ldxpMessageId("missing-raw-hash"), RawHash: " 	"}), gorm.ErrInvalidData)
+}
+
+func TestClaimSelectedLdxpTopupSessionDoesNotOverwriteStaleClaim(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	now := int64(1_000)
+	session := &LdxpTopupSession{
+		SessionId:   "stale-claim",
+		UserId:      1001,
+		Status:      LdxpStatusCreated,
+		CreatedTime: 10,
+		UpdatedTime: 10,
+		ExpiredTime: now + 100,
+	}
+	require.NoError(t, InsertLdxpTopupSession(session))
+
+	staleCandidate := *session
+	require.NoError(t, DB.Model(&LdxpTopupSession{}).
+		Where("id = ?", session.Id).
+		Updates(map[string]interface{}{
+			"status":       LdxpStatusWorkerClaimed,
+			"worker_id":    "worker-a",
+			"updated_time": now,
+		}).Error)
+
+	claimed, err := claimSelectedLdxpTopupSession(DB, &staleCandidate, "worker-b", now+1)
+	require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	assert.Nil(t, claimed)
+
+	persisted, err := GetLdxpTopupSessionBySessionId("stale-claim")
+	require.NoError(t, err)
+	assert.Equal(t, LdxpStatusWorkerClaimed, persisted.Status)
+	assert.Equal(t, "worker-a", persisted.WorkerId)
+	assert.Equal(t, now, persisted.UpdatedTime)
 }
 
 func TestGetClaimableLdxpSessionSkipsExpiredAndNonCreated(t *testing.T) {

@@ -1,6 +1,9 @@
 package model
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -67,7 +70,7 @@ type LdxpTopupSession struct {
 
 type LdxpMailEvent struct {
 	Id               int            `json:"id"`
-	MessageId        string         `json:"message_id" gorm:"type:varchar(255);uniqueIndex"`
+	MessageId        *string        `json:"message_id,omitempty" gorm:"type:varchar(255);uniqueIndex"`
 	ImapUid          string         `json:"imap_uid" gorm:"type:varchar(128);index"`
 	RawHash          string         `json:"raw_hash" gorm:"type:varchar(128);uniqueIndex"`
 	MailFrom         string         `json:"mail_from" gorm:"type:varchar(255)"`
@@ -112,21 +115,55 @@ func GetLdxpTopupSessionForUser(sessionId string, userId int) (*LdxpTopupSession
 }
 
 func ClaimNextLdxpTopupSession(workerId string, now int64) (*LdxpTopupSession, error) {
-	var claimed LdxpTopupSession
+	var claimed *LdxpTopupSession
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("status = ? AND expired_time > ?", LdxpStatusCreated, now).Order("created_time ASC, id ASC")
-		if !common.UsingSQLite {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		for i := 0; i < 3; i++ {
+			var candidate LdxpTopupSession
+			query := tx.Where("status = ? AND expired_time > ?", LdxpStatusCreated, now).Order("created_time ASC, id ASC")
+			if !common.UsingSQLite {
+				query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			if err := query.First(&candidate).Error; err != nil {
+				return err
+			}
+
+			updated, err := claimSelectedLdxpTopupSession(tx, &candidate, workerId, now)
+			if err == nil {
+				claimed = updated
+				return nil
+			}
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 		}
-		if err := query.First(&claimed).Error; err != nil {
-			return err
-		}
-		claimed.Status = LdxpStatusWorkerClaimed
-		claimed.WorkerId = workerId
-		claimed.UpdatedTime = now
-		return tx.Save(&claimed).Error
+		return gorm.ErrRecordNotFound
 	})
 	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
+}
+
+func claimSelectedLdxpTopupSession(tx *gorm.DB, candidate *LdxpTopupSession, workerId string, now int64) (*LdxpTopupSession, error) {
+	if candidate == nil {
+		return nil, gorm.ErrInvalidData
+	}
+	result := tx.Model(&LdxpTopupSession{}).
+		Where("id = ? AND status = ? AND expired_time > ?", candidate.Id, LdxpStatusCreated, now).
+		Updates(map[string]interface{}{
+			"status":       LdxpStatusWorkerClaimed,
+			"worker_id":    workerId,
+			"updated_time": now,
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	var claimed LdxpTopupSession
+	if err := tx.Where("id = ?", candidate.Id).First(&claimed).Error; err != nil {
 		return nil, err
 	}
 	return &claimed, nil
@@ -137,6 +174,17 @@ func SaveLdxpTopupSession(session *LdxpTopupSession) error {
 }
 
 func InsertLdxpMailEvent(event *LdxpMailEvent) error {
+	if event == nil || strings.TrimSpace(event.RawHash) == "" {
+		return gorm.ErrInvalidData
+	}
+	if event.MessageId != nil {
+		messageId := strings.TrimSpace(*event.MessageId)
+		if messageId == "" {
+			event.MessageId = nil
+		} else {
+			event.MessageId = &messageId
+		}
+	}
 	return DB.Create(event).Error
 }
 
