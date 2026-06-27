@@ -337,6 +337,154 @@ func TestClaimLdxpTopupSessionRejectsNilConfig(t *testing.T) {
 	assert.ErrorIs(t, err, ErrLdxpInvalidSessionRequest)
 }
 
+func TestRecordLdxpQrRejectsMissingOrderNo(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_qr_missing_order_reject",
+		UserId:      1001,
+		Status:      model.LdxpStatusWorkerClaimed,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+
+	err := RecordLdxpQr("ldxp_qr_missing_order_reject", LdxpWorkerQrPayload{
+		WorkerID:          "worker-a",
+		WorkerOrderNo:     "   ",
+		WorkerAmount:      0.10,
+		WorkerProductName: "LDXP 10",
+		QRCode:            "created-qr",
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrLdxpInvalidSessionRequest)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_qr_missing_order_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, persisted.Status)
+	assert.Empty(t, persisted.WorkerOrderNo)
+	assert.Empty(t, persisted.QrCode)
+	assert.EqualValues(t, 100, persisted.UpdatedTime)
+}
+
+func TestRecordLdxpQrRejectsOrderNoOverwrite(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:     "ldxp_qr_overwrite_reject",
+		UserId:        1001,
+		Status:        model.LdxpStatusQrReady,
+		WorkerId:      "worker-a",
+		WorkerOrderNo: "order-B",
+		QrCode:        "original-qr",
+		CreatedTime:   100,
+		UpdatedTime:   100,
+		ExpiredTime:   2000,
+	})
+
+	err := RecordLdxpQr("ldxp_qr_overwrite_reject", LdxpWorkerQrPayload{
+		WorkerID:          "worker-a",
+		WorkerOrderNo:     "order-A",
+		WorkerAmount:      0.10,
+		WorkerProductName: "UPDATED",
+		QRCode:            "updated-qr",
+		QRPageURL:         "https://example.test/updated",
+	})
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_qr_overwrite_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusQrReady, persisted.Status)
+	assert.Equal(t, "order-B", persisted.WorkerOrderNo)
+	assert.Equal(t, "original-qr", persisted.QrCode)
+	assert.Empty(t, persisted.QrPageUrl)
+	assert.EqualValues(t, 100, persisted.UpdatedTime)
+}
+
+func TestRecordLdxpWorkerResultRejectsStaleOrderNo(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:          "ldxp_result_stale_order_reject",
+		UserId:             1001,
+		Status:             model.LdxpStatusQrReady,
+		WorkerId:           "worker-a",
+		WorkerOrderNo:      "order-B",
+		QrCode:             "qr",
+		WorkerCardKey:      "ORIGINAL-CARD",
+		WorkerStatusText:   "original",
+		WorkerDetectedTime: 150,
+		CreatedTime:        100,
+		UpdatedTime:        150,
+		ExpiredTime:        2000,
+	})
+
+	session, err := RecordLdxpWorkerResult("ldxp_result_stale_order_reject", LdxpWorkerResultPayload{
+		WorkerID:          "worker-a",
+		WorkerOrderNo:     "order-A",
+		WorkerAmount:      0.20,
+		WorkerProductName: "LDXP 20",
+		WorkerCardKey:     "NEW-CARD",
+		WorkerStatusText:  "paid",
+		WorkerSuccessURL:  "https://example.test/success",
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, session)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_result_stale_order_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusQrReady, persisted.Status)
+	assert.Equal(t, "order-B", persisted.WorkerOrderNo)
+	assert.Equal(t, "ORIGINAL-CARD", persisted.WorkerCardKey)
+	assert.Equal(t, "original", persisted.WorkerStatusText)
+	assert.EqualValues(t, 150, persisted.WorkerDetectedTime)
+	assert.EqualValues(t, 150, persisted.UpdatedTime)
+}
+
+func TestCreateLdxpTopupSessionSerializesConcurrentCreates(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	require.NoError(t, model.DB.Create(&model.User{Id: 1001, Username: "user-1001"}).Error)
+
+	const workers = 16
+	start := make(chan struct{})
+	results := make(chan *LdxpSessionPublicView, workers)
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			<-start
+			view, err := CreateLdxpTopupSession(1001, 10, testLdxpSessionConfig(true))
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- view
+		}()
+	}
+	close(start)
+
+	views := make([]*LdxpSessionPublicView, 0, workers)
+	for i := 0; i < workers; i++ {
+		select {
+		case err := <-errs:
+			require.NoError(t, err)
+		case view := <-results:
+			views = append(views, view)
+		}
+	}
+
+	require.Len(t, views, workers)
+	sessionIDs := map[string]struct{}{}
+	for _, view := range views {
+		require.NotNil(t, view)
+		sessionIDs[view.SessionID] = struct{}{}
+	}
+	assert.Len(t, sessionIDs, 1)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("user_id = ? AND status IN ?", 1001, []string{model.LdxpStatusCreated, model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady}).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
 func TestRecordLdxpQrRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{

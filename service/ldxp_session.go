@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const defaultLdxpPollIntervalMs = 2000
@@ -18,6 +20,8 @@ var (
 	ErrLdxpSessionNotCancelable  = errors.New("ldxp session is not cancelable")
 	ErrLdxpInvalidSessionRequest = errors.New("invalid ldxp session request")
 )
+
+var ldxpCreateSessionMu sync.Mutex
 
 type LdxpCreateSessionRequest struct {
 	Amount int64 `json:"amount"`
@@ -71,30 +75,45 @@ func CreateLdxpTopupSession(userID int, amount int64, cfg *LdxpConfig) (*LdxpSes
 	}
 
 	now := common.GetTimestamp()
-	if activeSession, err := findActiveLdxpTopupSessionForUser(userID, now); err == nil {
-		return publicLdxpSessionView(activeSession), nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
+	ldxpCreateSessionMu.Lock()
+	defer ldxpCreateSessionMu.Unlock()
 
-	sessionID, err := generateLdxpSessionID()
+	var session *model.LdxpTopupSession
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if activeSession, err := findActiveLdxpTopupSessionForUserTx(tx, userID, now); err == nil {
+			session = activeSession
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		if err := lockLdxpUserRowIfPossible(tx, userID); err != nil {
+			return err
+		}
+
+		sessionID, err := generateLdxpSessionID()
+		if err != nil {
+			return err
+		}
+		session = &model.LdxpTopupSession{
+			SessionId:    sessionID,
+			UserId:       userID,
+			Amount:       amount,
+			Money:        product.Money,
+			ProductUrl:   product.ProductURL,
+			ProductName:  product.ProductName,
+			ContactEmail: cfg.ContactEmail,
+			Status:       model.LdxpStatusCreated,
+			CreatedTime:  now,
+			UpdatedTime:  now,
+			ExpiredTime:  now + cfg.SessionTTLSeconds,
+		}
+		if err := tx.Create(session).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, err
-	}
-	session := &model.LdxpTopupSession{
-		SessionId:    sessionID,
-		UserId:       userID,
-		Amount:       amount,
-		Money:        product.Money,
-		ProductUrl:   product.ProductURL,
-		ProductName:  product.ProductName,
-		ContactEmail: cfg.ContactEmail,
-		Status:       model.LdxpStatusCreated,
-		CreatedTime:  now,
-		UpdatedTime:  now,
-		ExpiredTime:  now + cfg.SessionTTLSeconds,
-	}
-	if err := model.InsertLdxpTopupSession(session); err != nil {
 		return nil, err
 	}
 	return publicLdxpSessionView(session), nil
@@ -155,6 +174,10 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 	if workerID == "" {
 		return fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
 	}
+	workerOrderNo := strings.TrimSpace(payload.WorkerOrderNo)
+	if workerOrderNo == "" {
+		return fmt.Errorf("%w: missing worker order no", ErrLdxpInvalidSessionRequest)
+	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
 		"status":              model.LdxpStatusQrReady,
@@ -162,14 +185,12 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 		"worker_product_name": strings.TrimSpace(payload.WorkerProductName),
 		"qr_code":             strings.TrimSpace(payload.QRCode),
 		"qr_page_url":         strings.TrimSpace(payload.QRPageURL),
+		"worker_order_no":     workerOrderNo,
 		"qr_ready_time":       now,
 		"updated_time":        now,
 	}
-	if workerOrderNo := strings.TrimSpace(payload.WorkerOrderNo); workerOrderNo != "" {
-		updates["worker_order_no"] = workerOrderNo
-	}
 	result := model.DB.Model(&model.LdxpTopupSession{}).
-		Where("session_id = ? AND worker_id = ? AND status IN ?", sessionID, workerID, []string{model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady}).
+		Where("session_id = ? AND worker_id = ? AND status IN ? AND (worker_order_no = ? OR worker_order_no = '' OR worker_order_no IS NULL)", sessionID, workerID, []string{model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady}, workerOrderNo).
 		Updates(updates)
 	if result.Error != nil {
 		return result.Error
@@ -189,13 +210,6 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 	if workerOrderNo == "" {
 		return nil, fmt.Errorf("%w: missing worker order no", ErrLdxpInvalidSessionRequest)
 	}
-	existing, err := model.GetLdxpTopupSessionBySessionId(sessionID)
-	if err != nil {
-		return nil, err
-	}
-	if existing.WorkerOrderNo != "" && existing.WorkerOrderNo != workerOrderNo {
-		return nil, gorm.ErrRecordNotFound
-	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
 		"status":               model.LdxpStatusWorkerPaid,
@@ -209,7 +223,7 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 	}
 	updates["worker_order_no"] = workerOrderNo
 	result := model.DB.Model(&model.LdxpTopupSession{}).
-		Where("session_id = ? AND worker_id = ? AND status IN ?", sessionID, workerID, []string{model.LdxpStatusQrReady}).
+		Where("session_id = ? AND worker_id = ? AND status IN ? AND worker_order_no = ?", sessionID, workerID, []string{model.LdxpStatusQrReady}, workerOrderNo).
 		Updates(updates)
 	if result.Error != nil {
 		return nil, result.Error
@@ -300,4 +314,32 @@ func findActiveLdxpTopupSessionForUser(userID int, now int64) (*model.LdxpTopupS
 		Order("created_time ASC, id ASC").
 		First(&session).Error
 	return &session, err
+}
+
+func findActiveLdxpTopupSessionForUserTx(tx *gorm.DB, userID int, now int64) (*model.LdxpTopupSession, error) {
+	var session model.LdxpTopupSession
+	query := tx.
+		Where("user_id = ? AND status IN ? AND expired_time > ?", userID, activeLdxpSessionStatuses(), now).
+		Order("created_time ASC, id ASC")
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&session).Error
+	return &session, err
+}
+
+func lockLdxpUserRowIfPossible(tx *gorm.DB, userID int) error {
+	if tx == nil {
+		return gorm.ErrInvalidData
+	}
+	var user model.User
+	query := tx.Model(&model.User{}).Where("id = ?", userID)
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	return err
 }
