@@ -26,11 +26,13 @@ var (
 	ldxpWhitespaceRe  = regexp.MustCompile(`[\t\r\f\v ]+`)
 	ldxpBlankLineRe   = regexp.MustCompile(`\n{3,}`)
 	ldxpOrderRe       = regexp.MustCompile(`(?m)(?:订单号|订单编号|订单)\s*[:：]?\s*(LD[A-Z0-9]+)\b`)
-	ldxpCardRe        = regexp.MustCompile(`(?m)(?:卡密账号|卡密|兑换码)\s*[:：]?\s*([A-Za-z0-9_-]{6,128})`)
+	ldxpCardRe        = regexp.MustCompile(`(?mi)(?:卡密信息|卡密内容|兑换码为|激活码|券码|序列号|CDKEY|卡密账号|卡密|兑换码|卡号|发货内容|购买内容|\b(?:code|secret|token|password)\b)\s*[:：]?\s*([A-Za-z0-9_-]{6,128})`)
 	ldxpAmountRe      = regexp.MustCompile(`(?m)(?:支付金额|金额)\s*[:：]?\s*¥?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:元)?`)
 	ldxpProductNameRe = regexp.MustCompile(`(?m)(?:商品名称|商品名|购买内容)\s*[:：]?\s*([^\n]+)`)
 	ldxpPaidTimeRe    = regexp.MustCompile(`(?m)(?:付款时间|支付时间|付款日期|支付日期)\s*[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`)
-	ldxpSensitiveRe   = regexp.MustCompile(`(?m)((?:卡密账号|卡密|兑换码|购买内容|发货内容|卡号)\s*[:：]?\s*)([A-Za-z0-9_-]{6,128})`)
+	ldxpSensitiveRe   = regexp.MustCompile(`(?mi)((?:卡密信息|卡密内容|兑换码为|激活码|券码|序列号|CDKEY|卡密账号|卡密|兑换码|卡号|发货内容|购买内容|\b(?:code|secret|token|password)\b)\s*[:：]?\s*)([A-Za-z0-9_-]{6,128})`)
+	ldxpRiskContextRe = regexp.MustCompile(`(?i)(?:卡|码|密|key|code|token|secret|password)`)
+	ldxpTokenLikeRe   = regexp.MustCompile(`[A-Za-z0-9_-]{6,128}`)
 )
 
 type LdxpParsedMail struct {
@@ -234,7 +236,8 @@ func TryMatchLdxpMailEvent(event *model.LdxpMailEvent) (*model.LdxpTopupSession,
 		}
 		eventResult := tx.Model(&model.LdxpMailEvent{}).
 			Where("id = ?", event.Id).
-			Where("(processed = ? OR matched_session_id = ?)", false, "").
+			Where("processed = ?", false).
+			Where("(matched_session_id = ? OR matched_session_id IS NULL)", "").
 			Updates(map[string]interface{}{
 				"matched_session_id": session.SessionId,
 				"processed":          true,
@@ -286,14 +289,24 @@ func hasLdxpMailAttachment(session *model.LdxpTopupSession) bool {
 }
 
 func redactLdxpSensitiveTokens(body string) string {
-	return ldxpSensitiveRe.ReplaceAllString(body, "${1}[redacted]")
+	body = ldxpSensitiveRe.ReplaceAllString(body, "${1}[redacted]")
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		if !ldxpRiskContextRe.MatchString(line) {
+			continue
+		}
+		lines[i] = ldxpTokenLikeRe.ReplaceAllStringFunc(line, func(token string) string {
+			return "[redacted]"
+		})
+	}
+	return strings.Join(lines, "\n")
 }
 
 func trimLdxpMailFieldValue(value string) string {
 	value = strings.TrimSpace(value)
 	fieldKeywords := []string{
-		"支付金额", "金额", "卡密账号", "卡密", "兑换码",
-		"卡号", "发货内容",
+		"支付金额", "金额", "卡密信息", "卡密内容", "兑换码为", "激活码", "券码", "序列号", "CDKEY",
+		"卡密账号", "卡密", "兑换码", "卡号", "发货内容", "购买内容", "code", "secret", "token", "password",
 		"付款时间", "支付时间", "付款日期", "支付日期",
 		"订单号", "订单编号", "订单",
 	}

@@ -360,7 +360,7 @@ func TestParseLdxpMailDoesNotLeakCardWhenCardLabelChanges(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, parsed)
 		assert.NotContains(t, parsed.BodyExcerpt, "SECRET-CARD-999999")
-		assert.Contains(t, parsed.BodyExcerpt, "[redacted]")
+		assert.Contains(t, parsed.BodyExcerpt, RedactLdxpValue("SECRET-CARD-999999"))
 	}
 }
 
@@ -375,6 +375,91 @@ func TestParseLdxpMailDoesNotGreedilyCaptureStickyFields(t *testing.T) {
 	assert.Equal(t, "abcd1234-card-key", parsed.CardKey)
 	assert.NotContains(t, parsed.CardKey, "付款时间")
 	assert.NotContains(t, parsed.ProductName, "金额")
+}
+
+func TestParseLdxpMailRedactsCommonSecretLabelVariants(t *testing.T) {
+	body := "订单号：LD260628UZJ97P\n卡密信息：SECRET-CARD-111111\n兑换码为：SECRET-CARD-222222\n金额：0.10"
+
+	parsed, err := ParseLdxpMailText(body)
+
+	require.NoError(t, err)
+	require.NotNil(t, parsed)
+	assert.NotContains(t, parsed.BodyExcerpt, "SECRET-CARD-111111")
+	assert.NotContains(t, parsed.BodyExcerpt, "SECRET-CARD-222222")
+	assert.Contains(t, parsed.BodyExcerpt, "[redacted]")
+}
+
+func TestMatchLdxpMailEventRejectsProcessedOrMatchedEventStates(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		processed        bool
+		matchedSessionId string
+	}{
+		{
+			name:             "matched_session_set",
+			processed:        false,
+			matchedSessionId: "other-session",
+		},
+		{
+			name:             "processed_but_unmatched",
+			processed:        true,
+			matchedSessionId: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupLdxpSessionServiceTest(t)
+			insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+				SessionId:         "ldxp_mail_reject_" + tc.name,
+				UserId:            1001,
+				Amount:            10,
+				Money:             0.10,
+				Status:            model.LdxpStatusWorkerPaid,
+				WorkerId:          "worker-a",
+				WorkerOrderNo:     "LD260628UZJ97P",
+				WorkerAmount:      0.10,
+				WorkerProductName: "0.1 元测试",
+				WorkerCardKey:     "abcd1234-card-key",
+				CreatedTime:       100,
+				UpdatedTime:       100,
+				ExpiredTime:       2000,
+			})
+			messageID := "message-reject-" + tc.name
+			event := &model.LdxpMailEvent{
+				MessageId:    &messageID,
+				RawHash:      HashLdxpMailRaw([]byte("reject-" + tc.name)),
+				MailFrom:     "sender@example.test",
+				MailTo:       "buyer@example.test",
+				Subject:      "paid",
+				ReceivedTime: 101,
+				OrderNo:      "LD260628UZJ97P",
+				Amount:       0.10,
+				ProductName:  "0.1 元测试",
+				CardKey:      "abcd1234-card-key",
+				CreatedTime:  102,
+			}
+			require.NoError(t, model.InsertLdxpMailEvent(event))
+			require.NoError(t, model.DB.Model(&model.LdxpMailEvent{}).
+				Where("id = ?", event.Id).
+				Updates(map[string]interface{}{
+					"processed":          tc.processed,
+					"matched_session_id": tc.matchedSessionId,
+				}).Error)
+
+			session, err := TryMatchLdxpMailEvent(event)
+
+			require.Error(t, err)
+			assert.Nil(t, session)
+			persistedSession, err := model.GetLdxpTopupSessionBySessionId("ldxp_mail_reject_" + tc.name)
+			require.NoError(t, err)
+			assert.Empty(t, persistedSession.MailMessageId)
+			assert.Empty(t, persistedSession.MailOrderNo)
+			assert.Empty(t, persistedSession.MailCardKey)
+			var persistedEvent model.LdxpMailEvent
+			require.NoError(t, model.DB.First(&persistedEvent, event.Id).Error)
+			assert.Equal(t, tc.processed, persistedEvent.Processed)
+			assert.Equal(t, tc.matchedSessionId, persistedEvent.MatchedSessionId)
+		})
+	}
 }
 
 func TestSaveLdxpMailEventDedupesMessageID(t *testing.T) {
