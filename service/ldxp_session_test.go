@@ -1,0 +1,245 @@
+package service
+
+import (
+	"errors"
+	"fmt"
+	"regexp"
+	"testing"
+
+	"github.com/QuantumNous/new-api/model"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+)
+
+func setupLdxpSessionServiceTest(t *testing.T) {
+	t.Helper()
+	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}))
+	cleanup := func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM ldxp_topup_sessions").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM ldxp_mail_events").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM users").Error)
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+}
+
+func testLdxpSessionConfig(enabled bool) *LdxpConfig {
+	return &LdxpConfig{
+		Enabled:      enabled,
+		ContactEmail: "buyer@example.test",
+		Products: map[int64]LdxpProductConfig{
+			10: {Amount: 10, Money: 0.10, ProductURL: "https://example.test/product/10", ProductName: "LDXP 10"},
+			20: {Amount: 20, Money: 0.20, ProductURL: "https://example.test/product/20", ProductName: "LDXP 20"},
+		},
+		SessionTTLSeconds: 1200,
+		QrTTLSeconds:      300,
+	}
+}
+
+func insertLdxpSessionForServiceTest(t *testing.T, session *model.LdxpTopupSession) {
+	t.Helper()
+	require.NoError(t, model.InsertLdxpTopupSession(session))
+}
+
+func TestCreateLdxpTopupSessionRejectsDisabled(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+
+	view, err := CreateLdxpTopupSession(1001, 10, testLdxpSessionConfig(false))
+
+	require.Error(t, err)
+	assert.Nil(t, view)
+	assert.Contains(t, err.Error(), "disabled")
+}
+
+func TestCreateLdxpTopupSessionRejectsUnsupportedAmount(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+
+	view, err := CreateLdxpTopupSession(1001, 30, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.Nil(t, view)
+	assert.Contains(t, err.Error(), "unsupported")
+}
+
+func TestCreateLdxpTopupSessionPersistsCreatedState(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+
+	view, err := CreateLdxpTopupSession(1001, 10, testLdxpSessionConfig(true))
+
+	require.NoError(t, err)
+	require.NotNil(t, view)
+	assert.Regexp(t, regexp.MustCompile(`^ldxp_[a-z0-9]{24}$`), view.SessionID)
+	assert.EqualValues(t, 10, view.Amount)
+	assert.Equal(t, 0.10, view.Money)
+	assert.Equal(t, model.LdxpStatusCreated, view.Status)
+	assert.Empty(t, view.QRCode)
+	assert.Equal(t, 2000, view.PollIntervalMs)
+	assert.NotZero(t, view.ExpiresAt)
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId(view.SessionID)
+	require.NoError(t, err)
+	assert.Equal(t, 1001, persisted.UserId)
+	assert.EqualValues(t, 10, persisted.Amount)
+	assert.Equal(t, 0.10, persisted.Money)
+	assert.Equal(t, "https://example.test/product/10", persisted.ProductUrl)
+	assert.Equal(t, "LDXP 10", persisted.ProductName)
+	assert.Equal(t, "buyer@example.test", persisted.ContactEmail)
+	assert.Equal(t, model.LdxpStatusCreated, persisted.Status)
+	assert.Equal(t, persisted.CreatedTime, persisted.UpdatedTime)
+	assert.EqualValues(t, persisted.CreatedTime+1200, persisted.ExpiredTime)
+}
+
+func TestRecordLdxpQrMovesSessionToQrReady(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_qr_ready_test",
+		UserId:      1001,
+		Amount:      10,
+		Money:       0.10,
+		Status:      model.LdxpStatusWorkerClaimed,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+
+	err := RecordLdxpQr("ldxp_qr_ready_test", LdxpWorkerQrPayload{
+		WorkerID:          "worker-a",
+		WorkerOrderNo:     "order-qr-1",
+		WorkerAmount:      0.10,
+		WorkerProductName: "LDXP 10",
+		QRCode:            "data:image/png;base64,QR",
+		QRPageURL:         "https://example.test/qr",
+	})
+
+	require.NoError(t, err)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_qr_ready_test")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusQrReady, persisted.Status)
+	assert.Equal(t, "worker-a", persisted.WorkerId)
+	assert.Equal(t, "order-qr-1", persisted.WorkerOrderNo)
+	assert.Equal(t, 0.10, persisted.WorkerAmount)
+	assert.Equal(t, "LDXP 10", persisted.WorkerProductName)
+	assert.Equal(t, "data:image/png;base64,QR", persisted.QrCode)
+	assert.Equal(t, "https://example.test/qr", persisted.QrPageUrl)
+	assert.NotZero(t, persisted.QrReadyTime)
+	assert.Greater(t, persisted.UpdatedTime, int64(100))
+
+	view, err := GetLdxpSessionPublicView("ldxp_qr_ready_test", 1001)
+	require.NoError(t, err)
+	assert.Equal(t, "data:image/png;base64,QR", view.QRCode)
+}
+
+func TestRecordLdxpWorkerResultMovesSessionToWorkerPaid(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:     "ldxp_worker_paid_test",
+		UserId:        1001,
+		Amount:        20,
+		Money:         0.20,
+		Status:        model.LdxpStatusQrReady,
+		WorkerId:      "worker-a",
+		WorkerOrderNo: "order-paid-1",
+		QrCode:        "data:image/png;base64,QR",
+		CreatedTime:   100,
+		UpdatedTime:   100,
+		ExpiredTime:   2000,
+	})
+
+	session, err := RecordLdxpWorkerResult("ldxp_worker_paid_test", LdxpWorkerResultPayload{
+		WorkerID:          "worker-a",
+		WorkerOrderNo:     "order-paid-1",
+		WorkerAmount:      0.20,
+		WorkerProductName: "LDXP 20",
+		WorkerCardKey:     "SECRET-CARD-KEY",
+		WorkerStatusText:  "paid",
+		WorkerSuccessURL:  "https://example.test/success",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, model.LdxpStatusWorkerPaid, session.Status)
+	assert.Equal(t, "SECRET-CARD-KEY", session.WorkerCardKey)
+	assert.NotZero(t, session.WorkerDetectedTime)
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_worker_paid_test")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusWorkerPaid, persisted.Status)
+	assert.Equal(t, "worker-a", persisted.WorkerId)
+	assert.Equal(t, "order-paid-1", persisted.WorkerOrderNo)
+	assert.Equal(t, 0.20, persisted.WorkerAmount)
+	assert.Equal(t, "LDXP 20", persisted.WorkerProductName)
+	assert.Equal(t, "SECRET-CARD-KEY", persisted.WorkerCardKey)
+	assert.Equal(t, "paid", persisted.WorkerStatusText)
+	assert.Equal(t, "https://example.test/success", persisted.WorkerSuccessUrl)
+	assert.NotZero(t, persisted.WorkerDetectedTime)
+
+	view, err := GetLdxpSessionPublicView("ldxp_worker_paid_test", 1001)
+	require.NoError(t, err)
+	assert.Empty(t, view.QRCode, "terminal/paid views must not keep exposing QR code")
+}
+
+func TestCancelLdxpSessionOnlyOwnerAndCancelableStates(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	for _, session := range []*model.LdxpTopupSession{
+		{SessionId: "cancel_created", UserId: 1001, Status: model.LdxpStatusCreated, CreatedTime: 100, UpdatedTime: 100, ExpiredTime: 2000},
+		{SessionId: "cancel_claimed", UserId: 1001, Status: model.LdxpStatusWorkerClaimed, CreatedTime: 100, UpdatedTime: 100, ExpiredTime: 2000},
+		{SessionId: "cancel_qr", UserId: 1001, Status: model.LdxpStatusQrReady, CreatedTime: 100, UpdatedTime: 100, ExpiredTime: 2000},
+		{SessionId: "cancel_paid", UserId: 1001, Status: model.LdxpStatusWorkerPaid, CreatedTime: 100, UpdatedTime: 100, ExpiredTime: 2000},
+		{SessionId: "cancel_other_owner", UserId: 2002, Status: model.LdxpStatusCreated, CreatedTime: 100, UpdatedTime: 100, ExpiredTime: 2000},
+	} {
+		insertLdxpSessionForServiceTest(t, session)
+	}
+
+	for _, sessionID := range []string{"cancel_created", "cancel_claimed", "cancel_qr"} {
+		require.NoError(t, CancelLdxpTopupSession(sessionID, 1001))
+		persisted, err := model.GetLdxpTopupSessionBySessionId(sessionID)
+		require.NoError(t, err)
+		assert.Equal(t, model.LdxpStatusCanceled, persisted.Status)
+		assert.Greater(t, persisted.UpdatedTime, int64(100))
+	}
+
+	err := CancelLdxpTopupSession("cancel_paid", 1001)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not cancelable")
+	paid, err := model.GetLdxpTopupSessionBySessionId("cancel_paid")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusWorkerPaid, paid.Status)
+
+	err = CancelLdxpTopupSession("cancel_other_owner", 1001)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, gorm.ErrRecordNotFound), "got %v", err)
+	otherOwner, err := model.GetLdxpTopupSessionBySessionId("cancel_other_owner")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusCreated, otherOwner.Status)
+}
+
+func TestPublicLdxpSessionViewDoesNotExposeCardKey(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:     "ldxp_public_view_secret_test",
+		UserId:        1001,
+		Amount:        20,
+		Money:         0.20,
+		Status:        model.LdxpStatusWorkerPaid,
+		WorkerOrderNo: "order-public-1",
+		QrCode:        "data:image/png;base64,QR",
+		WorkerCardKey: "SECRET-WORKER-CARD",
+		MailCardKey:   "SECRET-MAIL-CARD",
+		CreatedTime:   100,
+		UpdatedTime:   100,
+		ExpiredTime:   2000,
+	})
+
+	view, err := GetLdxpSessionPublicView("ldxp_public_view_secret_test", 1001)
+
+	require.NoError(t, err)
+	require.NotNil(t, view)
+	assert.Equal(t, "ldxp_public_view_secret_test", view.SessionID)
+	assert.Equal(t, "order-public-1", view.WorkerOrderNo)
+	assert.Empty(t, view.QRCode)
+	renderedView := fmt.Sprintf("%+v", view)
+	assert.NotContains(t, renderedView, "SECRET-WORKER-CARD")
+	assert.NotContains(t, renderedView, "SECRET-MAIL-CARD")
+}
