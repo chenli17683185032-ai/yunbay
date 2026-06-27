@@ -71,6 +71,12 @@ func CreateLdxpTopupSession(userID int, amount int64, cfg *LdxpConfig) (*LdxpSes
 	}
 
 	now := common.GetTimestamp()
+	if activeSession, err := findActiveLdxpTopupSessionForUser(userID, now); err == nil {
+		return publicLdxpSessionView(activeSession), nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
 	sessionID, err := generateLdxpSessionID()
 	if err != nil {
 		return nil, err
@@ -180,14 +186,15 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 		return nil, fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
 	}
 	workerOrderNo := strings.TrimSpace(payload.WorkerOrderNo)
-	if workerOrderNo != "" {
-		existing, err := model.GetLdxpTopupSessionBySessionId(sessionID)
-		if err != nil {
-			return nil, err
-		}
-		if existing.WorkerOrderNo != "" && existing.WorkerOrderNo != workerOrderNo {
-			return nil, gorm.ErrRecordNotFound
-		}
+	if workerOrderNo == "" {
+		return nil, fmt.Errorf("%w: missing worker order no", ErrLdxpInvalidSessionRequest)
+	}
+	existing, err := model.GetLdxpTopupSessionBySessionId(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if existing.WorkerOrderNo != "" && existing.WorkerOrderNo != workerOrderNo {
+		return nil, gorm.ErrRecordNotFound
 	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
@@ -200,9 +207,7 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 		"worker_detected_time": now,
 		"updated_time":         now,
 	}
-	if workerOrderNo != "" {
-		updates["worker_order_no"] = workerOrderNo
-	}
+	updates["worker_order_no"] = workerOrderNo
 	result := model.DB.Model(&model.LdxpTopupSession{}).
 		Where("session_id = ? AND worker_id = ? AND status IN ?", sessionID, workerID, []string{model.LdxpStatusQrReady}).
 		Updates(updates)
@@ -277,17 +282,22 @@ func isLdxpCancelableStatus(status string) bool {
 	}
 }
 
-func terminalLdxpStatuses() []string {
+func activeLdxpSessionStatuses() []string {
 	return []string{
+		model.LdxpStatusCreated,
+		model.LdxpStatusWorkerClaimed,
+		model.LdxpStatusQrReady,
 		model.LdxpStatusWorkerPaid,
 		model.LdxpStatusVerified,
 		model.LdxpStatusRedeemed,
-		model.LdxpStatusSuccess,
-		model.LdxpStatusCanceled,
-		model.LdxpStatusExpired,
-		model.LdxpStatusWorkerFailed,
-		model.LdxpStatusMailTimeout,
-		model.LdxpStatusVerifyFailed,
-		model.LdxpStatusRedeemFailed,
 	}
+}
+
+func findActiveLdxpTopupSessionForUser(userID int, now int64) (*model.LdxpTopupSession, error) {
+	var session model.LdxpTopupSession
+	err := model.DB.
+		Where("user_id = ? AND status IN ? AND expired_time > ?", userID, activeLdxpSessionStatuses(), now).
+		Order("created_time ASC, id ASC").
+		First(&session).Error
+	return &session, err
 }

@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+
 	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -60,6 +62,58 @@ func TestCreateLdxpTopupSessionRejectsUnsupportedAmount(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, view)
 	assert.Contains(t, err.Error(), "unsupported")
+}
+
+func TestCreateLdxpTopupSessionReusesActiveSessionForUser(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	now := common.GetTimestamp()
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_active_reuse_existing",
+		UserId:      1001,
+		Amount:      10,
+		Money:       0.10,
+		ProductUrl:  "https://example.test/product/10",
+		ProductName: "LDXP 10",
+		Status:      model.LdxpStatusQrReady,
+		WorkerId:    "worker-a",
+		QrCode:      "data:image/png;base64,QR",
+		CreatedTime: now - 10,
+		UpdatedTime: now - 5,
+		ExpiredTime: now + 1200,
+	})
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_other_user_active",
+		UserId:      2002,
+		Amount:      20,
+		Money:       0.20,
+		Status:      model.LdxpStatusCreated,
+		CreatedTime: now - 9,
+		UpdatedTime: now - 9,
+		ExpiredTime: now + 1200,
+	})
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_terminal_not_reused",
+		UserId:      1001,
+		Amount:      20,
+		Money:       0.20,
+		Status:      model.LdxpStatusSuccess,
+		CreatedTime: now - 8,
+		UpdatedTime: now - 8,
+		ExpiredTime: now + 1200,
+	})
+
+	view, err := CreateLdxpTopupSession(1001, 20, testLdxpSessionConfig(true))
+
+	require.NoError(t, err)
+	require.NotNil(t, view)
+	assert.Equal(t, "ldxp_active_reuse_existing", view.SessionID)
+	assert.EqualValues(t, 10, view.Amount, "active session is reused even when requested amount differs")
+	assert.Equal(t, model.LdxpStatusQrReady, view.Status)
+	assert.Equal(t, "data:image/png;base64,QR", view.QRCode)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("user_id = ?", 1001).Count(&count).Error)
+	assert.EqualValues(t, 2, count, "reuse must not create another row for the same user")
 }
 
 func TestCreateLdxpTopupSessionPersistsCreatedState(t *testing.T) {
@@ -244,6 +298,35 @@ func TestPublicLdxpSessionViewDoesNotExposeCardKey(t *testing.T) {
 	assert.NotContains(t, renderedView, "SECRET-MAIL-CARD")
 }
 
+func TestClaimLdxpTopupSessionMovesCreatedSessionToWorkerClaimed(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	now := common.GetTimestamp()
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_claim_created",
+		UserId:      1001,
+		Amount:      10,
+		Money:       0.10,
+		Status:      model.LdxpStatusCreated,
+		CreatedTime: now - 10,
+		UpdatedTime: now - 10,
+		ExpiredTime: now + 1200,
+	})
+
+	claimed, err := ClaimLdxpTopupSession(" worker-a ", testLdxpSessionConfig(true))
+
+	require.NoError(t, err)
+	require.NotNil(t, claimed)
+	assert.Equal(t, "ldxp_claim_created", claimed.SessionId)
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, claimed.Status)
+	assert.Equal(t, "worker-a", claimed.WorkerId)
+	assert.Greater(t, claimed.UpdatedTime, now-10)
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_claim_created")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, persisted.Status)
+	assert.Equal(t, "worker-a", persisted.WorkerId)
+}
+
 func TestClaimLdxpTopupSessionRejectsNilConfig(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 
@@ -304,6 +387,39 @@ func TestRecordLdxpQrRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
 	assert.EqualValues(t, 100, claimed.UpdatedTime)
 }
 
+func TestRecordLdxpWorkerResultRejectsMissingOrderNo(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_result_missing_order",
+		UserId:      1001,
+		Status:      model.LdxpStatusQrReady,
+		WorkerId:    "worker-a",
+		QrCode:      "qr",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+
+	session, err := RecordLdxpWorkerResult("ldxp_result_missing_order", LdxpWorkerResultPayload{
+		WorkerID:          "worker-a",
+		WorkerOrderNo:     "   ",
+		WorkerAmount:      0.10,
+		WorkerProductName: "LDXP 10",
+		WorkerCardKey:     "SHOULD-NOT-WRITE",
+		WorkerStatusText:  "paid",
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, session)
+	assert.ErrorIs(t, err, ErrLdxpInvalidSessionRequest)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_result_missing_order")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusQrReady, persisted.Status)
+	assert.Empty(t, persisted.WorkerOrderNo)
+	assert.Empty(t, persisted.WorkerCardKey)
+	assert.EqualValues(t, 100, persisted.UpdatedTime)
+}
+
 func TestRecordLdxpWorkerResultRejectsDifferentWorkerAndPaidOverwrite(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
@@ -362,6 +478,43 @@ func TestRecordLdxpWorkerResultRejectsDifferentWorkerAndPaidOverwrite(t *testing
 	assert.Equal(t, "paid-original", paid.WorkerStatusText)
 	assert.EqualValues(t, 150, paid.WorkerDetectedTime)
 	assert.EqualValues(t, 150, paid.UpdatedTime)
+}
+
+func TestRecordLdxpWorkerErrorMovesClaimedOrQrSessionToWorkerFailed(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_error_claimed_success",
+		UserId:      1001,
+		Status:      model.LdxpStatusWorkerClaimed,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_error_qr_success",
+		UserId:      1001,
+		Status:      model.LdxpStatusQrReady,
+		WorkerId:    "worker-a",
+		QrCode:      "qr",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+
+	for _, sessionID := range []string{"ldxp_error_claimed_success", "ldxp_error_qr_success"} {
+		err := RecordLdxpWorkerError(sessionID, " worker-a ", " qr_failed ", " failed to fetch qr ", " /tmp/ldxp-snapshot.png ")
+		require.NoError(t, err)
+
+		persisted, err := model.GetLdxpTopupSessionBySessionId(sessionID)
+		require.NoError(t, err)
+		assert.Equal(t, model.LdxpStatusWorkerFailed, persisted.Status)
+		assert.Equal(t, "worker-a", persisted.WorkerId)
+		assert.Equal(t, "qr_failed", persisted.ErrorCode)
+		assert.Equal(t, "failed to fetch qr", persisted.ErrorMessage)
+		assert.Equal(t, "/tmp/ldxp-snapshot.png", persisted.DebugSnapshotPath)
+		assert.Greater(t, persisted.UpdatedTime, int64(100))
+	}
 }
 
 func TestRecordLdxpWorkerErrorRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
