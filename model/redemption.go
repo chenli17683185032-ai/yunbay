@@ -111,11 +111,12 @@ func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Re
 	// Build query based on keyword type
 	query := tx.Model(&Redemption{})
 
+	pattern := keyword + "%"
 	// Only try to convert to ID if the string represents a valid integer
 	if id, err := strconv.Atoi(keyword); err == nil {
-		query = query.Where("id = ? OR name LIKE ?", id, keyword+"%")
+		query = query.Where("id = ? OR name LIKE ? OR batch_id LIKE ?", id, pattern, pattern)
 	} else {
-		query = query.Where("name LIKE ?", keyword+"%")
+		query = query.Where("name LIKE ? OR batch_id LIKE ?", pattern, pattern)
 	}
 
 	// Get total count
@@ -227,6 +228,24 @@ func buildRedeemResult(redemption *Redemption) *RedeemResult {
 			Source:       redemption.Source,
 		},
 	}
+}
+
+func GetRedemptionsByBatchId(batchId string) ([]*Redemption, error) {
+	batchId = strings.TrimSpace(batchId)
+	if batchId == "" {
+		return nil, ErrRedemptionInvalid
+	}
+	var redemptions []*Redemption
+	err := DB.Where("batch_id = ?", batchId).Order("id asc").Find(&redemptions).Error
+	return redemptions, err
+}
+
+func MarkRedemptionsExported(batchId string, exportedTime int64) error {
+	batchId = strings.TrimSpace(batchId)
+	if batchId == "" {
+		return ErrRedemptionInvalid
+	}
+	return DB.Model(&Redemption{}).Where("batch_id = ?", batchId).Update("exported_time", exportedTime).Error
 }
 
 func redeemError(err error) error {
