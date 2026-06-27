@@ -750,3 +750,52 @@ cd web/classic && bun run build
 ```
 
 生产同步仍按本文“非删除式同步生产”章节执行，不要在服务器上依赖失效 worktree 的 `git pull`。
+
+
+### 2026-06-27 生产同步与复核结果
+
+本轮用户标签修复已同步到生产环境。公开文档只记录可复现事实，不记录 SSH 私钥、后台密码、cookie、session、token 或服务器 secret。
+
+- GitHub 分支：`codex/user-tags-model-groups`
+- 功能修复提交：`0f0ac266 fix: separate admin user tag options`
+- 同步方式：非删除式 `rsync --relative --files-from` 同步本次提交涉及的 21 个文件到 `/opt/new-api/app/`
+- 重建方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api`
+- 重启方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api`
+
+生产复核结果：
+
+```text
+yunbay-new-api: running / healthy
+http://127.0.0.1:3000/api/status 200
+https://yunbay.xyz/              200
+https://yunbay.xyz/api/status    200
+https://yunbay.xyz/login         200
+https://yunbay.xyz/console/user  200
+```
+
+后台用户标签接口已用真实后台登录会话验证：
+
+```text
+GET /api/user/group-tags
+success=true
+values=体验用户,vip
+labels=体验用户,VIP 用户
+```
+
+生产数据复核：
+
+```text
+USER_GROUP|1|体验用户|40
+USER_GROUP|10|default|1
+USER_GROUP|100|default|1
+TOKEN_GROUP|gpt-plus|29
+TOKEN_GROUP|gpt-pro|2
+COMMON_USER_UNEXPECTED_GROUP_COUNT|0
+TOKEN_INVALID_MODEL_GROUP_COUNT|0
+```
+
+部署后发现 1 个普通用户历史残留 `users.group=gpt-plus`（模型分组误写到用户标签字段）。已按“普通用户无 VIP 条件则归为体验用户”的规则做一次性修正为 `体验用户`，并在服务器 `/opt/new-api/backups/` 下保留 root-only TSV 备份：
+
+```text
+user_group_cleanup_20260627_145927.tsv
+```
