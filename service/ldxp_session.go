@@ -131,7 +131,10 @@ func ClaimLdxpTopupSession(workerID string, cfg *LdxpConfig) (*model.LdxpTopupSe
 	if workerID == "" {
 		return nil, fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
 	}
-	if cfg != nil && !cfg.Enabled {
+	if cfg == nil {
+		return nil, fmt.Errorf("%w: missing config", ErrLdxpInvalidSessionRequest)
+	}
+	if !cfg.Enabled {
 		return nil, ErrLdxpTopupDisabled
 	}
 	now := common.GetTimestamp()
@@ -142,11 +145,13 @@ func ClaimLdxpTopupSession(workerID string, cfg *LdxpConfig) (*model.LdxpTopupSe
 }
 
 func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
+	workerID := strings.TrimSpace(payload.WorkerID)
+	if workerID == "" {
+		return fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
+	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
 		"status":              model.LdxpStatusQrReady,
-		"worker_id":           strings.TrimSpace(payload.WorkerID),
-		"worker_order_no":     strings.TrimSpace(payload.WorkerOrderNo),
 		"worker_amount":       payload.WorkerAmount,
 		"worker_product_name": strings.TrimSpace(payload.WorkerProductName),
 		"qr_code":             strings.TrimSpace(payload.QRCode),
@@ -154,8 +159,11 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 		"qr_ready_time":       now,
 		"updated_time":        now,
 	}
+	if workerOrderNo := strings.TrimSpace(payload.WorkerOrderNo); workerOrderNo != "" {
+		updates["worker_order_no"] = workerOrderNo
+	}
 	result := model.DB.Model(&model.LdxpTopupSession{}).
-		Where("session_id = ? AND status IN ?", sessionID, []string{model.LdxpStatusCreated, model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady}).
+		Where("session_id = ? AND worker_id = ? AND status IN ?", sessionID, workerID, []string{model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady}).
 		Updates(updates)
 	if result.Error != nil {
 		return result.Error
@@ -167,11 +175,23 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 }
 
 func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (*model.LdxpTopupSession, error) {
+	workerID := strings.TrimSpace(payload.WorkerID)
+	if workerID == "" {
+		return nil, fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
+	}
+	workerOrderNo := strings.TrimSpace(payload.WorkerOrderNo)
+	if workerOrderNo != "" {
+		existing, err := model.GetLdxpTopupSessionBySessionId(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if existing.WorkerOrderNo != "" && existing.WorkerOrderNo != workerOrderNo {
+			return nil, gorm.ErrRecordNotFound
+		}
+	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
 		"status":               model.LdxpStatusWorkerPaid,
-		"worker_id":            strings.TrimSpace(payload.WorkerID),
-		"worker_order_no":      strings.TrimSpace(payload.WorkerOrderNo),
 		"worker_amount":        payload.WorkerAmount,
 		"worker_product_name":  strings.TrimSpace(payload.WorkerProductName),
 		"worker_card_key":      strings.TrimSpace(payload.WorkerCardKey),
@@ -180,8 +200,11 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 		"worker_detected_time": now,
 		"updated_time":         now,
 	}
+	if workerOrderNo != "" {
+		updates["worker_order_no"] = workerOrderNo
+	}
 	result := model.DB.Model(&model.LdxpTopupSession{}).
-		Where("session_id = ? AND status IN ?", sessionID, []string{model.LdxpStatusCreated, model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady, model.LdxpStatusWorkerPaid}).
+		Where("session_id = ? AND worker_id = ? AND status IN ?", sessionID, workerID, []string{model.LdxpStatusQrReady}).
 		Updates(updates)
 	if result.Error != nil {
 		return nil, result.Error
@@ -193,12 +216,15 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 }
 
 func RecordLdxpWorkerError(sessionID string, workerID string, code string, message string, snapshotPath string) error {
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
+	}
 	now := common.GetTimestamp()
 	result := model.DB.Model(&model.LdxpTopupSession{}).
-		Where("session_id = ? AND status NOT IN ?", sessionID, terminalLdxpStatuses()).
+		Where("session_id = ? AND worker_id = ? AND status IN ?", sessionID, workerID, []string{model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady}).
 		Updates(map[string]interface{}{
 			"status":              model.LdxpStatusWorkerFailed,
-			"worker_id":           strings.TrimSpace(workerID),
 			"error_code":          strings.TrimSpace(code),
 			"error_message":       strings.TrimSpace(message),
 			"debug_snapshot_path": strings.TrimSpace(snapshotPath),

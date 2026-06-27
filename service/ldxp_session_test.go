@@ -243,3 +243,165 @@ func TestPublicLdxpSessionViewDoesNotExposeCardKey(t *testing.T) {
 	assert.NotContains(t, renderedView, "SECRET-WORKER-CARD")
 	assert.NotContains(t, renderedView, "SECRET-MAIL-CARD")
 }
+
+func TestClaimLdxpTopupSessionRejectsNilConfig(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+
+	session, err := ClaimLdxpTopupSession("worker-a", nil)
+
+	require.Error(t, err)
+	assert.Nil(t, session)
+	assert.ErrorIs(t, err, ErrLdxpInvalidSessionRequest)
+}
+
+func TestRecordLdxpQrRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_qr_created_reject",
+		UserId:      1001,
+		Status:      model.LdxpStatusCreated,
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_qr_worker_reject",
+		UserId:      1001,
+		Status:      model.LdxpStatusWorkerClaimed,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+
+	err := RecordLdxpQr("ldxp_qr_created_reject", LdxpWorkerQrPayload{
+		WorkerID:      "worker-a",
+		WorkerOrderNo: "order-created-should-not-write",
+		QRCode:        "created-qr",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	created, err := model.GetLdxpTopupSessionBySessionId("ldxp_qr_created_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusCreated, created.Status)
+	assert.Empty(t, created.WorkerOrderNo)
+	assert.Empty(t, created.QrCode)
+	assert.EqualValues(t, 100, created.UpdatedTime)
+
+	err = RecordLdxpQr("ldxp_qr_worker_reject", LdxpWorkerQrPayload{
+		WorkerID:      "worker-b",
+		WorkerOrderNo: "order-wrong-worker",
+		QRCode:        "wrong-worker-qr",
+	})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	claimed, err := model.GetLdxpTopupSessionBySessionId("ldxp_qr_worker_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, claimed.Status)
+	assert.Equal(t, "worker-a", claimed.WorkerId)
+	assert.Empty(t, claimed.WorkerOrderNo)
+	assert.Empty(t, claimed.QrCode)
+	assert.EqualValues(t, 100, claimed.UpdatedTime)
+}
+
+func TestRecordLdxpWorkerResultRejectsDifferentWorkerAndPaidOverwrite(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:     "ldxp_result_worker_reject",
+		UserId:        1001,
+		Status:        model.LdxpStatusQrReady,
+		WorkerId:      "worker-a",
+		WorkerOrderNo: "order-result-1",
+		QrCode:        "qr",
+		CreatedTime:   100,
+		UpdatedTime:   100,
+		ExpiredTime:   2000,
+	})
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:          "ldxp_result_paid_reject",
+		UserId:             1001,
+		Status:             model.LdxpStatusWorkerPaid,
+		WorkerId:           "worker-a",
+		WorkerOrderNo:      "order-paid-1",
+		WorkerCardKey:      "ORIGINAL-CARD-KEY",
+		WorkerStatusText:   "paid-original",
+		WorkerDetectedTime: 150,
+		CreatedTime:        100,
+		UpdatedTime:        150,
+		ExpiredTime:        2000,
+	})
+
+	session, err := RecordLdxpWorkerResult("ldxp_result_worker_reject", LdxpWorkerResultPayload{
+		WorkerID:      "worker-b",
+		WorkerOrderNo: "order-result-1",
+		WorkerCardKey: "WRONG-WORKER-CARD",
+	})
+	require.Error(t, err)
+	assert.Nil(t, session)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	wrongWorker, err := model.GetLdxpTopupSessionBySessionId("ldxp_result_worker_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusQrReady, wrongWorker.Status)
+	assert.Equal(t, "worker-a", wrongWorker.WorkerId)
+	assert.Empty(t, wrongWorker.WorkerCardKey)
+	assert.EqualValues(t, 100, wrongWorker.UpdatedTime)
+
+	session, err = RecordLdxpWorkerResult("ldxp_result_paid_reject", LdxpWorkerResultPayload{
+		WorkerID:         "worker-a",
+		WorkerOrderNo:    "order-paid-1",
+		WorkerCardKey:    "REPLACEMENT-CARD-KEY",
+		WorkerStatusText: "paid-replacement",
+	})
+	require.Error(t, err)
+	assert.Nil(t, session)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	paid, err := model.GetLdxpTopupSessionBySessionId("ldxp_result_paid_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusWorkerPaid, paid.Status)
+	assert.Equal(t, "ORIGINAL-CARD-KEY", paid.WorkerCardKey)
+	assert.Equal(t, "paid-original", paid.WorkerStatusText)
+	assert.EqualValues(t, 150, paid.WorkerDetectedTime)
+	assert.EqualValues(t, 150, paid.UpdatedTime)
+}
+
+func TestRecordLdxpWorkerErrorRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_error_created_reject",
+		UserId:      1001,
+		Status:      model.LdxpStatusCreated,
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_error_worker_reject",
+		UserId:      1001,
+		Status:      model.LdxpStatusQrReady,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: 2000,
+	})
+
+	err := RecordLdxpWorkerError("ldxp_error_created_reject", "worker-a", "created_error", "should not write", "/tmp/created.png")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	created, err := model.GetLdxpTopupSessionBySessionId("ldxp_error_created_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusCreated, created.Status)
+	assert.Empty(t, created.ErrorCode)
+	assert.Empty(t, created.DebugSnapshotPath)
+	assert.EqualValues(t, 100, created.UpdatedTime)
+
+	err = RecordLdxpWorkerError("ldxp_error_worker_reject", "worker-b", "wrong_worker", "should not write", "/tmp/wrong.png")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	claimed, err := model.GetLdxpTopupSessionBySessionId("ldxp_error_worker_reject")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusQrReady, claimed.Status)
+	assert.Equal(t, "worker-a", claimed.WorkerId)
+	assert.Empty(t, claimed.ErrorCode)
+	assert.Empty(t, claimed.DebugSnapshotPath)
+	assert.EqualValues(t, 100, claimed.UpdatedTime)
+}
