@@ -26,10 +26,11 @@ var (
 	ldxpWhitespaceRe  = regexp.MustCompile(`[\t\r\f\v ]+`)
 	ldxpBlankLineRe   = regexp.MustCompile(`\n{3,}`)
 	ldxpOrderRe       = regexp.MustCompile(`(?m)(?:订单号|订单编号|订单)\s*[:：]?\s*(LD[A-Z0-9]+)\b`)
-	ldxpCardRe        = regexp.MustCompile(`(?m)(?:卡密账号|卡密|兑换码)\s*[:：]?\s*([^\s]+)`)
+	ldxpCardRe        = regexp.MustCompile(`(?m)(?:卡密账号|卡密|兑换码)\s*[:：]?\s*([A-Za-z0-9_-]{6,128})`)
 	ldxpAmountRe      = regexp.MustCompile(`(?m)(?:支付金额|金额)\s*[:：]?\s*¥?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:元)?`)
 	ldxpProductNameRe = regexp.MustCompile(`(?m)(?:商品名称|商品名|购买内容)\s*[:：]?\s*([^\n]+)`)
 	ldxpPaidTimeRe    = regexp.MustCompile(`(?m)(?:付款时间|支付时间|付款日期|支付日期)\s*[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`)
+	ldxpSensitiveRe   = regexp.MustCompile(`(?m)((?:卡密账号|卡密|兑换码|购买内容|发货内容|卡号)\s*[:：]?\s*)([A-Za-z0-9_-]{6,128})`)
 )
 
 type LdxpParsedMail struct {
@@ -66,7 +67,7 @@ func ParseLdxpMailText(input string) (*LdxpParsedMail, error) {
 		parsed.Amount = amount
 	}
 	if matches := ldxpProductNameRe.FindStringSubmatch(normalized); len(matches) > 1 {
-		parsed.ProductName = strings.TrimSpace(matches[1])
+		parsed.ProductName = trimLdxpMailFieldValue(matches[1])
 	}
 	if matches := ldxpPaidTimeRe.FindStringSubmatch(normalized); len(matches) > 1 {
 		paidTime, err := time.ParseInLocation("2006-01-02 15:04:05", strings.TrimSpace(matches[1]), time.Local)
@@ -173,11 +174,33 @@ func TryMatchLdxpMailEvent(event *model.LdxpMailEvent) (*model.LdxpTopupSession,
 			return err
 		}
 
-		if strings.TrimSpace(session.WorkerCardKey) != "" && strings.TrimSpace(event.CardKey) != "" && strings.TrimSpace(session.WorkerCardKey) != strings.TrimSpace(event.CardKey) {
+		if hasLdxpMailAttachment(&session) {
+			var persistedEvent model.LdxpMailEvent
+			if err := tx.Where("id = ?", event.Id).First(&persistedEvent).Error; err != nil {
+				return err
+			}
+			if persistedEvent.Processed && strings.TrimSpace(persistedEvent.MatchedSessionId) == session.SessionId {
+				matched = &session
+				return nil
+			}
+			return fmt.Errorf("%w: ldxp mail already attached", ErrLdxpInvalidSessionRequest)
+		}
+
+		workerCard := strings.TrimSpace(session.WorkerCardKey)
+		eventCard := strings.TrimSpace(event.CardKey)
+		if eventCard == "" {
+			return fmt.Errorf("%w: missing ldxp mail card", ErrLdxpInvalidSessionRequest)
+		}
+		if workerCard != "" && workerCard != eventCard {
 			return fmt.Errorf("%w: ldxp mail card mismatch", ErrLdxpInvalidSessionRequest)
 		}
-		if session.WorkerAmount > 0 && event.Amount > 0 && math.Abs(session.WorkerAmount-event.Amount) > 0.01 {
-			return fmt.Errorf("%w: ldxp mail amount mismatch", ErrLdxpInvalidSessionRequest)
+		if event.Amount <= 0 {
+			return fmt.Errorf("%w: missing ldxp mail amount", ErrLdxpInvalidSessionRequest)
+		}
+		if session.WorkerAmount > 0 {
+			if math.Abs(session.WorkerAmount-event.Amount) > 0.01 {
+				return fmt.Errorf("%w: ldxp mail amount mismatch", ErrLdxpInvalidSessionRequest)
+			}
 		}
 
 		messageID := ""
@@ -197,15 +220,31 @@ func TryMatchLdxpMailEvent(event *model.LdxpMailEvent) (*model.LdxpTopupSession,
 			"mail_received_time": event.ReceivedTime,
 			"updated_time":       now,
 		}
-		if err := tx.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
-			return err
+		result := tx.Model(&model.LdxpTopupSession{}).
+			Where("id = ?", session.Id).
+			Where("(mail_order_no = ? OR mail_order_no IS NULL)", "").
+			Where("(mail_card_key = ? OR mail_card_key IS NULL)", "").
+			Where("(mail_message_id = ? OR mail_message_id IS NULL)", "").
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
 		}
-		if err := tx.Model(&model.LdxpMailEvent{}).Where("id = ?", event.Id).Updates(map[string]interface{}{
-			"matched_session_id": session.SessionId,
-			"processed":          true,
-			"error_message":      "",
-		}).Error; err != nil {
-			return err
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("%w: ldxp mail already attached", ErrLdxpInvalidSessionRequest)
+		}
+		eventResult := tx.Model(&model.LdxpMailEvent{}).
+			Where("id = ?", event.Id).
+			Where("(processed = ? OR matched_session_id = ?)", false, "").
+			Updates(map[string]interface{}{
+				"matched_session_id": session.SessionId,
+				"processed":          true,
+				"error_message":      "",
+			})
+		if eventResult.Error != nil {
+			return eventResult.Error
+		}
+		if eventResult.RowsAffected != 1 {
+			return fmt.Errorf("%w: ldxp mail event already processed", ErrLdxpInvalidSessionRequest)
 		}
 		if err := tx.Where("id = ?", session.Id).First(&session).Error; err != nil {
 			return err
@@ -225,6 +264,7 @@ func buildLdxpMailBodyExcerpt(body string, cardKey string) string {
 	if cardKey != "" {
 		excerpt = strings.ReplaceAll(excerpt, cardKey, RedactLdxpValue(cardKey))
 	}
+	excerpt = redactLdxpSensitiveTokens(excerpt)
 	runes := []rune(excerpt)
 	if len(runes) > ldxpMailExcerptMaxRunes {
 		excerpt = string(runes[:ldxpMailExcerptMaxRunes])
@@ -232,7 +272,38 @@ func buildLdxpMailBodyExcerpt(body string, cardKey string) string {
 	if cardKey != "" && strings.Contains(excerpt, cardKey) {
 		excerpt = strings.ReplaceAll(excerpt, cardKey, "[redacted]")
 	}
+	excerpt = redactLdxpSensitiveTokens(excerpt)
 	return strings.TrimSpace(excerpt)
+}
+
+func hasLdxpMailAttachment(session *model.LdxpTopupSession) bool {
+	if session == nil {
+		return false
+	}
+	return strings.TrimSpace(session.MailOrderNo) != "" ||
+		strings.TrimSpace(session.MailCardKey) != "" ||
+		strings.TrimSpace(session.MailMessageId) != ""
+}
+
+func redactLdxpSensitiveTokens(body string) string {
+	return ldxpSensitiveRe.ReplaceAllString(body, "${1}[redacted]")
+}
+
+func trimLdxpMailFieldValue(value string) string {
+	value = strings.TrimSpace(value)
+	fieldKeywords := []string{
+		"支付金额", "金额", "卡密账号", "卡密", "兑换码",
+		"卡号", "发货内容",
+		"付款时间", "支付时间", "付款日期", "支付日期",
+		"订单号", "订单编号", "订单",
+	}
+	cut := len(value)
+	for _, keyword := range fieldKeywords {
+		if idx := strings.Index(value, keyword); idx >= 0 && idx < cut {
+			cut = idx
+		}
+	}
+	return strings.TrimSpace(value[:cut])
 }
 
 func getLdxpMailEventByRawHash(rawHash string) (*model.LdxpMailEvent, error) {
