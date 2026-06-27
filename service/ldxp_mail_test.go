@@ -58,6 +58,28 @@ func TestParseLdxpMailDoesNotTreatProductContentAsCard(t *testing.T) {
 	assert.NotContains(t, parsed.BodyExcerpt, "SECRET-CARD-999999")
 }
 
+func TestParseLdxpMailAcceptsAndRedactsNonSpaceCardTokens(t *testing.T) {
+	for _, token := range []string{
+		"SECRET.CARD.999999",
+		"SECRET/CARD/999999",
+		"abc",
+	} {
+		t.Run(token, func(t *testing.T) {
+			body := "订单号：LD260628UZJ97P\n商品名称：0.1 元测试\n金额：0.10\n卡密：\n" + token
+
+			parsed, err := ParseLdxpMailText(body)
+
+			require.NoError(t, err)
+			require.NotNil(t, parsed)
+			assert.Equal(t, token, parsed.CardKey)
+			assert.NotContains(t, parsed.BodyExcerpt, token)
+			assert.Contains(t, parsed.BodyExcerpt, RedactLdxpValue(token))
+			assert.NotContains(t, parsed.BodyExcerpt, ".CARD")
+			assert.NotContains(t, parsed.BodyExcerpt, "/CARD")
+		})
+	}
+}
+
 func TestUpsertLdxpMailEventDedupesRawHash(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	raw := []byte(ldxpMailFixtureText)
@@ -106,6 +128,54 @@ func TestMatchLdxpMailEventToWorkerSessionRequiresOrderNo(t *testing.T) {
 	require.NoError(t, model.DB.First(&persisted, event.Id).Error)
 	assert.False(t, persisted.Processed)
 	assert.Empty(t, persisted.MatchedSessionId)
+}
+
+func TestMatchLdxpMailEventRejectsMismatchedAmount(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:         "ldxp_mail_mismatch_amount",
+		UserId:            1001,
+		Amount:            10,
+		Money:             0.10,
+		Status:            model.LdxpStatusWorkerPaid,
+		WorkerId:          "worker-a",
+		WorkerOrderNo:     "LD260628UZJ97P",
+		WorkerAmount:      0.10,
+		WorkerProductName: "0.1 元测试",
+		WorkerCardKey:     "abcd1234-card-key",
+		CreatedTime:       100,
+		UpdatedTime:       100,
+		ExpiredTime:       2000,
+	})
+	messageID := "message-match-mismatch-amount"
+	event := &model.LdxpMailEvent{
+		MessageId:    &messageID,
+		RawHash:      HashLdxpMailRaw([]byte("mismatch-amount")),
+		OrderNo:      "LD260628UZJ97P",
+		Amount:       0.11,
+		ProductName:  "0.1 元测试",
+		CardKey:      "abcd1234-card-key",
+		MailFrom:     "sender@example.test",
+		MailTo:       "buyer@example.test",
+		Subject:      "paid",
+		ReceivedTime: 101,
+		CreatedTime:  102,
+	}
+	require.NoError(t, model.InsertLdxpMailEvent(event))
+
+	session, err := TryMatchLdxpMailEvent(event)
+
+	require.Error(t, err)
+	assert.Nil(t, session)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_mail_mismatch_amount")
+	require.NoError(t, err)
+	assert.Empty(t, persisted.MailOrderNo)
+	assert.Empty(t, persisted.MailCardKey)
+	assert.Zero(t, persisted.MailAmount)
+	var persistedEvent model.LdxpMailEvent
+	require.NoError(t, model.DB.First(&persistedEvent, event.Id).Error)
+	assert.False(t, persistedEvent.Processed)
+	assert.Empty(t, persistedEvent.MatchedSessionId)
 }
 
 func TestMatchLdxpMailEventRejectsMismatchedCard(t *testing.T) {

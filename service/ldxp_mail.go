@@ -23,6 +23,8 @@ const ldxpMailExcerptMaxRunes = 500
 const (
 	ldxpSecretLabelPattern         = `(?:卡密信息|卡密内容|兑换码为|激活码|券码|序列号|CDKEY|卡密账号|卡密|兑换码|卡号|发货内容|购买内容(?:卡号|卡密账号|卡密(?:信息|内容)?|兑换码(?:为)?|激活码|序列号)|\b(?:code|secret|token|password)\b)`
 	ldxpProductContentLabelPattern = `(?:商品名称|商品名|购买内容)`
+	ldxpCardTokenPattern           = `\S*[A-Za-z0-9]\S*`
+	ldxpContextTokenPattern        = `[^\s\p{Han}:：]*[A-Za-z0-9][^\s\p{Han}:：]*`
 )
 
 var (
@@ -31,13 +33,13 @@ var (
 	ldxpWhitespaceRe  = regexp.MustCompile(`[\t\r\f\v ]+`)
 	ldxpBlankLineRe   = regexp.MustCompile(`\n{3,}`)
 	ldxpOrderRe       = regexp.MustCompile(`(?m)(?:订单号|订单编号|订单)\s*[:：]?\s*(LD[A-Z0-9]+)\b`)
-	ldxpCardRe        = regexp.MustCompile(`(?mi)` + ldxpSecretLabelPattern + `\s*[:：]?\s*([A-Za-z0-9_-]{6,128})`)
+	ldxpCardRe        = regexp.MustCompile(`(?mi)` + ldxpSecretLabelPattern + `\s*[:：]?\s*(` + ldxpCardTokenPattern + `)`)
 	ldxpAmountRe      = regexp.MustCompile(`(?m)(?:支付金额|金额)\s*[:：]?\s*¥?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:元)?`)
 	ldxpProductNameRe = regexp.MustCompile(`(?m)` + ldxpProductContentLabelPattern + `\s*[:：]?\s*([^\n]+)`)
 	ldxpPaidTimeRe    = regexp.MustCompile(`(?m)(?:付款时间|支付时间|付款日期|支付日期)\s*[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`)
-	ldxpSensitiveRe   = regexp.MustCompile(`(?mi)(` + ldxpSecretLabelPattern + `\s*[:：]?\s*)([A-Za-z0-9_-]{6,128})`)
+	ldxpSensitiveRe   = regexp.MustCompile(`(?mi)(` + ldxpSecretLabelPattern + `\s*[:：]?\s*)(` + ldxpCardTokenPattern + `)`)
 	ldxpRiskContextRe = regexp.MustCompile(`(?i)(?:卡|码|密|key|code|token|secret|password)`)
-	ldxpTokenLikeRe   = regexp.MustCompile(`[A-Za-z0-9_-]{6,128}`)
+	ldxpTokenLikeRe   = regexp.MustCompile(ldxpContextTokenPattern)
 )
 
 type LdxpParsedMail struct {
@@ -64,7 +66,7 @@ func ParseLdxpMailText(input string) (*LdxpParsedMail, error) {
 		parsed.OrderNo = strings.TrimSpace(matches[1])
 	}
 	if matches := ldxpCardRe.FindStringSubmatch(normalized); len(matches) > 1 {
-		parsed.CardKey = strings.TrimSpace(matches[1])
+		parsed.CardKey = trimLdxpMailCardValue(matches[1])
 	}
 	if matches := ldxpAmountRe.FindStringSubmatch(normalized); len(matches) > 1 {
 		amount, err := strconv.ParseFloat(matches[1], 64)
@@ -205,7 +207,7 @@ func TryMatchLdxpMailEvent(event *model.LdxpMailEvent) (*model.LdxpTopupSession,
 			return fmt.Errorf("%w: missing ldxp mail amount", ErrLdxpInvalidSessionRequest)
 		}
 		if session.WorkerAmount > 0 {
-			if math.Abs(session.WorkerAmount-event.Amount) > 0.01 {
+			if ldxpAmountCents(session.WorkerAmount) != ldxpAmountCents(event.Amount) {
 				return fmt.Errorf("%w: ldxp mail amount mismatch", ErrLdxpInvalidSessionRequest)
 			}
 		}
@@ -269,10 +271,12 @@ func TryMatchLdxpMailEvent(event *model.LdxpMailEvent) (*model.LdxpTopupSession,
 func buildLdxpMailBodyExcerpt(body string, cardKey string) string {
 	excerpt := body
 	cardKey = strings.TrimSpace(cardKey)
+	redactedCardKey := ""
 	if cardKey != "" {
-		excerpt = strings.ReplaceAll(excerpt, cardKey, RedactLdxpValue(cardKey))
+		redactedCardKey = redactLdxpMailValue(cardKey)
+		excerpt = strings.ReplaceAll(excerpt, cardKey, redactedCardKey)
 	}
-	excerpt = redactLdxpSensitiveTokens(excerpt)
+	excerpt = redactLdxpSensitiveTokens(excerpt, redactedCardKey)
 	runes := []rune(excerpt)
 	if len(runes) > ldxpMailExcerptMaxRunes {
 		excerpt = string(runes[:ldxpMailExcerptMaxRunes])
@@ -280,7 +284,7 @@ func buildLdxpMailBodyExcerpt(body string, cardKey string) string {
 	if cardKey != "" && strings.Contains(excerpt, cardKey) {
 		excerpt = strings.ReplaceAll(excerpt, cardKey, "[redacted]")
 	}
-	excerpt = redactLdxpSensitiveTokens(excerpt)
+	excerpt = redactLdxpSensitiveTokens(excerpt, redactedCardKey)
 	return strings.TrimSpace(excerpt)
 }
 
@@ -293,18 +297,71 @@ func hasLdxpMailAttachment(session *model.LdxpTopupSession) bool {
 		strings.TrimSpace(session.MailMessageId) != ""
 }
 
-func redactLdxpSensitiveTokens(body string) string {
-	body = ldxpSensitiveRe.ReplaceAllString(body, "${1}[redacted]")
+func redactLdxpSensitiveTokens(body string, preservedRedactedTokens ...string) string {
+	body = ldxpSensitiveRe.ReplaceAllStringFunc(body, func(match string) string {
+		parts := ldxpSensitiveRe.FindStringSubmatch(match)
+		if len(parts) < 3 {
+			return match
+		}
+		if isRedactedLdxpToken(parts[2], preservedRedactedTokens) {
+			return match
+		}
+		return parts[1] + "[redacted]"
+	})
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
 		if !ldxpRiskContextRe.MatchString(line) {
 			continue
 		}
 		lines[i] = ldxpTokenLikeRe.ReplaceAllStringFunc(line, func(token string) string {
+			if isRedactedLdxpToken(token, preservedRedactedTokens) {
+				return token
+			}
 			return "[redacted]"
 		})
 	}
 	return strings.Join(lines, "\n")
+}
+
+func isRedactedLdxpToken(token string, preservedRedactedTokens []string) bool {
+	if token == "[redacted]" {
+		return true
+	}
+	for _, preserved := range preservedRedactedTokens {
+		if preserved != "" && token == preserved {
+			return true
+		}
+	}
+	return false
+}
+
+func redactLdxpMailValue(value string) string {
+	redacted := RedactLdxpValue(value)
+	if redacted == value {
+		return "[redacted]"
+	}
+	return redacted
+}
+
+func ldxpAmountCents(amount float64) int64 {
+	return int64(math.Round(amount * 100))
+}
+
+func trimLdxpMailCardValue(value string) string {
+	value = strings.TrimSpace(value)
+	fieldKeywords := []string{
+		"支付金额", "金额", "付款时间", "支付时间", "付款日期", "支付日期",
+		"订单号", "订单编号", "订单", "商品名称", "商品名", "购买内容",
+		"卡密信息", "卡密内容", "兑换码为", "激活码", "券码", "序列号", "CDKEY",
+		"卡密账号", "卡密", "兑换码", "卡号", "发货内容", "code", "secret", "token", "password",
+	}
+	cut := len(value)
+	for _, keyword := range fieldKeywords {
+		if idx := strings.Index(value, keyword); idx > 0 && idx < cut {
+			cut = idx
+		}
+	}
+	return strings.TrimSpace(value[:cut])
 }
 
 func trimLdxpMailFieldValue(value string) string {
