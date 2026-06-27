@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -106,6 +107,29 @@ func TestExportRedemptionsTxtWritesKeysMarksExportedAndKeepsStatus(t *testing.T)
 	var other model.Redemption
 	require.NoError(t, db.First(&other, "batch_id = ?", "batch-2").Error)
 	require.Zero(t, other.ExportedTime)
+}
+
+func TestExportRedemptionsSanitizesBatchIdOnlyForDownloadFilename(t *testing.T) {
+	db := setupRedemptionExportTestDB(t)
+	hostileBatchID := "bad\";name\r\n/with\u00a0space"
+	seedExportRedemption(t, db, "key-hostile", hostileBatchID, common.RedemptionCodeStatusEnabled)
+	ctx, recorder := newRedemptionExportContext("/api/redemption/export?batch_id=" + url.QueryEscape(hostileBatchID) + "&format=csv")
+
+	ExportRedemptions(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "key-hostile")
+	contentDisposition := recorder.Header().Get("Content-Disposition")
+	require.Equal(t, `attachment; filename="redemptions-bad__name___with_space.csv"`, contentDisposition)
+	require.NotContains(t, contentDisposition, hostileBatchID)
+	require.NotContains(t, contentDisposition, "\r")
+	require.NotContains(t, contentDisposition, "\n")
+	require.NotContains(t, contentDisposition, ";name")
+	require.NotContains(t, contentDisposition, "/")
+
+	var exported model.Redemption
+	require.NoError(t, db.First(&exported, "batch_id = ?", hostileBatchID).Error)
+	require.Positive(t, exported.ExportedTime)
 }
 
 func TestExportRedemptionsCsvIncludesHeaderAndRow(t *testing.T) {

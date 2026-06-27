@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -184,6 +185,18 @@ func TestRedeemReturnsSpecificErrors(t *testing.T) {
 			assert.True(t, errors.Is(err, tc.want), "got %v, want %v", err, tc.want)
 		})
 	}
+}
+
+func TestGenerateRedemptionBatchIdAddsUniqueSuffixForSameSecond(t *testing.T) {
+	const now int64 = 1735689600
+	first := GenerateRedemptionBatchId(RedemptionSourceLDXP, 1000, now)
+	second := GenerateRedemptionBatchId(RedemptionSourceLDXP, 1000, now)
+
+	require.NotEqual(t, first, second)
+	require.LessOrEqual(t, len(first), 64)
+	require.LessOrEqual(t, len(second), 64)
+	assert.Regexp(t, regexp.MustCompile(`^RDMLDXP10001735689600-[A-Za-z0-9]+$`), first)
+	assert.Regexp(t, regexp.MustCompile(`^RDMLDXP10001735689600-[A-Za-z0-9]+$`), second)
 }
 
 func TestNormalizeRedemptionForCreateDefaultsAndValidates(t *testing.T) {

@@ -154,7 +154,22 @@ func GenerateRedemptionBatchId(source string, amount int64, now int64) string {
 	if source == "" {
 		source = RedemptionSourceManual
 	}
-	return fmt.Sprintf("RDM%s%d%d", strings.ToUpper(source), amount, now)
+	suffix, err := common.GenerateRandomCharsKey(8)
+	if err != nil {
+		suffix = common.GetUUID()[:8]
+	}
+
+	amountPart := strconv.FormatInt(amount, 10)
+	timePart := strconv.FormatInt(now, 10)
+	sourcePart := strings.ToUpper(source)
+	maxSourceLen := 64 - len("RDM") - len(amountPart) - len(timePart) - len("-") - len(suffix)
+	if maxSourceLen < 0 {
+		maxSourceLen = 0
+	}
+	if len(sourcePart) > maxSourceLen {
+		sourcePart = sourcePart[:maxSourceLen]
+	}
+	return fmt.Sprintf("RDM%s%s%s-%s", sourcePart, amountPart, timePart, suffix)
 }
 
 func CreateRedemptionTopUpTradeNo(redemptionID int, userID int) string {
