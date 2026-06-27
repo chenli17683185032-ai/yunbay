@@ -164,19 +164,23 @@ func NormalizeRedemptionForCreate(redemption *Redemption) error {
 	if redemption == nil {
 		return ErrRedemptionInvalid
 	}
+	redemption.Kind = strings.TrimSpace(redemption.Kind)
+	redemption.Source = strings.TrimSpace(redemption.Source)
+	redemption.BatchId = strings.TrimSpace(redemption.BatchId)
 	if redemption.Kind == "" {
-		redemption.Kind = RedemptionKindLegacy
+		redemption.Kind = RedemptionKindPromoCredit
 	}
 	if redemption.Source == "" {
-		redemption.Source = RedemptionSourceManual
+		if redemption.Kind == RedemptionKindPaidTopUp {
+			redemption.Source = RedemptionSourceLDXP
+		} else {
+			redemption.Source = RedemptionSourcePromo
+		}
 	}
-	if err := ValidateRedemptionKindForCreate(redemption); err != nil {
-		return err
+	if redemption.BatchId == "" {
+		redemption.BatchId = GenerateRedemptionBatchId(redemption.Source, redemption.Amount, common.GetTimestamp())
 	}
-	if redemption.Kind == RedemptionKindPaidTopUp && redemption.CountAsTopUp && (redemption.Amount <= 0 || redemption.Money <= 0) {
-		return ErrRedemptionInvalid
-	}
-	return nil
+	return ValidateRedemptionKindForCreate(redemption)
 }
 
 func ValidateRedemptionKindForCreate(redemption *Redemption) error {
@@ -184,7 +188,15 @@ func ValidateRedemptionKindForCreate(redemption *Redemption) error {
 		return ErrRedemptionInvalid
 	}
 	switch redemption.Kind {
-	case "", RedemptionKindLegacy, RedemptionKindPaidTopUp, RedemptionKindPromoCredit, RedemptionKindCoupon:
+	case RedemptionKindPaidTopUp:
+		if redemption.Quota <= 0 || redemption.Amount <= 0 || redemption.Money <= 0 || !redemption.CountAsTopUp {
+			return ErrRedemptionInvalid
+		}
+		return nil
+	case RedemptionKindPromoCredit:
+		if redemption.Quota <= 0 || redemption.Amount < 0 || redemption.Money < 0 || redemption.CountAsTopUp {
+			return ErrRedemptionInvalid
+		}
 		return nil
 	default:
 		return ErrRedemptionUnsupportedKind
@@ -258,9 +270,18 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 		if redemption.Kind == RedemptionKindCoupon || (redemption.Kind != RedemptionKindLegacy && redemption.Kind != RedemptionKindPaidTopUp && redemption.Kind != RedemptionKindPromoCredit) {
 			return ErrRedemptionUnsupportedKind
 		}
-		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
-		if err != nil {
-			return err
+		if redemption.Kind == RedemptionKindPaidTopUp && (!redemption.CountAsTopUp || redemption.Amount <= 0 || redemption.Money <= 0) {
+			return ErrRedemptionInvalid
+		}
+		if redemption.Kind == RedemptionKindPromoCredit && redemption.CountAsTopUp {
+			return ErrRedemptionInvalid
+		}
+		result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrRedemptionInvalid
 		}
 		redemption.RedeemedTime = now
 		redemption.Status = common.RedemptionCodeStatusUsed
