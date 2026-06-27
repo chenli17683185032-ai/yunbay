@@ -87,7 +87,7 @@ export const REDEMPTION_KINDS = {
 } as const
 
 export const REDEMPTION_SOURCES = {
-  LIANDONG: 'liandong',
+  LIANDONG: 'ldxp',
   PROMO: 'promo',
   MANUAL: 'manual',
 } as const
@@ -149,6 +149,7 @@ export const ERROR_MESSAGES = {
   NAME_LENGTH_INVALID: 'Name must be between {{min}} and {{max}} characters',
   COUNT_INVALID: 'Count must be between {{min}} and {{max}}',
   EXPIRED_TIME_INVALID: 'Expired time cannot be earlier than current time',
+  FACE_AMOUNT_INTEGER_INVALID: 'Face amount must be a whole number.',
   PAID_TOPUP_INVALID:
     'Paid top-up cards require positive quota, amount, paid money, and top-up accounting.',
   PROMO_CREDIT_INVALID:
@@ -167,6 +168,7 @@ export function getRedemptionFormErrorMessages(t: TFunction) {
       max: REDEMPTION_VALIDATION.COUNT_MAX,
     }),
     EXPIRED_TIME_INVALID: t(ERROR_MESSAGES.EXPIRED_TIME_INVALID),
+    FACE_AMOUNT_INTEGER_INVALID: t(ERROR_MESSAGES.FACE_AMOUNT_INTEGER_INVALID),
     PAID_TOPUP_INVALID: t(ERROR_MESSAGES.PAID_TOPUP_INVALID),
     PROMO_CREDIT_INVALID: t(ERROR_MESSAGES.PROMO_CREDIT_INVALID),
   } as const

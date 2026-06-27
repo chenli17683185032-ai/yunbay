@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import { resolveExportBlob } from './lib'
 import type {
   Redemption,
   ApiResponse,
@@ -78,7 +79,7 @@ export async function exportRedemptions(
     responseType: 'blob',
     skipBusinessError: true,
   })
-  return res.data
+  return resolveExportBlob(res.data)
 }
 
 // Update redemption code

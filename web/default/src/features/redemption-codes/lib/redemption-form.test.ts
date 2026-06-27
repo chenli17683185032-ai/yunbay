@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
+import assert from 'node:assert/strict'
+import test from 'node:test'
 import type { Redemption } from '../types'
 import {
   getRedemptionFormSchema,
@@ -24,12 +26,6 @@ import {
   transformRedemptionToFormDefaults,
   type RedemptionFormValues,
 } from './redemption-form'
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message)
-  }
-}
 
 const t = ((key: string) => key) as TFunction
 
@@ -46,7 +42,7 @@ const validBase: RedemptionFormValues = {
   source: 'promo',
 }
 
-function expectValidPaidTopupPayload() {
+test('paid_topup keeps billing metadata in create payload', () => {
   const schema = getRedemptionFormSchema(t)
   const result = schema.safeParse({
     ...validBase,
@@ -55,23 +51,21 @@ function expectValidPaidTopupPayload() {
     amount: 100,
     money: 88,
     count_as_topup: true,
-    source: 'liandong',
+    source: 'ldxp',
   })
 
-  assert(
-    result.success,
-    'paid_topup with positive quota, amount, money, and top-up accounting should be valid'
-  )
+  assert.equal(result.success, true)
+  if (!result.success) throw new Error('expected paid_topup form to be valid')
 
   const payload = transformFormDataToPayload(result.data)
-  assert(payload.kind === 'paid_topup', 'payload should keep kind')
-  assert(payload.amount === 100, 'payload should keep amount')
-  assert(payload.money === 88, 'payload should keep money')
-  assert(payload.count_as_topup === true, 'payload should keep count_as_topup')
-  assert(payload.source === 'liandong', 'payload should keep source')
-}
+  assert.equal(payload.kind, 'paid_topup')
+  assert.equal(payload.amount, 100)
+  assert.equal(payload.money, 88)
+  assert.equal(payload.count_as_topup, true)
+  assert.equal(payload.source, 'ldxp')
+})
 
-function expectPromoCreditCannotCountAsTopup() {
+test('promo_credit cannot count as paid top-up', () => {
   const schema = getRedemptionFormSchema(t)
   const result = schema.safeParse({
     ...validBase,
@@ -81,10 +75,35 @@ function expectPromoCreditCannotCountAsTopup() {
     count_as_topup: true,
   })
 
-  assert(!result.success, 'promo_credit should reject count_as_topup=true')
-}
+  assert.equal(result.success, false)
+})
 
-function expectEditDefaultsPreserveTypeMetadata() {
+test('rejects zero quota', () => {
+  const schema = getRedemptionFormSchema(t)
+  const result = schema.safeParse({
+    ...validBase,
+    quota_dollars: 0,
+  })
+
+  assert.equal(result.success, false)
+})
+
+test('rejects fractional face amount', () => {
+  const schema = getRedemptionFormSchema(t)
+  const result = schema.safeParse({
+    ...validBase,
+    kind: 'paid_topup',
+    quota_dollars: 20,
+    amount: 10.5,
+    money: 10.5,
+    count_as_topup: true,
+    source: 'ldxp',
+  })
+
+  assert.equal(result.success, false)
+})
+
+test('edit defaults preserve type metadata from API data', () => {
   const defaults = transformRedemptionToFormDefaults({
     id: 1,
     user_id: 2,
@@ -101,21 +120,14 @@ function expectEditDefaultsPreserveTypeMetadata() {
     money: 88,
     count_as_topup: true,
     batch_id: 'batch-1',
-    source: 'liandong',
+    source: 'ldxp',
     exported_time: 0,
   } satisfies Redemption)
 
-  assert(defaults.kind === 'paid_topup', 'edit defaults should keep kind')
-  assert(defaults.amount === 100, 'edit defaults should keep amount')
-  assert(defaults.money === 88, 'edit defaults should keep money')
-  assert(
-    defaults.count_as_topup === true,
-    'edit defaults should keep count_as_topup'
-  )
-  assert(defaults.batch_id === 'batch-1', 'edit defaults should keep batch_id')
-  assert(defaults.source === 'liandong', 'edit defaults should keep source')
-}
-
-expectValidPaidTopupPayload()
-expectPromoCreditCannotCountAsTopup()
-expectEditDefaultsPreserveTypeMetadata()
+  assert.equal(defaults.kind, 'paid_topup')
+  assert.equal(defaults.amount, 100)
+  assert.equal(defaults.money, 88)
+  assert.equal(defaults.count_as_topup, true)
+  assert.equal(defaults.batch_id, 'batch-1')
+  assert.equal(defaults.source, 'ldxp')
+})

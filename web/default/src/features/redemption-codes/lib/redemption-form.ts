@@ -43,7 +43,7 @@ export function getRedemptionFormSchema(t: TFunction) {
         .string()
         .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
         .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
-      quota_dollars: z.number().min(0, t('Quota must be a positive number')),
+      quota_dollars: z.number().positive(t('Quota must be a positive number')),
       expired_time: z.date().optional(),
       count: z
         .number()
@@ -51,7 +51,10 @@ export function getRedemptionFormSchema(t: TFunction) {
         .max(REDEMPTION_VALIDATION.COUNT_MAX, msg.COUNT_INVALID)
         .optional(),
       kind: redemptionKindSchema,
-      amount: z.number().min(0, msg.PROMO_CREDIT_INVALID),
+      amount: z
+        .number()
+        .int(msg.FACE_AMOUNT_INTEGER_INVALID)
+        .min(0, msg.PROMO_CREDIT_INVALID),
       money: z.number().min(0, msg.PROMO_CREDIT_INVALID),
       count_as_topup: z.boolean(),
       batch_id: z.string(),

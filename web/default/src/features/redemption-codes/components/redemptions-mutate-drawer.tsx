@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { addTimeToDate } from '@/lib/time'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { Button } from '@/components/ui/button'
 import {
   Form,
@@ -93,7 +94,14 @@ export function RedemptionsMutateDrawer({
   const isUpdate = !!currentRow
   const { triggerRefresh } = useRedemptions()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const redemptionKindOptions = getRedemptionKindOptions(t)
+  const { copyToClipboard } = useCopyToClipboard()
+  const redemptionKindOptions = getRedemptionKindOptions(t).filter((option) => {
+    if (isUpdate) return true
+    return (
+      option.value === REDEMPTION_KINDS.PROMO_CREDIT ||
+      option.value === REDEMPTION_KINDS.PAID_TOPUP
+    )
+  })
   const redemptionSourceOptions = getRedemptionSourceOptions(t)
 
   const form = useForm<RedemptionFormValues>({
@@ -123,8 +131,10 @@ export function RedemptionsMutateDrawer({
 
       if (isUpdate && currentRow) {
         const result = await updateRedemption({
-          ...basePayload,
           id: currentRow.id,
+          name: basePayload.name,
+          quota: basePayload.quota,
+          expired_time: basePayload.expired_time,
         })
         if (result.success) {
           toast.success(t(SUCCESS_MESSAGES.REDEMPTION_UPDATED))
@@ -138,17 +148,28 @@ export function RedemptionsMutateDrawer({
         const result = await createRedemption(basePayload)
         if (result.success) {
           const count = result.data?.length || 0
+          const createdCodesText = result.data?.join('\n') ?? ''
           const message =
             count > 1
               ? t('Successfully created {{count}} redemption codes', {
                   count,
                 })
               : t(SUCCESS_MESSAGES.REDEMPTION_CREATED)
-          toast.success(
-            result.batch_id
-              ? `${message} (${t('Batch ID')}: ${result.batch_id})`
-              : message
-          )
+          const description = result.batch_id
+            ? `${t('Batch ID')}: ${result.batch_id}`
+            : undefined
+          toast.success(message, {
+            description,
+            action:
+              createdCodesText.length > 0
+                ? {
+                    label: t('Copy created codes'),
+                    onClick: () => {
+                      void copyToClipboard(createdCodesText)
+                    },
+                  }
+                : undefined,
+          })
           onOpenChange(false)
           triggerRefresh()
         } else {
@@ -343,11 +364,11 @@ export function RedemptionsMutateDrawer({
                           {...field}
                           type='number'
                           min='0'
-                          step='0.01'
+                          step='1'
                           placeholder={t('Face amount')}
                           disabled={isUpdate}
                           onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value) || 0)
+                            field.onChange(parseInt(e.target.value, 10) || 0)
                           }
                         />
                       </FormControl>
