@@ -93,12 +93,30 @@ export function getAffiliateCode(): string {
 }
 
 /**
+ * Remove affiliate code from localStorage
+ */
+export function removeAffiliateCode(): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(STORAGE_KEYS.AFFILIATE)
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to remove affiliate code:', error)
+  }
+}
+
+/**
  * Save affiliate code to localStorage
  */
 export function saveAffiliateCode(code: string): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(STORAGE_KEYS.AFFILIATE, code)
+    const trimmed = code.trim()
+    if (!trimmed) {
+      window.localStorage.removeItem(STORAGE_KEYS.AFFILIATE)
+      return
+    }
+    window.localStorage.setItem(STORAGE_KEYS.AFFILIATE, trimmed)
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('Failed to save affiliate code:', error)

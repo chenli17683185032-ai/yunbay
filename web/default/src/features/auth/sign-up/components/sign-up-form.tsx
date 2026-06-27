@@ -48,6 +48,7 @@ import { useEmailVerification } from '@/features/auth/hooks/use-email-verificati
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
 import {
   getAffiliateCode,
+  removeAffiliateCode,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
 
@@ -90,6 +91,7 @@ export function SignUpForm({
       email: '',
       password: '',
       confirmPassword: '',
+      affCode: '',
     },
   })
 
@@ -128,11 +130,18 @@ export function SignUpForm({
   }, [requiresLegalConsent])
 
   useEffect(() => {
-    const aff = new URLSearchParams(window.location.search).get('aff')?.trim()
-    if (aff) {
-      saveAffiliateCode(aff)
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlAff = urlParams.get('aff')
+    const initialAff =
+      urlAff !== null ? urlAff.trim() : getAffiliateCode().trim()
+
+    form.setValue('affCode', initialAff)
+    if (initialAff) {
+      saveAffiliateCode(initialAff)
+    } else if (urlAff !== null) {
+      removeAffiliateCode()
     }
-  }, [])
+  }, [form])
 
   async function onSubmit(data: z.infer<typeof registerFormSchema>) {
     if (requiresLegalConsent && !agreedToLegal) {
@@ -154,6 +163,13 @@ export function SignUpForm({
 
     if (!validateTurnstile()) return
 
+    const affCode = data.affCode?.trim() || ''
+    if (affCode) {
+      saveAffiliateCode(affCode)
+    } else {
+      removeAffiliateCode()
+    }
+
     setIsLoading(true)
     try {
       const res = await register({
@@ -161,7 +177,7 @@ export function SignUpForm({
         password: data.password,
         email: data.email || undefined,
         verification_code: verificationCode || undefined,
-        aff_code: getAffiliateCode(),
+        aff_code: affCode || undefined,
         turnstile: turnstileToken,
       })
 
@@ -297,62 +313,80 @@ export function SignUpForm({
           )}
         />
 
+        {/* Email Field */}
+        <FormField
+          control={form.control}
+          name='email'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Email (QQ mailbox only)')}</FormLabel>
+              <FormControl>
+                <Input placeholder={t('name@qq.com')} type='email' {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
         {/* Email Verification Section */}
         {emailVerificationRequired && (
-          <>
-            {/* Email Field */}
-            <FormField
-              control={form.control}
-              name='email'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>
-                    {t('Email (required for verification)')}
-                  </FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder={t('name@example.com')}
-                      type='email'
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            {/* Verification Code Field */}
-            <div className='flex items-end gap-2'>
-              <div className='flex-1'>
-                <Input
-                  placeholder={t('Verification code')}
-                  value={verificationCode}
-                  onChange={(e) => setVerificationCode(e.target.value)}
-                />
-              </div>
-              <Button
-                variant='outline'
-                type='button'
-                disabled={
-                  isLoading ||
-                  isSendingCode ||
-                  isActive ||
-                  !emailValue ||
-                  !turnstileReady
-                }
-                onClick={handleSendVerificationCode}
-              >
-                {isActive ? (
-                  t('Resend ({{seconds}}s)', { seconds: secondsLeft })
-                ) : isSendingCode ? (
-                  <Loader2 className='h-4 w-4 animate-spin' />
-                ) : (
-                  t('Send code')
-                )}
-              </Button>
+          <div className='flex items-end gap-2'>
+            <div className='flex-1'>
+              <Input
+                placeholder={t('Verification code')}
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+              />
             </div>
-          </>
+            <Button
+              variant='outline'
+              type='button'
+              disabled={
+                isLoading ||
+                isSendingCode ||
+                isActive ||
+                !emailValue ||
+                !turnstileReady
+              }
+              onClick={handleSendVerificationCode}
+            >
+              {isActive ? (
+                t('Resend ({{seconds}}s)', { seconds: secondsLeft })
+              ) : isSendingCode ? (
+                <Loader2 className='h-4 w-4 animate-spin' />
+              ) : (
+                t('Send code')
+              )}
+            </Button>
+          </div>
         )}
+
+        {/* Invitation Code Field */}
+        <FormField
+          control={form.control}
+          name='affCode'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Invitation code (optional)')}</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder={t('Leave blank if you do not have one')}
+                  {...field}
+                  onChange={(event) => {
+                    field.onChange(event)
+                    const affCode = event.target.value.trim()
+                    if (affCode) {
+                      saveAffiliateCode(affCode)
+                    } else {
+                      removeAffiliateCode()
+                    }
+                  }}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
 
         {/* Turnstile */}
         {isTurnstileEnabled && (
