@@ -799,3 +799,123 @@ TOKEN_INVALID_MODEL_GROUP_COUNT|0
 ```text
 user_group_cleanup_20260627_145927.tsv
 ```
+
+## 2026-06-28 LDXP 卡密兑换与充值统计生产维护
+
+本轮上线 LDXP 卡密兑换与充值统计能力，允许管理员创建付费充值卡和赠送额度码，并让真实付费卡密兑换后进入充值统计。公开文档只记录可复现事实，不记录 SSH 私钥、后台密码、cookie、session、token 或服务器 secret。
+
+### 功能范围
+
+- 新增兑换码类型：
+  - `paid_topup`：付费充值卡，兑换后增加额度并创建成功 `TopUp` 记录；
+  - `promo_credit`：赠送额度码，兑换后只增加额度，不计入真实充值统计。
+- `redemptions` 增加批次、来源、面额、实付金额、是否计入充值统计、导出时间等字段。
+- default 后台兑换码页支持批次创建、复制本次生成卡密、TXT/CSV 导出。
+- 钱包页兑换成功提示会区分付费充值卡与赠送额度码。
+- `POST /api/user/topup` 保持 `data` 为数字，同时额外返回可选 `redemption` 元信息，兼容 classic 前端和旧调用方。
+
+详细维护语义见：`docs/ldxp-redemption-cards.md`。
+
+### 部署来源
+
+- GitHub 分支：`codex/deploy-ldxp-card-redemption`
+- 部署提交：`54cd3e16 fix: complete redemption card frontend integration`
+- 合成基线：`codex/user-tags-model-groups`
+
+本轮没有直接部署单独的 LDXP 功能分支，而是在用户标签 / 模型分组生产修复基础上创建合成部署分支，避免覆盖已经上线的用户标签修复。
+
+### 本地验证
+
+部署前在合成 worktree 中完成：
+
+```bash
+go test ./model ./controller ./router ./common ./setting/... -count=1
+cd web/default
+bun test \
+  src/features/redemption-codes/lib/export-utils.test.ts \
+  src/features/redemption-codes/lib/redemption-form.test.ts \
+  src/features/wallet/lib/redemption-result.test.ts
+bun run typecheck
+bun run build
+git diff --check
+```
+
+### 生产同步方式
+
+- 生产目录 `/opt/new-api/app` 不是可信 git checkout，本轮没有在服务器上执行 `git pull`。
+- 同步方式：非删除式 `rsync` 到 `/opt/new-api/app/`。
+- 构建方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api`
+- 重启方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api`
+
+第一次 `rsync` 发现生产部分历史目录归属为 `501:staff`，导致 `deploy` 用户不能设置目录时间，也不能在部分目录写入新前端文件。已仅针对应用源码相关目录修正为 `deploy:deploy`，删除本轮误传的 worktree `.git` 文件，并使用 `--omit-dir-times --no-owner --no-group` 重新同步。最终确认 `/opt/new-api/app/.git` 不存在。
+
+### 备份
+
+部署前保留：
+
+```text
+/opt/new-api/backups/ldxp-card-redemption-predeploy-20260628-004211/app-source.tgz
+yunbay-new-api:prod-pre-ldxp-20260628-004211
+```
+
+源码备份约 477M。镜像备份可用于快速回滚。
+
+### 生产复核结果
+
+最终复核时间：`2026-06-28T01:01:28+08:00`
+
+容器状态：
+
+```text
+yunbay-new-api: running / healthy / restart_count=0
+yunbay-caddy:   running / healthy / restart_count=0
+yunbay-postgres running / healthy / restart_count=0
+yunbay-redis    running / healthy / restart_count=0
+```
+
+入口验证：
+
+```text
+http://127.0.0.1:3000/api/status                  success=true setup=true
+https://yunbay.xyz/                               200
+https://yunbay.xyz/api/status                     200
+https://yunbay.xyz/console/redemption-codes       200
+https://yunbay.xyz/wallet                         200
+GET /api/redemption/export?batch_id=__missing__   401（未登录预期）
+```
+
+数据库字段验证：
+
+```text
+amount
+batch_id
+count_as_top_up
+exported_time
+kind
+money
+source
+```
+
+字段类型：
+
+```text
+kind:character varying
+amount:bigint
+money:numeric
+count_as_top_up:boolean
+batch_id:character varying
+source:character varying
+exported_time:bigint
+```
+
+### 回滚提示
+
+优先回滚镜像：
+
+```bash
+docker tag yunbay-new-api:prod-pre-ldxp-20260628-004211 yunbay-new-api:prod
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api
+```
+
+如需恢复源码，可从上述 `app-source.tgz` 恢复后重新 build/up。新增数据库列通常无需删除，旧代码会忽略多余字段；不要做破坏性 schema rollback，除非已经确认没有生产数据依赖这些列。
