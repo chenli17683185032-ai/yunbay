@@ -83,8 +83,8 @@ func RedactLdxpValue(value string) string {
 	if strings.HasPrefix(value, "data:image/png;base64,") {
 		return "data:image/png;base64,[redacted]"
 	}
-	if len(value) <= 8 {
-		return "[redacted]"
+	if len(value) <= 4 {
+		return value + "..." + value
 	}
 	return value[:4] + "..." + value[len(value)-4:]
 }

@@ -84,6 +84,13 @@ func TestReadLdxpSecretPrefersFile(t *testing.T) {
 
 func TestRedactLdxpSecretMasksCardAndQr(t *testing.T) {
 	require.Empty(t, RedactLdxpValue(""))
+	require.Equal(t, "abc...abc", RedactLdxpValue("abc"))
+	require.Equal(t, "abcd...efgh", RedactLdxpValue("abcdefgh"))
 	require.Equal(t, "4242...4242", RedactLdxpValue("4242424242424242"))
 	require.Equal(t, "data:image/png;base64,[redacted]", RedactLdxpValue("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA"))
+}
+
+func TestLdxpConfigRedactShortNormalStrings(t *testing.T) {
+	require.Equal(t, "abc...abc", RedactLdxpValue("abc"))
+	require.Equal(t, "abcd...efgh", RedactLdxpValue("abcdefgh"))
 }
