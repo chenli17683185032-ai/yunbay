@@ -408,3 +408,44 @@ GET https://yunbay.xyz/quick-start: HTTP 200
 - **不要再回到 Channel Console / Cliproxy / Sub2API 深嵌 adapter 方案**；
 - 只维护 `new-api` 原生渠道管理 + `sub2api` 独立上游模式；
 - 涉及 `Caddyfile` 改动时，要记得 **force-recreate caddy**，不要只靠宿主机文件覆盖后假设容器会自动看到。
+
+## 2026-06-27 邮件投递切换：Resend SMTP + Cloudflare Routing
+
+当前生产邮件架构：
+
+```text
+出站系统邮件：yunbay-new-api -> Resend SMTP -> 用户邮箱
+入站/回复邮件：support@yunbay.xyz -> Cloudflare Email Routing -> 10256345@qq.com
+```
+
+当前生产 SMTP 摘要：
+
+```text
+SMTPServer=smtp.resend.com
+SMTPPort=465
+SMTPSSLEnabled=true
+SMTPAccount=resend
+SMTPFrom=support@yunbay.xyz
+SystemName=yunbay
+```
+
+`SMTPToken` 为 Resend API Key，只记录为 `SET`，不要写入仓库文档、GitHub issue、PR、聊天记录或公开日志。
+
+切换原因：历史 QQ SMTP 发信会在收件端暴露 QQ 昵称；当前出站邮件改为正式域名邮箱身份 `yunbay <support@yunbay.xyz>`。
+
+已验证：
+
+- 线上服务器直连 Resend SMTP 测试通过：`SMTP_TEST_OK from=support@yunbay.xyz to=10256345@qq.com`。
+- 云贝应用层密码重置接口测试返回：`http_status=200`、`success=true`。
+- `yunbay-new-api` 重启后为 healthy。
+- 最近日志未见 SMTP / TLS / AUTH / Resend / 501 / `failed to send` 相关错误。
+
+切换前备份保存在生产服务器：
+
+```text
+/root/yunbay-smtp-backups/smtp-before-resend-20260627-114705.tsv
+```
+
+回滚时不要在终端或文档中打印备份内容。恢复 `SMTP*` 与 `SystemName` 相关 options 后，重启 `yunbay-new-api` 并重新走密码重置或邮箱验证码接口验证发信。
+
+详细公开说明见：`docs/email-delivery.md`。
