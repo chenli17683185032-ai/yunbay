@@ -101,6 +101,26 @@ func TestLdxpMailEventDedupesByRawHash(t *testing.T) {
 	assert.Equal(t, "CARD-KEY-1", persisted.CardKey)
 }
 
+func TestLdxpMailEventDedupesByMessageId(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	first := &LdxpMailEvent{
+		MessageId: "same-message-id",
+		ImapUid:   "uid-message-1",
+		RawHash:   "message-raw-hash-1",
+		OrderNo:   "message-order-1",
+	}
+	duplicate := &LdxpMailEvent{
+		MessageId: "same-message-id",
+		ImapUid:   "uid-message-2",
+		RawHash:   "message-raw-hash-2",
+		OrderNo:   "message-order-2",
+	}
+
+	require.NoError(t, InsertLdxpMailEvent(first))
+	require.Error(t, InsertLdxpMailEvent(duplicate))
+}
+
 func TestGetClaimableLdxpSessionSkipsExpiredAndNonCreated(t *testing.T) {
 	setupLdxpTopupTest(t)
 

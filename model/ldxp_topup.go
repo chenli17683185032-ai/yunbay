@@ -67,7 +67,7 @@ type LdxpTopupSession struct {
 
 type LdxpMailEvent struct {
 	Id               int            `json:"id"`
-	MessageId        string         `json:"message_id" gorm:"type:varchar(255);index"`
+	MessageId        string         `json:"message_id" gorm:"type:varchar(255);uniqueIndex"`
 	ImapUid          string         `json:"imap_uid" gorm:"type:varchar(128);index"`
 	RawHash          string         `json:"raw_hash" gorm:"type:varchar(128);uniqueIndex"`
 	MailFrom         string         `json:"mail_from" gorm:"type:varchar(255)"`
