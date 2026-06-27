@@ -234,17 +234,17 @@ export const useUsersData = () => {
     }
   };
 
-  // Fetch groups data
+  // Fetch user tag options for user management.
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
+      let res = await API.get(`/api/user/group-tags`);
       if (res === undefined) {
         return;
       }
       setGroupOptions(
-        res.data.data.map((group) => ({
-          label: group,
-          value: group,
+        res.data.data.map((option) => ({
+          label: option.label,
+          value: option.value,
         })),
       );
     } catch (error) {

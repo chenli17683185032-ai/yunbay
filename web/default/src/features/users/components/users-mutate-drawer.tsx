@@ -62,9 +62,10 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
-import { createUser, updateUser, getUser, getGroups } from '../api'
+import { createUser, updateUser, getUser, getUserGroupTags } from '../api'
 import { BINDING_FIELDS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
+  buildUserGroupTagOptions,
   userFormSchema,
   type UserFormValues,
   USER_FORM_DEFAULT_VALUES,
@@ -92,19 +93,23 @@ export function UsersMutateDrawer({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [quotaDialogOpen, setQuotaDialogOpen] = useState(false)
 
-  // Fetch groups
-  const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+  // Fetch user tag options for editing users.group.
+  const { data: userGroupTagsData } = useQuery({
+    queryKey: ['user-group-tags'],
+    queryFn: getUserGroupTags,
     staleTime: 5 * 60 * 1000,
   })
-
-  const groups = groupsData?.data || []
 
   const form = useForm<UserFormValues>({
     resolver: zodResolver(userFormSchema),
     defaultValues: USER_FORM_DEFAULT_VALUES,
   })
+
+  const userGroupTagOptions = buildUserGroupTagOptions(
+    userGroupTagsData?.data || [],
+    form.watch('group'),
+    t('Current Value')
+  )
 
   // Load existing data when updating
   useEffect(() => {
@@ -325,27 +330,27 @@ export function UsersMutateDrawer({
                     name='group'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{t('Group')}</FormLabel>
+                        <FormLabel>{t('User Tag')}</FormLabel>
                         <Select
-                          items={[
-                            ...groups.map((group) => ({
-                              value: group,
-                              label: group,
-                            })),
-                          ]}
+                          items={userGroupTagOptions}
                           onValueChange={field.onChange}
                           value={field.value}
                         >
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder={t('Select a group')} />
+                              <SelectValue
+                                placeholder={t('Select a user tag')}
+                              />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent alignItemWithTrigger={false}>
                             <SelectGroup>
-                              {groups.map((group) => (
-                                <SelectItem key={group} value={group}>
-                                  {group}
+                              {userGroupTagOptions.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
                                 </SelectItem>
                               ))}
                             </SelectGroup>

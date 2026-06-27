@@ -74,7 +74,7 @@ const UsersFilters = ({
         <div className='w-full md:w-48'>
           <Form.Select
             field='searchGroup'
-            placeholder={t('选择分组')}
+            placeholder={t('选择用户标签')}
             optionList={groupOptions}
             onChange={(value) => {
               // Group change triggers automatic search

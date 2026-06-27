@@ -50,3 +50,14 @@ func GetUserGroups(c *gin.Context) {
 		"data":    usableGroups,
 	})
 }
+
+func GetUserGroupTags(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": []gin.H{
+			{"value": model.UserGroupTiyan, "label": "体验用户"},
+			{"value": model.UserGroupVIP, "label": "VIP 用户"},
+		},
+	})
+}

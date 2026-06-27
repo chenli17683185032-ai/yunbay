@@ -676,3 +676,77 @@ https://yunbay.xyz/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.e
 ```
 
 本次生产验证确认：快速启动页与 Windows 下载入口可访问，后端状态接口可访问，`new-api` 与 `caddy` 容器均为 healthy。
+
+## 2026-06-27 用户标签与模型分组后台管理维护
+
+本轮用户体系拆分后，后台需要严格区分两类“分组”：
+
+```text
+users.group      = 用户标签 / 用户等级
+                  例如：体验用户、vip
+
+tokens.group     = Token 使用的模型分组
+abilities.group  = 模型能力所属模型分组
+                  例如：gpt-plus、gpt-pro
+```
+
+### 管理后台入口约定
+
+- 用户管理页编辑用户时，修改的是 `users.group`，下拉选项必须来自用户标签接口：
+
+```text
+GET /api/user/group-tags
+```
+
+- 当前云贝用户标签选项：
+
+```text
+体验用户
+vip（前端展示为 VIP 用户）
+```
+
+- Token/API Key 创建、渠道、模型能力、倍率设置仍然使用模型分组接口：
+
+```text
+GET /api/group/
+GET /api/user/self/groups
+```
+
+不要把 `/api/group/` 接到用户管理的 `users.group` 编辑框，否则后台会只显示 `gpt-plus` / `gpt-pro`，并可能把模型分组错误写入用户标签字段。
+
+### 前端维护点
+
+- default 后台用户编辑：`web/default/src/features/users/components/users-mutate-drawer.tsx`
+- default 用户标签选项 helper：`web/default/src/features/users/lib/user-group-tags.ts`
+- classic 用户列表筛选：`web/classic/src/hooks/users/useUsersData.jsx`
+- classic 用户编辑弹窗：`web/classic/src/components/table/users/modals/EditUserModal.jsx`
+
+编辑 admin/root 等历史用户时，如果当前 `users.group` 是 `default` 或其他非标准值，前端会把当前值临时放到下拉第一项，避免打开编辑框后丢失现有值。普通用户应使用 `体验用户` 或 `vip`。
+
+### 生产数据期望
+
+普通用户不应再保留 `default` 用户标签；Token 不应再保留空值、`default`、`体验用户` 等非模型分组值。生产验证可用以下断言思路：
+
+```text
+common_default_users = 0
+illegal_token_groups = 0
+aff_count_mismatch_count = 0
+```
+
+其中 token 合法模型分组目前仅为：
+
+```text
+gpt-plus
+gpt-pro
+```
+
+### 本地验证建议
+
+```bash
+/Users/ethan/.cache/codex-go/go1.25.1/bin/go test ./controller -run TestGetUserGroupTagsReturnsUserTagsNotModelGroups -count=1
+cd web/default && bun test src/features/users/lib/user-group-tags.test.ts
+cd web/default && bun run typecheck && bun run build
+cd web/classic && bun run build
+```
+
+生产同步仍按本文“非删除式同步生产”章节执行，不要在服务器上依赖失效 worktree 的 `git pull`。

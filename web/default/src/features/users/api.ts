@@ -23,6 +23,7 @@ import type {
   GetUsersResponse,
   SearchUsersParams,
   UserFormData,
+  UserGroupTagOption,
   ManageUserAction,
   ManageUserQuotaPayload,
   ApiResponse,
@@ -146,6 +147,16 @@ export async function resetUserTwoFA(id: number): Promise<ApiResponse> {
  */
 export async function getGroups(): Promise<ApiResponse<string[]>> {
   const res = await api.get('/api/group/')
+  return res.data
+}
+
+/**
+ * Get user tag options for admin user management.
+ */
+export async function getUserGroupTags(): Promise<
+  ApiResponse<UserGroupTagOption[]>
+> {
+  const res = await api.get('/api/user/group-tags')
   return res.data
 }
 
