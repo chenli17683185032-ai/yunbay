@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -18,12 +19,48 @@ type Redemption struct {
 	Status       int            `json:"status" gorm:"default:1"`
 	Name         string         `json:"name" gorm:"index"`
 	Quota        int            `json:"quota" gorm:"default:100"`
+	Kind         string         `json:"kind" gorm:"type:varchar(32);default:'legacy';index"`
+	Amount       int64          `json:"amount" gorm:"default:0"`
+	Money        float64        `json:"money" gorm:"default:0"`
+	CountAsTopUp bool           `json:"count_as_topup" gorm:"default:false"`
+	BatchId      string         `json:"batch_id" gorm:"type:varchar(64);default:'';index"`
+	Source       string         `json:"source" gorm:"type:varchar(32);default:'manual';index"`
+	ExportedTime int64          `json:"exported_time" gorm:"bigint;default:0"`
 	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
 	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
 	Count        int            `json:"count" gorm:"-:all"` // only for api request
 	UsedUserId   int            `json:"used_user_id"`
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+}
+
+const (
+	RedemptionKindLegacy      = "legacy"
+	RedemptionKindPaidTopUp   = "paid_topup"
+	RedemptionKindPromoCredit = "promo_credit"
+	RedemptionKindCoupon      = "coupon"
+)
+
+const (
+	RedemptionSourceManual = "manual"
+	RedemptionSourceLDXP   = "ldxp"
+	RedemptionSourcePromo  = "promo"
+)
+
+type RedeemRedemptionMeta struct {
+	Id           int     `json:"id"`
+	Kind         string  `json:"kind"`
+	Quota        int     `json:"quota"`
+	Amount       int64   `json:"amount"`
+	Money        float64 `json:"money"`
+	CountAsTopUp bool    `json:"count_as_topup"`
+	BatchId      string  `json:"batch_id"`
+	Source       string  `json:"source"`
+}
+
+type RedeemResult struct {
+	Quota      int                  `json:"quota"`
+	Redemption RedeemRedemptionMeta `json:"redemption"`
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -74,11 +111,12 @@ func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Re
 	// Build query based on keyword type
 	query := tx.Model(&Redemption{})
 
+	pattern := keyword + "%"
 	// Only try to convert to ID if the string represents a valid integer
 	if id, err := strconv.Atoi(keyword); err == nil {
-		query = query.Where("id = ? OR name LIKE ?", id, keyword+"%")
+		query = query.Where("id = ? OR name LIKE ? OR batch_id LIKE ?", id, pattern, pattern)
 	} else {
-		query = query.Where("name LIKE ?", keyword+"%")
+		query = query.Where("name LIKE ? OR batch_id LIKE ?", pattern, pattern)
 	}
 
 	// Get total count
@@ -112,47 +150,185 @@ func GetRedemptionById(id int) (*Redemption, error) {
 	return &redemption, err
 }
 
-func Redeem(key string, userId int) (quota int, err error) {
+func GenerateRedemptionBatchId(source string, amount int64, now int64) string {
+	if source == "" {
+		source = RedemptionSourceManual
+	}
+	return fmt.Sprintf("RDM%s%d%d", strings.ToUpper(source), amount, now)
+}
+
+func CreateRedemptionTopUpTradeNo(redemptionID int, userID int) string {
+	return fmt.Sprintf("RDM%dU%d", redemptionID, userID)
+}
+
+func NormalizeRedemptionForCreate(redemption *Redemption) error {
+	if redemption == nil {
+		return ErrRedemptionInvalid
+	}
+	redemption.Kind = strings.TrimSpace(redemption.Kind)
+	redemption.Source = strings.TrimSpace(redemption.Source)
+	redemption.BatchId = strings.TrimSpace(redemption.BatchId)
+	if redemption.Kind == "" {
+		redemption.Kind = RedemptionKindPromoCredit
+	}
+	if redemption.Source == "" {
+		if redemption.Kind == RedemptionKindPaidTopUp {
+			redemption.Source = RedemptionSourceLDXP
+		} else {
+			redemption.Source = RedemptionSourcePromo
+		}
+	}
+	if redemption.BatchId == "" {
+		redemption.BatchId = GenerateRedemptionBatchId(redemption.Source, redemption.Amount, common.GetTimestamp())
+	}
+	return ValidateRedemptionKindForCreate(redemption)
+}
+
+func ValidateRedemptionKindForCreate(redemption *Redemption) error {
+	if redemption == nil {
+		return ErrRedemptionInvalid
+	}
+	switch redemption.Kind {
+	case RedemptionKindPaidTopUp:
+		if redemption.Quota <= 0 || redemption.Amount <= 0 || redemption.Money <= 0 || !redemption.CountAsTopUp {
+			return ErrRedemptionInvalid
+		}
+		return nil
+	case RedemptionKindPromoCredit:
+		if redemption.Quota <= 0 || redemption.Amount < 0 || redemption.Money < 0 || redemption.CountAsTopUp {
+			return ErrRedemptionInvalid
+		}
+		return nil
+	default:
+		return ErrRedemptionUnsupportedKind
+	}
+}
+
+func normalizeRedeemedRedemption(redemption *Redemption) {
+	if redemption.Kind == "" {
+		redemption.Kind = RedemptionKindLegacy
+	}
+	if redemption.Source == "" {
+		redemption.Source = RedemptionSourceManual
+	}
+}
+
+func buildRedeemResult(redemption *Redemption) *RedeemResult {
+	normalizeRedeemedRedemption(redemption)
+	return &RedeemResult{
+		Quota: redemption.Quota,
+		Redemption: RedeemRedemptionMeta{
+			Id:           redemption.Id,
+			Kind:         redemption.Kind,
+			Quota:        redemption.Quota,
+			Amount:       redemption.Amount,
+			Money:        redemption.Money,
+			CountAsTopUp: redemption.CountAsTopUp,
+			BatchId:      redemption.BatchId,
+			Source:       redemption.Source,
+		},
+	}
+}
+
+func GetRedemptionsByBatchId(batchId string) ([]*Redemption, error) {
+	batchId = strings.TrimSpace(batchId)
+	if batchId == "" {
+		return nil, ErrRedemptionInvalid
+	}
+	var redemptions []*Redemption
+	err := DB.Where("batch_id = ?", batchId).Order("id asc").Find(&redemptions).Error
+	return redemptions, err
+}
+
+func MarkRedemptionsExported(batchId string, exportedTime int64) error {
+	batchId = strings.TrimSpace(batchId)
+	if batchId == "" {
+		return ErrRedemptionInvalid
+	}
+	return DB.Model(&Redemption{}).Where("batch_id = ?", batchId).Update("exported_time", exportedTime).Error
+}
+
+func redeemError(err error) error {
+	if errors.Is(err, ErrRedemptionNotProvided) ||
+		errors.Is(err, ErrRedemptionInvalid) ||
+		errors.Is(err, ErrRedemptionUsed) ||
+		errors.Is(err, ErrRedemptionExpired) ||
+		errors.Is(err, ErrRedemptionUnsupportedKind) {
+		return err
+	}
+	common.SysError("redemption failed: " + err.Error())
+	return ErrRedeemFailed
+}
+
+func Redeem(key string, userId int) (*RedeemResult, error) {
 	if key == "" {
-		return 0, errors.New("未提供兑换码")
+		return nil, ErrRedemptionNotProvided
 	}
 	if userId == 0 {
-		return 0, errors.New("无效的 user id")
+		return nil, ErrRedemptionInvalid
 	}
 	redemption := &Redemption{}
 
-	keyCol := "`key`"
-	if common.UsingPostgreSQL {
-		keyCol = `"key"`
-	}
 	common.RandomSleep()
-	err = DB.Transaction(func(tx *gorm.DB) error {
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(keyCol+" = ?", key).First(redemption).Error
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(commonKeyCol+" = ?", key).First(redemption).Error
 		if err != nil {
-			return errors.New("无效的兑换码")
-		}
-		if redemption.Status != common.RedemptionCodeStatusEnabled {
-			return errors.New("该兑换码已被使用")
-		}
-		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
-			return errors.New("该兑换码已过期")
-		}
-		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
-		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrRedemptionInvalid
+			}
 			return err
 		}
-		redemption.RedeemedTime = common.GetTimestamp()
+		if redemption.Status != common.RedemptionCodeStatusEnabled {
+			return ErrRedemptionUsed
+		}
+		now := common.GetTimestamp()
+		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < now {
+			return ErrRedemptionExpired
+		}
+		normalizeRedeemedRedemption(redemption)
+		if redemption.Kind == RedemptionKindCoupon || (redemption.Kind != RedemptionKindLegacy && redemption.Kind != RedemptionKindPaidTopUp && redemption.Kind != RedemptionKindPromoCredit) {
+			return ErrRedemptionUnsupportedKind
+		}
+		if redemption.Kind == RedemptionKindPaidTopUp && (!redemption.CountAsTopUp || redemption.Amount <= 0 || redemption.Money <= 0) {
+			return ErrRedemptionInvalid
+		}
+		if redemption.Kind == RedemptionKindPromoCredit && redemption.CountAsTopUp {
+			return ErrRedemptionInvalid
+		}
+		result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrRedemptionInvalid
+		}
+		redemption.RedeemedTime = now
 		redemption.Status = common.RedemptionCodeStatusUsed
 		redemption.UsedUserId = userId
-		err = tx.Save(redemption).Error
-		return err
+		if err = tx.Save(redemption).Error; err != nil {
+			return err
+		}
+		if redemption.Kind == RedemptionKindPaidTopUp && redemption.CountAsTopUp {
+			topUp := &TopUp{
+				UserId:          userId,
+				Amount:          redemption.Amount,
+				Money:           redemption.Money,
+				TradeNo:         CreateRedemptionTopUpTradeNo(redemption.Id, userId),
+				PaymentMethod:   PaymentMethodRedemptionCode,
+				PaymentProvider: PaymentProviderRedemptionCode,
+				CreateTime:      now,
+				CompleteTime:    now,
+				Status:          common.TopUpStatusSuccess,
+			}
+			return tx.Create(topUp).Error
+		}
+		return nil
 	})
 	if err != nil {
-		common.SysError("redemption failed: " + err.Error())
-		return 0, ErrRedeemFailed
+		return nil, redeemError(err)
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
-	return redemption.Quota, nil
+	return buildRedeemResult(redemption), nil
 }
 
 func (redemption *Redemption) Insert() error {

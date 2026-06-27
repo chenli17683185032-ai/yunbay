@@ -76,6 +76,52 @@ export function getRedemptionStatusOptions(t: TFunction) {
 }
 
 // ============================================================================
+// Redemption Type Configuration
+// ============================================================================
+
+export const REDEMPTION_KINDS = {
+  LEGACY: 'legacy',
+  PAID_TOPUP: 'paid_topup',
+  PROMO_CREDIT: 'promo_credit',
+  COUPON: 'coupon',
+} as const
+
+export const REDEMPTION_SOURCES = {
+  LIANDONG: 'ldxp',
+  PROMO: 'promo',
+  MANUAL: 'manual',
+} as const
+
+export function getRedemptionKindOptions(t: TFunction) {
+  return [
+    { label: t('Promo / gift credit'), value: REDEMPTION_KINDS.PROMO_CREDIT },
+    { label: t('Paid top-up card'), value: REDEMPTION_KINDS.PAID_TOPUP },
+    { label: t('Legacy'), value: REDEMPTION_KINDS.LEGACY },
+    { label: t('Coupon'), value: REDEMPTION_KINDS.COUPON },
+  ]
+}
+
+export function getRedemptionSourceOptions(t: TFunction) {
+  return [
+    { label: t('Promotion'), value: REDEMPTION_SOURCES.PROMO },
+    { label: t('LianDong card shop'), value: REDEMPTION_SOURCES.LIANDONG },
+    { label: t('Manual'), value: REDEMPTION_SOURCES.MANUAL },
+  ]
+}
+
+export function getRedemptionKindLabel(t: TFunction, kind: string) {
+  const option = getRedemptionKindOptions(t).find((item) => item.value === kind)
+  return option?.label ?? (kind || t('Legacy'))
+}
+
+export function getRedemptionSourceLabel(t: TFunction, source: string) {
+  const option = getRedemptionSourceOptions(t).find(
+    (item) => item.value === source
+  )
+  return option?.label ?? (source || '-')
+}
+
+// ============================================================================
 // Validation Constants
 // ============================================================================
 
@@ -103,6 +149,11 @@ export const ERROR_MESSAGES = {
   NAME_LENGTH_INVALID: 'Name must be between {{min}} and {{max}} characters',
   COUNT_INVALID: 'Count must be between {{min}} and {{max}}',
   EXPIRED_TIME_INVALID: 'Expired time cannot be earlier than current time',
+  FACE_AMOUNT_INTEGER_INVALID: 'Face amount must be a whole number.',
+  PAID_TOPUP_INVALID:
+    'Paid top-up cards require positive quota, amount, paid money, and top-up accounting.',
+  PROMO_CREDIT_INVALID:
+    'Promo / gift credit cannot be counted as paid top-up, and amount/money cannot be negative.',
 } as const
 
 /** For form schema only: returns translated messages with interpolation. */
@@ -117,6 +168,9 @@ export function getRedemptionFormErrorMessages(t: TFunction) {
       max: REDEMPTION_VALIDATION.COUNT_MAX,
     }),
     EXPIRED_TIME_INVALID: t(ERROR_MESSAGES.EXPIRED_TIME_INVALID),
+    FACE_AMOUNT_INTEGER_INVALID: t(ERROR_MESSAGES.FACE_AMOUNT_INTEGER_INVALID),
+    PAID_TOPUP_INVALID: t(ERROR_MESSAGES.PAID_TOPUP_INVALID),
+    PROMO_CREDIT_INVALID: t(ERROR_MESSAGES.PROMO_CREDIT_INVALID),
   } as const
 }
 
@@ -131,4 +185,6 @@ export const SUCCESS_MESSAGES = {
   REDEMPTION_ENABLED: 'Redemption code enabled successfully',
   REDEMPTION_DISABLED: 'Redemption code disabled successfully',
   COPY_SUCCESS: 'Copied to clipboard',
+  EXPORT_SUCCESS: 'Redemption codes exported successfully',
+  EXPORT_FAILED: 'Failed to export redemption codes',
 } as const

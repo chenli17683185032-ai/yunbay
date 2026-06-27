@@ -107,9 +107,14 @@ export function RedemptionsTable() {
     globalFilterFn: (row, _columnId, filterValue) => {
       const name = String(row.getValue('name')).toLowerCase()
       const id = String(row.getValue('id'))
+      const batchId = String(row.original.batch_id).toLowerCase()
       const searchValue = String(filterValue).toLowerCase()
 
-      return name.includes(searchValue) || id.includes(searchValue)
+      return (
+        name.includes(searchValue) ||
+        id.includes(searchValue) ||
+        batchId.includes(searchValue)
+      )
     },
     onPaginationChange,
     onGlobalFilterChange,
@@ -137,7 +142,7 @@ export function RedemptionsTable() {
       skeletonKeyPrefix='redemptions-skeleton'
       applyHeaderSize
       toolbarProps={{
-        searchPlaceholder: t('Filter by name or ID...'),
+        searchPlaceholder: t('Search by name, ID, or batch ID'),
         filters: [
           {
             columnId: 'status',

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import { resolveExportBlob } from './lib'
 import type {
   Redemption,
   ApiResponse,
@@ -24,6 +25,7 @@ import type {
   GetRedemptionsResponse,
   SearchRedemptionsParams,
   RedemptionFormData,
+  CreateRedemptionResponse,
 } from './types'
 
 // ============================================================================
@@ -35,7 +37,9 @@ export async function getRedemptions(
   params: GetRedemptionsParams = {}
 ): Promise<GetRedemptionsResponse> {
   const { p = 1, page_size = 10 } = params
-  const res = await api.get(`/api/redemption/?p=${p}&page_size=${page_size}`)
+  const res = await api.get('/api/redemption/', {
+    params: { p, page_size },
+  })
   return res.data
 }
 
@@ -44,9 +48,9 @@ export async function searchRedemptions(
   params: SearchRedemptionsParams
 ): Promise<GetRedemptionsResponse> {
   const { keyword = '', p = 1, page_size = 10 } = params
-  const res = await api.get(
-    `/api/redemption/search?keyword=${keyword}&p=${p}&page_size=${page_size}`
-  )
+  const res = await api.get('/api/redemption/search', {
+    params: { keyword, p, page_size },
+  })
   return res.data
 }
 
@@ -61,9 +65,21 @@ export async function getRedemption(
 // Create redemption code(s)
 export async function createRedemption(
   data: RedemptionFormData
-): Promise<ApiResponse<string[]>> {
+): Promise<CreateRedemptionResponse> {
   const res = await api.post('/api/redemption/', data)
   return res.data
+}
+
+export async function exportRedemptions(
+  batchId: string,
+  format: 'txt' | 'csv'
+): Promise<Blob> {
+  const res = await api.get('/api/redemption/export', {
+    params: { batch_id: batchId, format },
+    responseType: 'blob',
+    skipBusinessError: true,
+  })
+  return resolveExportBlob(res.data)
 }
 
 // Update redemption code
