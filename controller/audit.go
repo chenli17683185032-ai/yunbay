@@ -45,7 +45,8 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply":     "Applied upstream model changes to channel (ID: ${id})",
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
-	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",
+	"redemption.create": "Created ${count} ${kind} redemption codes named ${name} (${quota} each, amount ${amount}, money ${money}, count_as_topup ${count_as_topup}, source ${source}, batch ${batch_id})",
+	"redemption.export": "Exported ${count} redemption codes from batch ${batch_id} as ${format}",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。
