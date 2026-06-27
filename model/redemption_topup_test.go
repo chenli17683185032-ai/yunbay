@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -87,6 +86,9 @@ func TestRedeemPaidTopupCreatesSuccessfulTopUp(t *testing.T) {
 	assert.Equal(t, RedemptionSourceLDXP, result.Redemption.Source)
 	assert.Equal(t, 750, userQuotaForRedemptionTest(t, userID))
 
+	var redeemed Redemption
+	require.NoError(t, DB.Where("key = ?", originalKey).First(&redeemed).Error)
+
 	topUps := topUpsForRedemptionTest(t, userID)
 	require.Len(t, topUps, 1)
 	assert.EqualValues(t, 20, topUps[0].Amount)
@@ -94,13 +96,10 @@ func TestRedeemPaidTopupCreatesSuccessfulTopUp(t *testing.T) {
 	assert.Equal(t, common.TopUpStatusSuccess, topUps[0].Status)
 	assert.Equal(t, PaymentMethodRedemptionCode, topUps[0].PaymentMethod)
 	assert.Equal(t, PaymentProviderRedemptionCode, topUps[0].PaymentProvider)
-	assert.NotEmpty(t, topUps[0].TradeNo)
-	assert.False(t, strings.Contains(topUps[0].TradeNo, originalKey))
+	assert.Equal(t, CreateRedemptionTopUpTradeNo(redeemed.Id, userID), topUps[0].TradeNo)
+	assert.NotContains(t, topUps[0].TradeNo, originalKey)
 	assert.NotZero(t, topUps[0].CreateTime)
 	assert.Equal(t, topUps[0].CreateTime, topUps[0].CompleteTime)
-
-	var redeemed Redemption
-	require.NoError(t, DB.Where("key = ?", originalKey).First(&redeemed).Error)
 	assert.Equal(t, common.RedemptionCodeStatusUsed, redeemed.Status)
 	assert.Equal(t, userID, redeemed.UsedUserId)
 	assert.NotZero(t, redeemed.RedeemedTime)
@@ -116,9 +115,7 @@ func TestRedeemPromoCreditDoesNotCreateTopUp(t *testing.T) {
 		Name:         "Promo credit",
 		Quota:        300,
 		Kind:         RedemptionKindPromoCredit,
-		Amount:       30,
-		Money:        3.50,
-		CountAsTopUp: true,
+		CountAsTopUp: false,
 		Source:       RedemptionSourcePromo,
 	})
 
@@ -158,6 +155,7 @@ func TestRedeemReturnsSpecificErrors(t *testing.T) {
 	setupRedemptionTopUpTest(t)
 	insertRedemptionTopUpUser(t, 1004, 0)
 	insertRedemptionCode(t, &Redemption{Key: "used-key", Name: "Used", Quota: 1, Status: common.RedemptionCodeStatusUsed})
+	insertRedemptionCode(t, &Redemption{Key: "disabled-key", Name: "Disabled", Quota: 1, Status: common.RedemptionCodeStatusDisabled})
 	insertRedemptionCode(t, &Redemption{Key: "expired-key", Name: "Expired", Quota: 1, ExpiredTime: common.GetTimestamp() - 1})
 	insertRedemptionCode(t, &Redemption{Key: "coupon-key", Name: "Coupon", Quota: 1, Kind: RedemptionKindCoupon})
 	insertRedemptionCode(t, &Redemption{Key: "unknown-kind-key", Name: "Unknown", Quota: 1, Kind: "gift_card"})
@@ -172,6 +170,7 @@ func TestRedeemReturnsSpecificErrors(t *testing.T) {
 		{name: "empty user", key: "missing-key", user: 0, want: ErrRedemptionInvalid},
 		{name: "missing key", key: "missing-key", user: 1004, want: ErrRedemptionInvalid},
 		{name: "used key", key: "used-key", user: 1004, want: ErrRedemptionUsed},
+		{name: "disabled key", key: "disabled-key", user: 1004, want: ErrRedemptionUsed},
 		{name: "expired key", key: "expired-key", user: 1004, want: ErrRedemptionExpired},
 		{name: "coupon key", key: "coupon-key", user: 1004, want: ErrRedemptionUnsupportedKind},
 		{name: "unknown kind", key: "unknown-kind-key", user: 1004, want: ErrRedemptionUnsupportedKind},
@@ -188,26 +187,47 @@ func TestRedeemReturnsSpecificErrors(t *testing.T) {
 }
 
 func TestNormalizeRedemptionForCreateDefaultsAndValidates(t *testing.T) {
-	t.Run("defaults legacy and manual", func(t *testing.T) {
+	t.Run("defaults new create requests to promo credit", func(t *testing.T) {
 		redemption := &Redemption{Key: "normalize-default", Quota: 100}
 		require.NoError(t, NormalizeRedemptionForCreate(redemption))
-		assert.Equal(t, RedemptionKindLegacy, redemption.Kind)
-		assert.Equal(t, RedemptionSourceManual, redemption.Source)
+		assert.Equal(t, RedemptionKindPromoCredit, redemption.Kind)
+		assert.Equal(t, RedemptionSourcePromo, redemption.Source)
+		assert.NotEmpty(t, redemption.BatchId)
 		assert.EqualValues(t, 0, redemption.Amount)
 		assert.Equal(t, 0.0, redemption.Money)
 		assert.False(t, redemption.CountAsTopUp)
 	})
 
-	t.Run("paid topup with topup accounting requires amount and money", func(t *testing.T) {
+	t.Run("paid topup requires quota amount money and accounting", func(t *testing.T) {
+		redemption := &Redemption{Key: "normalize-paid", Quota: 100, Kind: RedemptionKindPaidTopUp, Amount: 10, Money: 10, CountAsTopUp: true}
+		require.NoError(t, NormalizeRedemptionForCreate(redemption))
+		assert.Equal(t, RedemptionSourceLDXP, redemption.Source)
+		assert.NotEmpty(t, redemption.BatchId)
+	})
+
+	t.Run("paid topup without accounting is invalid", func(t *testing.T) {
+		redemption := &Redemption{Key: "normalize-paid-no-accounting", Quota: 100, Kind: RedemptionKindPaidTopUp, Amount: 10, Money: 10, CountAsTopUp: false}
+		require.ErrorIs(t, NormalizeRedemptionForCreate(redemption), ErrRedemptionInvalid)
+	})
+
+	t.Run("paid topup with missing amount or money is invalid", func(t *testing.T) {
 		redemption := &Redemption{Key: "normalize-paid", Quota: 100, Kind: RedemptionKindPaidTopUp, CountAsTopUp: true}
 		require.ErrorIs(t, NormalizeRedemptionForCreate(redemption), ErrRedemptionInvalid)
 	})
 
-	t.Run("coupon is accepted for creation but not redeem", func(t *testing.T) {
+	t.Run("promo credit cannot count as topup", func(t *testing.T) {
+		redemption := &Redemption{Key: "normalize-promo", Quota: 100, Kind: RedemptionKindPromoCredit, CountAsTopUp: true}
+		require.ErrorIs(t, NormalizeRedemptionForCreate(redemption), ErrRedemptionInvalid)
+	})
+
+	t.Run("coupon is not creatable in this iteration", func(t *testing.T) {
 		redemption := &Redemption{Key: "normalize-coupon", Quota: 100, Kind: RedemptionKindCoupon, Source: RedemptionSourceLDXP}
-		require.NoError(t, NormalizeRedemptionForCreate(redemption))
-		assert.Equal(t, RedemptionKindCoupon, redemption.Kind)
-		assert.Equal(t, RedemptionSourceLDXP, redemption.Source)
+		require.ErrorIs(t, NormalizeRedemptionForCreate(redemption), ErrRedemptionUnsupportedKind)
+	})
+
+	t.Run("legacy is not creatable in this iteration", func(t *testing.T) {
+		redemption := &Redemption{Key: "normalize-legacy", Quota: 100, Kind: RedemptionKindLegacy}
+		require.ErrorIs(t, NormalizeRedemptionForCreate(redemption), ErrRedemptionUnsupportedKind)
 	})
 
 	t.Run("unknown kind is rejected", func(t *testing.T) {
@@ -218,4 +238,89 @@ func TestNormalizeRedemptionForCreateDefaultsAndValidates(t *testing.T) {
 	t.Run("nil redemption is invalid", func(t *testing.T) {
 		require.ErrorIs(t, NormalizeRedemptionForCreate(nil), ErrRedemptionInvalid)
 	})
+}
+
+func TestRedeemDoesNotConsumeCodeWhenUserDoesNotExist(t *testing.T) {
+	setupRedemptionTopUpTest(t)
+	insertRedemptionCode(t, &Redemption{
+		Key:          "missing-user-paid-key",
+		Name:         "Paid topup card",
+		Quota:        700,
+		Kind:         RedemptionKindPaidTopUp,
+		Amount:       20,
+		Money:        9.99,
+		CountAsTopUp: true,
+		BatchId:      "batch-missing-user",
+		Source:       RedemptionSourceLDXP,
+	})
+
+	result, err := Redeem("missing-user-paid-key", 9999)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRedemptionInvalid)
+
+	var redemption Redemption
+	require.NoError(t, DB.Where("key = ?", "missing-user-paid-key").First(&redemption).Error)
+	assert.Equal(t, common.RedemptionCodeStatusEnabled, redemption.Status)
+	assert.Zero(t, redemption.UsedUserId)
+	assert.Zero(t, redemption.RedeemedTime)
+
+	var count int64
+	require.NoError(t, DB.Model(&TopUp{}).Count(&count).Error)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestRedeemRejectsInvalidPaidTopupAccounting(t *testing.T) {
+	setupRedemptionTopUpTest(t)
+	const userID = 1005
+	insertRedemptionTopUpUser(t, userID, 50)
+	insertRedemptionCode(t, &Redemption{
+		Key:          "invalid-paid-key",
+		Name:         "Invalid paid topup card",
+		Quota:        700,
+		Kind:         RedemptionKindPaidTopUp,
+		Amount:       0,
+		Money:        9.99,
+		CountAsTopUp: true,
+		Source:       RedemptionSourceLDXP,
+	})
+
+	result, err := Redeem("invalid-paid-key", userID)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrRedemptionInvalid)
+	assert.Equal(t, 50, userQuotaForRedemptionTest(t, userID))
+	assert.Empty(t, topUpsForRedemptionTest(t, userID))
+
+	var redemption Redemption
+	require.NoError(t, DB.Where("key = ?", "invalid-paid-key").First(&redemption).Error)
+	assert.Equal(t, common.RedemptionCodeStatusEnabled, redemption.Status)
+}
+
+func TestRedeemPaidTopupCannotBeRedeemedTwice(t *testing.T) {
+	setupRedemptionTopUpTest(t)
+	const userID = 1006
+	insertRedemptionTopUpUser(t, userID, 50)
+	insertRedemptionCode(t, &Redemption{
+		Key:          "repeat-paid-key",
+		Name:         "Paid topup card",
+		Quota:        700,
+		Kind:         RedemptionKindPaidTopUp,
+		Amount:       20,
+		Money:        9.99,
+		CountAsTopUp: true,
+		BatchId:      "batch-repeat",
+		Source:       RedemptionSourceLDXP,
+	})
+
+	first, err := Redeem("repeat-paid-key", userID)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+
+	second, err := Redeem("repeat-paid-key", userID)
+
+	require.Nil(t, second)
+	require.ErrorIs(t, err, ErrRedemptionUsed)
+	assert.Equal(t, 750, userQuotaForRedemptionTest(t, userID))
+	require.Len(t, topUpsForRedemptionTest(t, userID), 1)
 }
