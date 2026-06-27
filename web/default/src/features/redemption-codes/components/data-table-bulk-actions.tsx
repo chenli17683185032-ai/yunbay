@@ -32,6 +32,7 @@ import { CopyButton } from '@/components/copy-button'
 import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
 import { deleteInvalidRedemptions, exportRedemptions } from '../api'
 import { SUCCESS_MESSAGES } from '../constants'
+import { getSingleSelectedBatchId } from '../lib'
 import { type Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
@@ -45,7 +46,7 @@ function downloadBlob(blob: Blob, filename: string) {
   a.href = url
   a.download = filename
   a.click()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 export function DataTableBulkActions<TData>({
@@ -70,19 +71,10 @@ export function DataTableBulkActions<TData>({
     return selectedRedemptions.map((redemption) => redemption.key).join('\n')
   }, [selectedRedemptions])
 
-  const selectedBatchId = useMemo(() => {
-    const batchIds = new Set(
-      selectedRedemptions
-        .map((redemption) => redemption.batch_id)
-        .filter((batchId) => batchId.length > 0)
-    )
-
-    if (batchIds.size !== 1 || batchIds.size !== selectedRedemptions.length) {
-      return null
-    }
-
-    return [...batchIds][0]
-  }, [selectedRedemptions])
+  const selectedBatchId = useMemo(
+    () => getSingleSelectedBatchId(selectedRedemptions),
+    [selectedRedemptions]
+  )
 
   const handleExport = async (format: 'txt' | 'csv') => {
     if (!selectedBatchId) return
@@ -91,9 +83,14 @@ export function DataTableBulkActions<TData>({
     try {
       const blob = await exportRedemptions(selectedBatchId, format)
       downloadBlob(blob, `redemptions-${selectedBatchId}.${format}`)
+      triggerRefresh()
       toast.success(t(SUCCESS_MESSAGES.EXPORT_SUCCESS))
-    } catch {
-      toast.error(t(SUCCESS_MESSAGES.EXPORT_FAILED))
+    } catch (error) {
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t(SUCCESS_MESSAGES.EXPORT_FAILED)
+      )
     } finally {
       setExportingFormat(null)
     }
