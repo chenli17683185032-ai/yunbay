@@ -80,14 +80,14 @@ func CreateLdxpTopupSession(userID int, amount int64, cfg *LdxpConfig) (*LdxpSes
 
 	var session *model.LdxpTopupSession
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockLdxpUserRowIfPossible(tx, userID); err != nil {
+			return err
+		}
+
 		if activeSession, err := findActiveLdxpTopupSessionForUserTx(tx, userID, now); err == nil {
 			session = activeSession
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-
-		if err := lockLdxpUserRowIfPossible(tx, userID); err != nil {
 			return err
 		}
 
@@ -339,7 +339,7 @@ func lockLdxpUserRowIfPossible(tx *gorm.DB, userID int) error {
 	}
 	err := query.First(&user).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil
+		return fmt.Errorf("%w: user not found", ErrLdxpInvalidSessionRequest)
 	}
 	return err
 }

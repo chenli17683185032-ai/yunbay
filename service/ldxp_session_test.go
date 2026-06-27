@@ -44,6 +44,11 @@ func insertLdxpSessionForServiceTest(t *testing.T, session *model.LdxpTopupSessi
 	require.NoError(t, model.InsertLdxpTopupSession(session))
 }
 
+func insertLdxpUserForServiceTest(t *testing.T, userID int) {
+	t.Helper()
+	require.NoError(t, model.DB.Create(&model.User{Id: userID, Username: fmt.Sprintf("user-%d", userID), AffCode: fmt.Sprintf("aff-%d", userID)}).Error)
+}
+
 func TestCreateLdxpTopupSessionRejectsDisabled(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 
@@ -66,6 +71,8 @@ func TestCreateLdxpTopupSessionRejectsUnsupportedAmount(t *testing.T) {
 
 func TestCreateLdxpTopupSessionReusesActiveSessionForUser(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1001)
+	insertLdxpUserForServiceTest(t, 2002)
 	now := common.GetTimestamp()
 	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
 		SessionId:   "ldxp_active_reuse_existing",
@@ -118,6 +125,7 @@ func TestCreateLdxpTopupSessionReusesActiveSessionForUser(t *testing.T) {
 
 func TestCreateLdxpTopupSessionPersistsCreatedState(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1001)
 
 	view, err := CreateLdxpTopupSession(1001, 10, testLdxpSessionConfig(true))
 
@@ -142,6 +150,20 @@ func TestCreateLdxpTopupSessionPersistsCreatedState(t *testing.T) {
 	assert.Equal(t, model.LdxpStatusCreated, persisted.Status)
 	assert.Equal(t, persisted.CreatedTime, persisted.UpdatedTime)
 	assert.EqualValues(t, persisted.CreatedTime+1200, persisted.ExpiredTime)
+}
+
+func TestCreateLdxpTopupSessionRejectsMissingUser(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+
+	view, err := CreateLdxpTopupSession(1001, 10, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.Nil(t, view)
+	assert.ErrorIs(t, err, ErrLdxpInvalidSessionRequest)
+
+	var count int64
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("user_id = ?", 1001).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
 }
 
 func TestRecordLdxpQrMovesSessionToQrReady(t *testing.T) {
@@ -443,7 +465,7 @@ func TestRecordLdxpWorkerResultRejectsStaleOrderNo(t *testing.T) {
 
 func TestCreateLdxpTopupSessionSerializesConcurrentCreates(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
-	require.NoError(t, model.DB.Create(&model.User{Id: 1001, Username: "user-1001"}).Error)
+	insertLdxpUserForServiceTest(t, 1001)
 
 	const workers = 16
 	start := make(chan struct{})
