@@ -9,7 +9,7 @@ import (
 )
 
 const ldxpSixProductsJSON = `[
-  {"amount":10,"money":10,"product_url":"https://example.test/ldxp/10","product_name":"LDXP 10"},
+  {"amount":10,"money":0.10,"product_url":"https://example.test/ldxp/10","product_name":"LDXP 10"},
   {"amount":20,"money":20,"product_url":"https://example.test/ldxp/20","product_name":"LDXP 20"},
   {"amount":30,"money":30,"product_url":"https://example.test/ldxp/30","product_name":"LDXP 30"},
   {"amount":50,"money":50,"product_url":"https://example.test/ldxp/50","product_name":"LDXP 50"},
@@ -17,11 +17,27 @@ const ldxpSixProductsJSON = `[
   {"amount":500,"money":500,"product_url":"https://example.test/ldxp/500","product_name":"LDXP 500"}
 ]`
 
+func clearLdxpEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"LDXP_AUTO_TOPUP_ENABLED",
+		"LDXP_TOPUP_PRODUCTS_JSON",
+		"LDXP_CONTACT_EMAIL",
+		"LDXP_WORKER_TOKEN",
+		"LDXP_WORKER_TOKEN_FILE",
+		"LDXP_SESSION_TTL_SECONDS",
+		"LDXP_QR_TTL_SECONDS",
+		"LDXP_WORKER_JOB_TIMEOUT_SECONDS",
+		"LDXP_MAIL_MATCH_WINDOW_SECONDS",
+		"LDXP_REQUIRE_MAIL_MATCH",
+		"LDXP_DEBUG_SNAPSHOT_DIR",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
 func TestLoadLdxpConfigDisabledByDefault(t *testing.T) {
-	t.Setenv("LDXP_AUTO_TOPUP_ENABLED", "")
-	t.Setenv("LDXP_TOPUP_PRODUCTS_JSON", "")
-	t.Setenv("LDXP_WORKER_TOKEN", "")
-	t.Setenv("LDXP_WORKER_TOKEN_FILE", "")
+	clearLdxpEnv(t)
 
 	cfg, err := LoadLdxpConfig()
 	require.NoError(t, err)
@@ -37,6 +53,7 @@ func TestLoadLdxpConfigDisabledByDefault(t *testing.T) {
 }
 
 func TestLoadLdxpConfigParsesSixProducts(t *testing.T) {
+	clearLdxpEnv(t)
 	t.Setenv("LDXP_AUTO_TOPUP_ENABLED", "true")
 	t.Setenv("LDXP_TOPUP_PRODUCTS_JSON", ldxpSixProductsJSON)
 	t.Setenv("LDXP_WORKER_TOKEN", " token-from-env\n")
@@ -47,6 +64,7 @@ func TestLoadLdxpConfigParsesSixProducts(t *testing.T) {
 	require.True(t, cfg.Enabled)
 	require.Equal(t, "token-from-env", cfg.WorkerToken)
 	require.Len(t, cfg.Products, 6)
+	require.Equal(t, 0.10, cfg.Products[10].Money)
 
 	for _, amount := range []int64{10, 20, 30, 50, 100, 500} {
 		product, ok := cfg.Products[amount]
@@ -59,6 +77,7 @@ func TestLoadLdxpConfigParsesSixProducts(t *testing.T) {
 }
 
 func TestLoadLdxpConfigRejectsMissingAmounts(t *testing.T) {
+	clearLdxpEnv(t)
 	t.Setenv("LDXP_TOPUP_PRODUCTS_JSON", `[
   {"amount":10,"money":10,"product_url":"https://example.test/ldxp/10","product_name":"LDXP 10"},
   {"amount":20,"money":20,"product_url":"https://example.test/ldxp/20","product_name":"LDXP 20"},
@@ -84,13 +103,35 @@ func TestReadLdxpSecretPrefersFile(t *testing.T) {
 
 func TestRedactLdxpSecretMasksCardAndQr(t *testing.T) {
 	require.Empty(t, RedactLdxpValue(""))
-	require.Equal(t, "abc...abc", RedactLdxpValue("abc"))
+	require.Equal(t, "[redacted]", RedactLdxpValue("abc"))
 	require.Equal(t, "abcd...efgh", RedactLdxpValue("abcdefgh"))
 	require.Equal(t, "4242...4242", RedactLdxpValue("4242424242424242"))
 	require.Equal(t, "data:image/png;base64,[redacted]", RedactLdxpValue("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA"))
 }
 
 func TestLdxpConfigRedactShortNormalStrings(t *testing.T) {
-	require.Equal(t, "abc...abc", RedactLdxpValue("abc"))
+	require.Equal(t, "[redacted]", RedactLdxpValue("abc"))
 	require.Equal(t, "abcd...efgh", RedactLdxpValue("abcdefgh"))
+}
+
+func TestLoadLdxpConfigRejectsUnreadableTokenFile(t *testing.T) {
+	clearLdxpEnv(t)
+	t.Setenv("LDXP_WORKER_TOKEN", "env-token")
+	t.Setenv("LDXP_WORKER_TOKEN_FILE", filepath.Join(t.TempDir(), "missing-token"))
+
+	cfg, err := LoadLdxpConfig()
+	require.Error(t, err)
+	require.Nil(t, cfg)
+	require.Contains(t, err.Error(), "LDXP_WORKER_TOKEN_FILE")
+	require.NotContains(t, err.Error(), "env-token")
+}
+
+func TestLoadLdxpConfigRejectsInvalidTTL(t *testing.T) {
+	clearLdxpEnv(t)
+	t.Setenv("LDXP_SESSION_TTL_SECONDS", "0")
+
+	cfg, err := LoadLdxpConfig()
+	require.Error(t, err)
+	require.Nil(t, cfg)
+	require.Contains(t, err.Error(), "LDXP_SESSION_TTL_SECONDS")
 }
