@@ -35,6 +35,14 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -43,6 +51,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import { DateTimePicker } from '@/components/datetime-picker'
 import {
   SideDrawerSection,
@@ -52,7 +61,13 @@ import {
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
 import { createRedemption, updateRedemption, getRedemption } from '../api'
-import { SUCCESS_MESSAGES } from '../constants'
+import {
+  REDEMPTION_KINDS,
+  REDEMPTION_SOURCES,
+  SUCCESS_MESSAGES,
+  getRedemptionKindOptions,
+  getRedemptionSourceOptions,
+} from '../constants'
 import {
   getRedemptionFormSchema,
   type RedemptionFormValues,
@@ -60,7 +75,7 @@ import {
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
 } from '../lib'
-import { type Redemption } from '../types'
+import { redemptionKindSchema, type Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
 type RedemptionsMutateDrawerProps = {
@@ -78,6 +93,8 @@ export function RedemptionsMutateDrawer({
   const isUpdate = !!currentRow
   const { triggerRefresh } = useRedemptions()
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const redemptionKindOptions = getRedemptionKindOptions(t)
+  const redemptionSourceOptions = getRedemptionSourceOptions(t)
 
   const form = useForm<RedemptionFormValues>({
     resolver: zodResolver(getRedemptionFormSchema(t)),
@@ -121,12 +138,16 @@ export function RedemptionsMutateDrawer({
         const result = await createRedemption(basePayload)
         if (result.success) {
           const count = result.data?.length || 0
-          toast.success(
+          const message =
             count > 1
               ? t('Successfully created {{count}} redemption codes', {
                   count,
                 })
               : t(SUCCESS_MESSAGES.REDEMPTION_CREATED)
+          toast.success(
+            result.batch_id
+              ? `${message} (${t('Batch ID')}: ${result.batch_id})`
+              : message
           )
           onOpenChange(false)
           triggerRefresh()
@@ -142,6 +163,32 @@ export function RedemptionsMutateDrawer({
   const handleSetExpiry = (months: number, days: number, hours: number) => {
     const newDate = addTimeToDate(months, days, hours)
     form.setValue('expired_time', newDate)
+  }
+
+  const handleKindChange = (value: string | null) => {
+    const kind = redemptionKindSchema.parse(
+      value ?? REDEMPTION_KINDS.PROMO_CREDIT
+    )
+    form.setValue('kind', kind, { shouldValidate: true })
+
+    if (kind === REDEMPTION_KINDS.PAID_TOPUP) {
+      form.setValue('source', REDEMPTION_SOURCES.LIANDONG, {
+        shouldValidate: true,
+      })
+      form.setValue('count_as_topup', true, { shouldValidate: true })
+      return
+    }
+
+    if (kind === REDEMPTION_KINDS.PROMO_CREDIT) {
+      form.setValue('source', REDEMPTION_SOURCES.PROMO, {
+        shouldValidate: true,
+      })
+      form.setValue('count_as_topup', false, { shouldValidate: true })
+      return
+    }
+
+    form.setValue('source', REDEMPTION_SOURCES.MANUAL, { shouldValidate: true })
+    form.setValue('count_as_topup', false, { shouldValidate: true })
   }
 
   const { meta: currencyMeta } = getCurrencyDisplay()
@@ -184,6 +231,181 @@ export function RedemptionsMutateDrawer({
             onSubmit={form.handleSubmit(onSubmit)}
             className={sideDrawerFormClassName()}
           >
+            <SideDrawerSection>
+              <FormField
+                control={form.control}
+                name='kind'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Card type')}</FormLabel>
+                    <Select
+                      items={redemptionKindOptions}
+                      value={field.value}
+                      onValueChange={handleKindChange}
+                      disabled={isUpdate}
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          {redemptionKindOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {isUpdate
+                        ? t('Type metadata cannot be changed after creation.')
+                        : t(
+                            'Choose how this redemption card should be billed.'
+                          )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='source'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Source')}</FormLabel>
+                    <Select
+                      items={redemptionSourceOptions}
+                      value={field.value}
+                      onValueChange={(value) =>
+                        value !== null && field.onChange(value)
+                      }
+                      disabled={isUpdate}
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          {redemptionSourceOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {t('Where this redemption batch comes from.')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='batch_id'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Batch ID')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder={t('Leave empty to generate automatically')}
+                        disabled={isUpdate}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Use the same batch ID for cards from one card shop export.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                <FormField
+                  control={form.control}
+                  name='amount'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Face amount')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='number'
+                          min='0'
+                          step='0.01'
+                          placeholder={t('Face amount')}
+                          disabled={isUpdate}
+                          onChange={(e) =>
+                            field.onChange(parseFloat(e.target.value) || 0)
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='money'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Paid money')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='number'
+                          min='0'
+                          step='0.01'
+                          placeholder={t('Paid money')}
+                          disabled={isUpdate}
+                          onChange={(e) =>
+                            field.onChange(parseFloat(e.target.value) || 0)
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name='count_as_topup'
+                render={({ field }) => (
+                  <FormItem className='flex flex-row items-center justify-between rounded-lg border p-3'>
+                    <div className='flex flex-col gap-1'>
+                      <FormLabel>{t('Count as paid top-up')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Paid top-up cards must be counted in wallet top-up statistics.'
+                        )}
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={isUpdate}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+            </SideDrawerSection>
+
             <SideDrawerSection>
               <FormField
                 control={form.control}
