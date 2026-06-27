@@ -46,6 +46,18 @@ func TestParseLdxpMailHandlesHtmlBody(t *testing.T) {
 	assert.NotContains(t, NormalizeLdxpMailBody(input), "<strong>")
 }
 
+func TestParseLdxpMailDoesNotTreatProductContentAsCard(t *testing.T) {
+	body := "订单号：LD260628UZJ97P\n购买内容：OpenAIPro\n卡密信息：SECRET-CARD-999999\n金额：0.10"
+
+	parsed, err := ParseLdxpMailText(body)
+
+	require.NoError(t, err)
+	require.NotNil(t, parsed)
+	assert.Equal(t, "OpenAIPro", parsed.ProductName)
+	assert.Equal(t, "SECRET-CARD-999999", parsed.CardKey)
+	assert.NotContains(t, parsed.BodyExcerpt, "SECRET-CARD-999999")
+}
+
 func TestUpsertLdxpMailEventDedupesRawHash(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	raw := []byte(ldxpMailFixtureText)

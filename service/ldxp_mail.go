@@ -20,17 +20,22 @@ import (
 
 const ldxpMailExcerptMaxRunes = 500
 
+const (
+	ldxpSecretLabelPattern         = `(?:卡密信息|卡密内容|兑换码为|激活码|券码|序列号|CDKEY|卡密账号|卡密|兑换码|卡号|发货内容|购买内容(?:卡号|卡密账号|卡密(?:信息|内容)?|兑换码(?:为)?|激活码|序列号)|\b(?:code|secret|token|password)\b)`
+	ldxpProductContentLabelPattern = `(?:商品名称|商品名|购买内容)`
+)
+
 var (
 	ldxpHTMLBreakRe   = regexp.MustCompile(`(?i)<\s*/?\s*(br|p|div|tr|li|table|tbody|thead|section|article|h[1-6])\b[^>]*>`)
 	ldxpHTMLTagRe     = regexp.MustCompile(`(?s)<[^>]+>`)
 	ldxpWhitespaceRe  = regexp.MustCompile(`[\t\r\f\v ]+`)
 	ldxpBlankLineRe   = regexp.MustCompile(`\n{3,}`)
 	ldxpOrderRe       = regexp.MustCompile(`(?m)(?:订单号|订单编号|订单)\s*[:：]?\s*(LD[A-Z0-9]+)\b`)
-	ldxpCardRe        = regexp.MustCompile(`(?mi)(?:卡密信息|卡密内容|兑换码为|激活码|券码|序列号|CDKEY|卡密账号|卡密|兑换码|卡号|发货内容|购买内容|\b(?:code|secret|token|password)\b)\s*[:：]?\s*([A-Za-z0-9_-]{6,128})`)
+	ldxpCardRe        = regexp.MustCompile(`(?mi)` + ldxpSecretLabelPattern + `\s*[:：]?\s*([A-Za-z0-9_-]{6,128})`)
 	ldxpAmountRe      = regexp.MustCompile(`(?m)(?:支付金额|金额)\s*[:：]?\s*¥?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:元)?`)
-	ldxpProductNameRe = regexp.MustCompile(`(?m)(?:商品名称|商品名|购买内容)\s*[:：]?\s*([^\n]+)`)
+	ldxpProductNameRe = regexp.MustCompile(`(?m)` + ldxpProductContentLabelPattern + `\s*[:：]?\s*([^\n]+)`)
 	ldxpPaidTimeRe    = regexp.MustCompile(`(?m)(?:付款时间|支付时间|付款日期|支付日期)\s*[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`)
-	ldxpSensitiveRe   = regexp.MustCompile(`(?mi)((?:卡密信息|卡密内容|兑换码为|激活码|券码|序列号|CDKEY|卡密账号|卡密|兑换码|卡号|发货内容|购买内容|\b(?:code|secret|token|password)\b)\s*[:：]?\s*)([A-Za-z0-9_-]{6,128})`)
+	ldxpSensitiveRe   = regexp.MustCompile(`(?mi)(` + ldxpSecretLabelPattern + `\s*[:：]?\s*)([A-Za-z0-9_-]{6,128})`)
 	ldxpRiskContextRe = regexp.MustCompile(`(?i)(?:卡|码|密|key|code|token|secret|password)`)
 	ldxpTokenLikeRe   = regexp.MustCompile(`[A-Za-z0-9_-]{6,128}`)
 )
