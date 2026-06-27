@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useMemo } from 'react'
 import { type Table } from '@tanstack/react-table'
-import { Trash2 } from 'lucide-react'
+import { Download, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -30,12 +30,22 @@ import {
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { CopyButton } from '@/components/copy-button'
 import { DataTableBulkActions as BulkActionsToolbar } from '@/components/data-table'
-import { deleteInvalidRedemptions } from '../api'
+import { deleteInvalidRedemptions, exportRedemptions } from '../api'
+import { SUCCESS_MESSAGES } from '../constants'
 import { type Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
 type DataTableBulkActionsProps<TData> = {
   table: Table<TData>
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export function DataTableBulkActions<TData>({
@@ -46,15 +56,48 @@ export function DataTableBulkActions<TData>({
   const [showDeleteInvalidConfirm, setShowDeleteInvalidConfirm] =
     useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [exportingFormat, setExportingFormat] = useState<'txt' | 'csv' | null>(
+    null
+  )
   const selectedRows = table.getFilteredSelectedRowModel().rows
 
+  const selectedRedemptions = useMemo(
+    () => selectedRows.map((row) => row.original as Redemption),
+    [selectedRows]
+  )
+
   const contentToCopy = useMemo(() => {
-    const selectedCodes = selectedRows.map((row) => {
-      const redemption = row.original as Redemption
-      return `${redemption.name}\t${redemption.key}`
-    })
-    return selectedCodes.join('\n')
-  }, [selectedRows])
+    return selectedRedemptions.map((redemption) => redemption.key).join('\n')
+  }, [selectedRedemptions])
+
+  const selectedBatchId = useMemo(() => {
+    const batchIds = new Set(
+      selectedRedemptions
+        .map((redemption) => redemption.batch_id)
+        .filter((batchId) => batchId.length > 0)
+    )
+
+    if (batchIds.size !== 1 || batchIds.size !== selectedRedemptions.length) {
+      return null
+    }
+
+    return [...batchIds][0]
+  }, [selectedRedemptions])
+
+  const handleExport = async (format: 'txt' | 'csv') => {
+    if (!selectedBatchId) return
+
+    setExportingFormat(format)
+    try {
+      const blob = await exportRedemptions(selectedBatchId, format)
+      downloadBlob(blob, `redemptions-${selectedBatchId}.${format}`)
+      toast.success(t(SUCCESS_MESSAGES.EXPORT_SUCCESS))
+    } catch {
+      toast.error(t(SUCCESS_MESSAGES.EXPORT_FAILED))
+    } finally {
+      setExportingFormat(null)
+    }
+  }
 
   const handleDeleteInvalid = async () => {
     setIsDeleting(true)
@@ -77,6 +120,11 @@ export function DataTableBulkActions<TData>({
     }
   }
 
+  const exportDisabled = !selectedBatchId || exportingFormat !== null
+  const exportTooltip = selectedBatchId
+    ? t('Export selected batch')
+    : t('Select codes from exactly one batch to export')
+
   return (
     <>
       <BulkActionsToolbar table={table} entityName={t('redemption code')}>
@@ -89,6 +137,48 @@ export function DataTableBulkActions<TData>({
           successTooltip={t('Codes copied!')}
           aria-label={t('Copy selected codes')}
         />
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => handleExport('txt')}
+                disabled={exportDisabled}
+                className='h-8'
+                aria-label={t('Export TXT')}
+              />
+            }
+          >
+            <Download data-icon='inline-start' />
+            TXT
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{exportTooltip}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='outline'
+                size='sm'
+                onClick={() => handleExport('csv')}
+                disabled={exportDisabled}
+                className='h-8'
+                aria-label={t('Export CSV')}
+              />
+            }
+          >
+            <Download data-icon='inline-start' />
+            CSV
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{exportTooltip}</p>
+          </TooltipContent>
+        </Tooltip>
 
         <Tooltip>
           <TooltipTrigger
