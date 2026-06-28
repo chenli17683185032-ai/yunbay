@@ -51,6 +51,10 @@ func (err *ldxpVerifyFieldError) Error() string {
 }
 
 func TryVerifyAndRedeemLdxpSession(sessionID string) (*LdxpVerifyResult, error) {
+	return tryVerifyAndRedeemLdxpSession(sessionID, nil)
+}
+
+func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpMailEvent) (*LdxpVerifyResult, error) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
 		return nil, gorm.ErrInvalidData
@@ -67,7 +71,7 @@ func TryVerifyAndRedeemLdxpSession(sessionID string) (*LdxpVerifyResult, error) 
 		return successLdxpVerifyResult(session), nil
 	}
 
-	event, eventErr := getLdxpVerifyMailEvent(session)
+	event, eventErr := getLdxpVerifyMailEvent(session, preferredEvent)
 	if eventErr != nil && !errors.Is(eventErr, gorm.ErrRecordNotFound) {
 		return nil, eventErr
 	}
@@ -99,6 +103,22 @@ func TryVerifyAndRedeemLdxpSession(sessionID string) (*LdxpVerifyResult, error) 
 		return nil, err
 	}
 	if err := RedeemLdxpSessionCard(session); err != nil {
+		if errors.Is(err, model.ErrRedemptionUsed) {
+			recovered, recoverErr := recoverLdxpSameUserUsedRedemption(session)
+			if recoverErr != nil {
+				return nil, recoverErr
+			}
+			if recovered {
+				if err := persistLdxpRedeemSuccess(session); err != nil {
+					return nil, err
+				}
+				return &LdxpVerifyResult{
+					Verified: true,
+					Redeemed: true,
+					Status:   model.LdxpStatusSuccess,
+				}, nil
+			}
+		}
 		message := strings.TrimSpace(err.Error())
 		if updateErr := persistLdxpRedeemFailure(session, message); updateErr != nil {
 			return nil, updateErr
@@ -186,15 +206,84 @@ func RedeemLdxpSessionCard(session *model.LdxpTopupSession) error {
 	return nil
 }
 
-func getLdxpVerifyMailEvent(session *model.LdxpTopupSession) (*model.LdxpMailEvent, error) {
+func getLdxpVerifyMailEvent(session *model.LdxpTopupSession, preferredEvent *model.LdxpMailEvent) (*model.LdxpMailEvent, error) {
 	if session == nil {
 		return nil, gorm.ErrInvalidData
+	}
+	if preferredEvent != nil {
+		return preferredEvent, nil
+	}
+	if strings.TrimSpace(session.SessionId) != "" {
+		var event model.LdxpMailEvent
+		err := model.DB.
+			Where(&model.LdxpMailEvent{MatchedSessionId: session.SessionId, Processed: true}).
+			Order("id DESC").
+			First(&event).Error
+		if err == nil {
+			return &event, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	if messageID := strings.TrimSpace(session.MailMessageId); messageID != "" {
+		var event model.LdxpMailEvent
+		err := model.DB.
+			Where(&model.LdxpMailEvent{MessageId: &messageID}).
+			First(&event).Error
+		if err == nil {
+			return &event, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
 	}
 	workerOrderNo := strings.TrimSpace(session.WorkerOrderNo)
 	if workerOrderNo == "" {
 		return nil, gorm.ErrRecordNotFound
 	}
+	if workerCardKey := strings.TrimSpace(session.WorkerCardKey); workerCardKey != "" {
+		var event model.LdxpMailEvent
+		err := model.DB.
+			Where(&model.LdxpMailEvent{OrderNo: workerOrderNo, CardKey: workerCardKey}).
+			Order("id DESC").
+			First(&event).Error
+		if err == nil {
+			return &event, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
 	return model.GetLdxpMailEventByOrderNo(workerOrderNo)
+}
+
+func recoverLdxpSameUserUsedRedemption(session *model.LdxpTopupSession) (bool, error) {
+	if session == nil {
+		return false, gorm.ErrInvalidData
+	}
+	key := strings.TrimSpace(session.WorkerCardKey)
+	if key == "" {
+		return false, nil
+	}
+
+	var redemption model.Redemption
+	err := model.DB.Where(&model.Redemption{Key: key}).First(&redemption).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if redemption.Status != common.RedemptionCodeStatusUsed || redemption.UsedUserId != session.UserId {
+		return false, nil
+	}
+
+	session.RedemptionId = redemption.Id
+	if redemption.RedeemedTime > 0 {
+		session.RedeemedTime = redemption.RedeemedTime
+	}
+	return true, nil
 }
 
 func shouldPersistLdxpVerifyMissingMail(session *model.LdxpTopupSession) bool {
@@ -259,10 +348,14 @@ func persistLdxpRedeemSuccess(session *model.LdxpTopupSession) error {
 	if verifiedTime == 0 {
 		verifiedTime = now
 	}
+	redeemedTime := session.RedeemedTime
+	if redeemedTime == 0 {
+		redeemedTime = now
+	}
 	updates := map[string]interface{}{
 		"status":        model.LdxpStatusSuccess,
 		"verified_time": verifiedTime,
-		"redeemed_time": now,
+		"redeemed_time": redeemedTime,
 		"redemption_id": session.RedemptionId,
 		"topup_id":      session.TopupId,
 		"error_code":    "",
@@ -274,7 +367,7 @@ func persistLdxpRedeemSuccess(session *model.LdxpTopupSession) error {
 	}
 	session.Status = model.LdxpStatusSuccess
 	session.VerifiedTime = verifiedTime
-	session.RedeemedTime = now
+	session.RedeemedTime = redeemedTime
 	session.ErrorCode = ""
 	session.ErrorMessage = ""
 	session.UpdatedTime = now

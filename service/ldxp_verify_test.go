@@ -302,6 +302,100 @@ func TestVerifyLdxpSessionRedeemsPaidTopupCard(t *testing.T) {
 	assert.Equal(t, model.CreateRedemptionTopUpTradeNo(redemption.Id, 6401), topUps[0].TradeNo)
 }
 
+func TestVerifyLdxpSessionUsesMatchedMailEvent(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	insertLdxpVerifyUser(t, 6451, 0)
+	redemption := insertLdxpVerifyPaidTopupCard(t, "verify-matched-current-card", 400)
+	session := completeLdxpVerifySession("ldxp_verify_matched_mail_event", 6451, "LDVERIFYMATCHED", "verify-matched-current-card", 0.10)
+	session.MailOrderNo = ""
+	session.MailAmount = 0
+	session.MailProductName = ""
+	session.MailCardKey = ""
+	session.MailFrom = ""
+	session.MailTo = ""
+	session.MailSubject = ""
+	session.MailReceivedTime = 0
+	insertLdxpVerifySession(t, session)
+	insertLdxpVerifyMailEvent(t, "LDVERIFYMATCHED", "verify-matched-old-card", 0.10)
+	correctEvent := insertLdxpVerifyMailEvent(t, "LDVERIFYMATCHED", "verify-matched-current-card", 0.10)
+
+	matched, err := TryMatchLdxpMailEvent(correctEvent)
+
+	require.NoError(t, err)
+	require.NotNil(t, matched)
+	assert.Equal(t, model.LdxpStatusSuccess, matched.Status)
+	assert.Equal(t, redemption.Id, matched.RedemptionId)
+	assert.Empty(t, matched.ErrorCode)
+	assert.Empty(t, matched.ErrorMessage)
+	assert.Equal(t, 400, ldxpVerifyUserQuota(t, 6451))
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_matched_mail_event")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusSuccess, persisted.Status)
+	assert.Equal(t, "verify-matched-current-card", persisted.MailCardKey)
+	assert.Equal(t, redemption.Id, persisted.RedemptionId)
+
+	var persistedCorrect model.LdxpMailEvent
+	require.NoError(t, model.DB.First(&persistedCorrect, correctEvent.Id).Error)
+	assert.True(t, persistedCorrect.Processed)
+	assert.Equal(t, "ldxp_verify_matched_mail_event", persistedCorrect.MatchedSessionId)
+}
+
+func TestVerifyLdxpSessionRecoversSameUserUsedRedemption(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	insertLdxpVerifyUser(t, 6452, 900)
+	redemption := insertLdxpVerifyPaidTopupCard(t, "verify-recover-used-card", 500)
+	redeemedTime := common.GetTimestamp() - 30
+	require.NoError(t, model.DB.Model(&model.Redemption{}).
+		Where("id = ?", redemption.Id).
+		Updates(map[string]interface{}{
+			"status":        common.RedemptionCodeStatusUsed,
+			"used_user_id":  6452,
+			"redeemed_time": redeemedTime,
+		}).Error)
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:          6452,
+		Amount:          redemption.Amount,
+		Money:           redemption.Money,
+		TradeNo:         model.CreateRedemptionTopUpTradeNo(redemption.Id, 6452),
+		PaymentMethod:   model.PaymentMethodRedemptionCode,
+		PaymentProvider: model.PaymentProviderRedemptionCode,
+		CreateTime:      redeemedTime,
+		CompleteTime:    redeemedTime,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+	insertLdxpVerifySession(t, completeLdxpVerifySession("ldxp_verify_recover_used", 6452, "LDVERIFYRECOVER", "verify-recover-used-card", 0.10))
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).
+		Where("session_id = ?", "ldxp_verify_recover_used").
+		Updates(map[string]interface{}{
+			"status":        model.LdxpStatusVerified,
+			"verified_time": redeemedTime - 10,
+		}).Error)
+	insertLdxpVerifyMailEvent(t, "LDVERIFYRECOVER", "verify-recover-used-card", 0.10)
+	require.Equal(t, 900, ldxpVerifyUserQuota(t, 6452))
+	require.Len(t, ldxpVerifyTopUps(t, 6452), 1)
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_recover_used")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.True(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusSuccess, result.Status)
+	assert.Empty(t, result.ErrorCode)
+	assert.Empty(t, result.ErrorMessage)
+	assert.Equal(t, 900, ldxpVerifyUserQuota(t, 6452))
+	assert.Len(t, ldxpVerifyTopUps(t, 6452), 1)
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_recover_used")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusSuccess, persisted.Status)
+	assert.Equal(t, redemption.Id, persisted.RedemptionId)
+	assert.Equal(t, redeemedTime, persisted.RedeemedTime)
+	assert.Empty(t, persisted.ErrorCode)
+	assert.Empty(t, persisted.ErrorMessage)
+}
+
 func TestVerifyLdxpSessionIsIdempotent(t *testing.T) {
 	setupLdxpVerifyServiceTest(t)
 	insertLdxpVerifyUser(t, 6501, 10)
@@ -377,6 +471,8 @@ func TestLdxpVerifyTask6Suite(t *testing.T) {
 	t.Run("RequiresCardMatch", TestVerifyLdxpSessionRequiresCardMatch)
 	t.Run("RequiresAmountMatchWhenConfigured", TestVerifyLdxpSessionRequiresAmountMatchWhenConfigured)
 	t.Run("RedeemsPaidTopupCard", TestVerifyLdxpSessionRedeemsPaidTopupCard)
+	t.Run("UsesMatchedMailEvent", TestVerifyLdxpSessionUsesMatchedMailEvent)
+	t.Run("RecoversSameUserUsedRedemption", TestVerifyLdxpSessionRecoversSameUserUsedRedemption)
 	t.Run("IsIdempotent", TestVerifyLdxpSessionIsIdempotent)
 	t.Run("StoresRedeemFailure", TestVerifyLdxpSessionStoresRedeemFailure)
 }
