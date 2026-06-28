@@ -268,6 +268,12 @@ func TryMatchLdxpMailEvent(event *model.LdxpMailEvent) (*model.LdxpTopupSession,
 	if err != nil {
 		return nil, err
 	}
+	if matched != nil {
+		if _, err := TryVerifyAndRedeemLdxpSession(matched.SessionId); err != nil {
+			return nil, err
+		}
+		return model.GetLdxpTopupSessionBySessionId(matched.SessionId)
+	}
 	return matched, nil
 }
 

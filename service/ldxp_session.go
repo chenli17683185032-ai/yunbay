@@ -231,6 +231,9 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 	if result.RowsAffected != 1 {
 		return nil, gorm.ErrRecordNotFound
 	}
+	if _, err := TryVerifyAndRedeemLdxpSession(sessionID); err != nil {
+		return nil, err
+	}
 	return model.GetLdxpTopupSessionBySessionId(sessionID)
 }
 
