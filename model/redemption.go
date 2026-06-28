@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Redemption struct {
@@ -282,68 +283,102 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 	if userId == 0 {
 		return nil, ErrRedemptionInvalid
 	}
-	redemption := &Redemption{}
 
 	common.RandomSleep()
+	var result *RedeemResult
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(commonKeyCol+" = ?", key).First(redemption).Error
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrRedemptionInvalid
-			}
-			return err
-		}
-		if redemption.Status != common.RedemptionCodeStatusEnabled {
-			return ErrRedemptionUsed
-		}
-		now := common.GetTimestamp()
-		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < now {
-			return ErrRedemptionExpired
-		}
-		normalizeRedeemedRedemption(redemption)
-		if redemption.Kind == RedemptionKindCoupon || (redemption.Kind != RedemptionKindLegacy && redemption.Kind != RedemptionKindPaidTopUp && redemption.Kind != RedemptionKindPromoCredit) {
-			return ErrRedemptionUnsupportedKind
-		}
-		if redemption.Kind == RedemptionKindPaidTopUp && (!redemption.CountAsTopUp || redemption.Amount <= 0 || redemption.Money <= 0) {
-			return ErrRedemptionInvalid
-		}
-		if redemption.Kind == RedemptionKindPromoCredit && redemption.CountAsTopUp {
-			return ErrRedemptionInvalid
-		}
-		result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota))
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return ErrRedemptionInvalid
-		}
-		redemption.RedeemedTime = now
-		redemption.Status = common.RedemptionCodeStatusUsed
-		redemption.UsedUserId = userId
-		if err = tx.Save(redemption).Error; err != nil {
-			return err
-		}
-		if redemption.Kind == RedemptionKindPaidTopUp && redemption.CountAsTopUp {
-			topUp := &TopUp{
-				UserId:          userId,
-				Amount:          redemption.Amount,
-				Money:           redemption.Money,
-				TradeNo:         CreateRedemptionTopUpTradeNo(redemption.Id, userId),
-				PaymentMethod:   PaymentMethodRedemptionCode,
-				PaymentProvider: PaymentProviderRedemptionCode,
-				CreateTime:      now,
-				CompleteTime:    now,
-				Status:          common.TopUpStatusSuccess,
-			}
-			return tx.Create(topUp).Error
-		}
-		return nil
+		var err error
+		result, err = RedeemWithTx(tx, key, userId)
+		return err
 	})
 	if err != nil {
+		return nil, err
+	}
+	RecordRedeemLog(userId, result)
+	return result, nil
+}
+
+func RedeemWithTx(tx *gorm.DB, key string, userId int) (*RedeemResult, error) {
+	if tx == nil {
+		return nil, ErrRedemptionInvalid
+	}
+	if key == "" {
+		return nil, ErrRedemptionNotProvided
+	}
+	if userId == 0 {
+		return nil, ErrRedemptionInvalid
+	}
+	redemption := &Redemption{}
+	if err := redeemWithTx(tx, key, userId, redemption); err != nil {
 		return nil, redeemError(err)
 	}
-	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return buildRedeemResult(redemption), nil
+}
+
+func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) error {
+	query := tx.Where(commonKeyCol+" = ?", key)
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(redemption).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrRedemptionInvalid
+		}
+		return err
+	}
+	if redemption.Status != common.RedemptionCodeStatusEnabled {
+		return ErrRedemptionUsed
+	}
+	now := common.GetTimestamp()
+	if redemption.ExpiredTime != 0 && redemption.ExpiredTime < now {
+		return ErrRedemptionExpired
+	}
+	normalizeRedeemedRedemption(redemption)
+	if redemption.Kind == RedemptionKindCoupon || (redemption.Kind != RedemptionKindLegacy && redemption.Kind != RedemptionKindPaidTopUp && redemption.Kind != RedemptionKindPromoCredit) {
+		return ErrRedemptionUnsupportedKind
+	}
+	if redemption.Kind == RedemptionKindPaidTopUp && (!redemption.CountAsTopUp || redemption.Amount <= 0 || redemption.Money <= 0) {
+		return ErrRedemptionInvalid
+	}
+	if redemption.Kind == RedemptionKindPromoCredit && redemption.CountAsTopUp {
+		return ErrRedemptionInvalid
+	}
+	result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrRedemptionInvalid
+	}
+	redemption.RedeemedTime = now
+	redemption.Status = common.RedemptionCodeStatusUsed
+	redemption.UsedUserId = userId
+	if err = tx.Save(redemption).Error; err != nil {
+		return err
+	}
+	if redemption.Kind == RedemptionKindPaidTopUp && redemption.CountAsTopUp {
+		topUp := &TopUp{
+			UserId:          userId,
+			Amount:          redemption.Amount,
+			Money:           redemption.Money,
+			TradeNo:         CreateRedemptionTopUpTradeNo(redemption.Id, userId),
+			PaymentMethod:   PaymentMethodRedemptionCode,
+			PaymentProvider: PaymentProviderRedemptionCode,
+			CreateTime:      now,
+			CompleteTime:    now,
+			Status:          common.TopUpStatusSuccess,
+		}
+		return tx.Create(topUp).Error
+	}
+	return nil
+}
+
+func RecordRedeemLog(userId int, result *RedeemResult) {
+	if result == nil {
+		return
+	}
+	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(result.Quota), result.Redemption.Id))
 }
 
 func (redemption *Redemption) Insert() error {

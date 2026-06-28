@@ -396,6 +396,91 @@ func TestVerifyLdxpSessionRecoversSameUserUsedRedemption(t *testing.T) {
 	assert.Empty(t, persisted.ErrorMessage)
 }
 
+func TestVerifyLdxpSessionRejectsDuplicateOrderAcrossSuccessfulSessions(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	insertLdxpVerifyUser(t, 6461, 100)
+	firstCard := insertLdxpVerifyPaidTopupCard(t, "verify-duplicate-order-card-1", 300)
+	secondCard := insertLdxpVerifyPaidTopupCard(t, "verify-duplicate-order-card-2", 500)
+	insertLdxpVerifySession(t, completeLdxpVerifySession("ldxp_verify_duplicate_order_first", 6461, "LDVERIFYDUPORDER", "verify-duplicate-order-card-1", 0.10))
+	insertLdxpVerifyMailEvent(t, "LDVERIFYDUPORDER", "verify-duplicate-order-card-1", 0.10)
+
+	first, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_duplicate_order_first")
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, model.LdxpStatusSuccess, first.Status)
+	assert.Equal(t, 400, ldxpVerifyUserQuota(t, 6461))
+
+	insertLdxpVerifySession(t, completeLdxpVerifySession("ldxp_verify_duplicate_order_second", 6461, "LDVERIFYDUPORDER", "verify-duplicate-order-card-2", 0.10))
+	insertLdxpVerifyMailEvent(t, "LDVERIFYDUPORDER", "verify-duplicate-order-card-2", 0.10)
+
+	second, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_duplicate_order_second")
+
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	assert.False(t, second.Verified)
+	assert.False(t, second.Redeemed)
+	assert.Equal(t, model.LdxpStatusVerifyFailed, second.Status)
+	assert.Equal(t, "duplicate_order", second.ErrorCode)
+	assert.Equal(t, 400, ldxpVerifyUserQuota(t, 6461))
+	assert.Len(t, ldxpVerifyTopUps(t, 6461), 1)
+
+	secondPersisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_duplicate_order_second")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusVerifyFailed, secondPersisted.Status)
+	assert.Equal(t, "duplicate_order", secondPersisted.ErrorCode)
+	assert.Zero(t, secondPersisted.RedemptionId)
+	assert.Zero(t, secondPersisted.TopupId)
+	assert.Equal(t, "LDVERIFYDUPORDER", secondPersisted.WorkerOrderNo)
+	assert.Equal(t, "LDVERIFYDUPORDER", secondPersisted.MailOrderNo)
+	assert.Equal(t, "verify-duplicate-order-card-2", secondPersisted.WorkerCardKey)
+	assert.Equal(t, "verify-duplicate-order-card-2", secondPersisted.MailCardKey)
+
+	var persistedFirstCard model.Redemption
+	require.NoError(t, model.DB.Where("id = ?", firstCard.Id).First(&persistedFirstCard).Error)
+	assert.Equal(t, common.RedemptionCodeStatusUsed, persistedFirstCard.Status)
+	assert.Equal(t, 6461, persistedFirstCard.UsedUserId)
+
+	var persistedSecondCard model.Redemption
+	require.NoError(t, model.DB.Where("id = ?", secondCard.Id).First(&persistedSecondCard).Error)
+	assert.Equal(t, common.RedemptionCodeStatusEnabled, persistedSecondCard.Status)
+	assert.Zero(t, persistedSecondCard.UsedUserId)
+}
+
+func TestVerifyLdxpSessionRejectsSameUserUsedRecoveryWithoutTopUp(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	insertLdxpVerifyUser(t, 6462, 900)
+	redemption := insertLdxpVerifyPaidTopupCard(t, "verify-recover-missing-topup-card", 500)
+	redeemedTime := common.GetTimestamp() - 30
+	require.NoError(t, model.DB.Model(&model.Redemption{}).
+		Where("id = ?", redemption.Id).
+		Updates(map[string]interface{}{
+			"status":        common.RedemptionCodeStatusUsed,
+			"used_user_id":  6462,
+			"redeemed_time": redeemedTime,
+		}).Error)
+	insertLdxpVerifySession(t, completeLdxpVerifySession("ldxp_verify_recover_missing_topup", 6462, "LDVERIFYRECOVERMISSINGTOPUP", "verify-recover-missing-topup-card", 0.10))
+	insertLdxpVerifyMailEvent(t, "LDVERIFYRECOVERMISSINGTOPUP", "verify-recover-missing-topup-card", 0.10)
+	require.Equal(t, 900, ldxpVerifyUserQuota(t, 6462))
+	require.Empty(t, ldxpVerifyTopUps(t, 6462))
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_recover_missing_topup")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, result.Status)
+	assert.Equal(t, "redeem_failed", result.ErrorCode)
+	assert.Equal(t, 900, ldxpVerifyUserQuota(t, 6462))
+	assert.Empty(t, ldxpVerifyTopUps(t, 6462))
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_recover_missing_topup")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, persisted.Status)
+	assert.Zero(t, persisted.RedemptionId)
+	assert.Zero(t, persisted.TopupId)
+}
+
 func TestVerifyLdxpSessionIsIdempotent(t *testing.T) {
 	setupLdxpVerifyServiceTest(t)
 	insertLdxpVerifyUser(t, 6501, 10)
@@ -473,6 +558,8 @@ func TestLdxpVerifyTask6Suite(t *testing.T) {
 	t.Run("RedeemsPaidTopupCard", TestVerifyLdxpSessionRedeemsPaidTopupCard)
 	t.Run("UsesMatchedMailEvent", TestVerifyLdxpSessionUsesMatchedMailEvent)
 	t.Run("RecoversSameUserUsedRedemption", TestVerifyLdxpSessionRecoversSameUserUsedRedemption)
+	t.Run("RejectsDuplicateOrderAcrossSuccessfulSessions", TestVerifyLdxpSessionRejectsDuplicateOrderAcrossSuccessfulSessions)
+	t.Run("RejectsSameUserUsedRecoveryWithoutTopUp", TestVerifyLdxpSessionRejectsSameUserUsedRecoveryWithoutTopUp)
 	t.Run("IsIdempotent", TestVerifyLdxpSessionIsIdempotent)
 	t.Run("StoresRedeemFailure", TestVerifyLdxpSessionStoresRedeemFailure)
 }

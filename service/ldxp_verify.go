@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -23,6 +24,8 @@ const (
 	ldxpVerifyCodeAmountMismatch     = "amount_mismatch"
 	ldxpVerifyCodeStatusNotPaid      = "status_not_paid"
 	ldxpVerifyCodeRedeemFailed       = "redeem_failed"
+	ldxpVerifyCodeDuplicateOrder     = "duplicate_order"
+	ldxpVerifyCodeDuplicateCard      = "duplicate_card"
 )
 
 var ldxpVerifyMu sync.Mutex
@@ -63,82 +66,118 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 	ldxpVerifyMu.Lock()
 	defer ldxpVerifyMu.Unlock()
 
-	session, err := model.GetLdxpTopupSessionBySessionId(sessionID)
+	var result *LdxpVerifyResult
+	var redeemResult *model.RedeemResult
+	var redeemLogUserID int
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		session, err := getLdxpVerifySessionForUpdateTx(tx, sessionID)
+		if err != nil {
+			return err
+		}
+		if isLdxpSessionAlreadyRedeemed(session) {
+			result = successLdxpVerifyResult(session)
+			return nil
+		}
+
+		event, eventErr := getLdxpVerifyMailEventTx(tx, session, preferredEvent)
+		if eventErr != nil && !errors.Is(eventErr, gorm.ErrRecordNotFound) {
+			return eventErr
+		}
+		if errors.Is(eventErr, gorm.ErrRecordNotFound) && !shouldPersistLdxpVerifyMissingMail(session) {
+			result = &LdxpVerifyResult{
+				Verified:     false,
+				Redeemed:     false,
+				Status:       session.Status,
+				ErrorCode:    ldxpVerifyCodePending,
+				ErrorMessage: "waiting for matching ldxp mail event",
+			}
+			return nil
+		}
+
+		if err := VerifyLdxpSessionFields(session, event); err != nil {
+			fieldErr := asLdxpVerifyFieldError(err)
+			if updateErr := persistLdxpVerifyFailureTx(tx, session, event, model.LdxpStatusVerifyFailed, fieldErr.Code, fieldErr.Message); updateErr != nil {
+				return updateErr
+			}
+			result = &LdxpVerifyResult{
+				Verified:     false,
+				Redeemed:     false,
+				Status:       model.LdxpStatusVerifyFailed,
+				ErrorCode:    fieldErr.Code,
+				ErrorMessage: fieldErr.Message,
+			}
+			return nil
+		}
+
+		if duplicateErr := rejectDuplicateSuccessfulLdxpSessionTx(tx, session, event); duplicateErr != nil {
+			fieldErr := asLdxpVerifyFieldError(duplicateErr)
+			if updateErr := persistLdxpVerifyFailureTx(tx, session, event, model.LdxpStatusVerifyFailed, fieldErr.Code, fieldErr.Message); updateErr != nil {
+				return updateErr
+			}
+			result = &LdxpVerifyResult{
+				Verified:     false,
+				Redeemed:     false,
+				Status:       model.LdxpStatusVerifyFailed,
+				ErrorCode:    fieldErr.Code,
+				ErrorMessage: fieldErr.Message,
+			}
+			return nil
+		}
+
+		if err := persistLdxpVerifiedTx(tx, session, event); err != nil {
+			return err
+		}
+		redeem, err := RedeemLdxpSessionCardTx(tx, session)
+		if err != nil {
+			if errors.Is(err, model.ErrRedemptionUsed) {
+				recovered, recoverErr := recoverLdxpSameUserUsedRedemptionTx(tx, session)
+				if recoverErr != nil {
+					return recoverErr
+				}
+				if recovered {
+					if err := persistLdxpRedeemSuccessTx(tx, session); err != nil {
+						return err
+					}
+					result = &LdxpVerifyResult{
+						Verified: true,
+						Redeemed: true,
+						Status:   model.LdxpStatusSuccess,
+					}
+					return nil
+				}
+			}
+			message := strings.TrimSpace(err.Error())
+			if updateErr := persistLdxpRedeemFailureTx(tx, session, message); updateErr != nil {
+				return updateErr
+			}
+			result = &LdxpVerifyResult{
+				Verified:     true,
+				Redeemed:     false,
+				Status:       model.LdxpStatusRedeemFailed,
+				ErrorCode:    ldxpVerifyCodeRedeemFailed,
+				ErrorMessage: message,
+			}
+			return nil
+		}
+		if err := persistLdxpRedeemSuccessTx(tx, session); err != nil {
+			return err
+		}
+		redeemResult = redeem
+		redeemLogUserID = session.UserId
+		result = &LdxpVerifyResult{
+			Verified: true,
+			Redeemed: true,
+			Status:   model.LdxpStatusSuccess,
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if isLdxpSessionAlreadyRedeemed(session) {
-		return successLdxpVerifyResult(session), nil
+	if result != nil && result.Redeemed && redeemResult != nil {
+		model.RecordRedeemLog(redeemLogUserID, redeemResult)
 	}
-
-	event, eventErr := getLdxpVerifyMailEvent(session, preferredEvent)
-	if eventErr != nil && !errors.Is(eventErr, gorm.ErrRecordNotFound) {
-		return nil, eventErr
-	}
-	if errors.Is(eventErr, gorm.ErrRecordNotFound) && !shouldPersistLdxpVerifyMissingMail(session) {
-		return &LdxpVerifyResult{
-			Verified:     false,
-			Redeemed:     false,
-			Status:       session.Status,
-			ErrorCode:    ldxpVerifyCodePending,
-			ErrorMessage: "waiting for matching ldxp mail event",
-		}, nil
-	}
-
-	if err := VerifyLdxpSessionFields(session, event); err != nil {
-		fieldErr := asLdxpVerifyFieldError(err)
-		if updateErr := persistLdxpVerifyFailure(session, event, model.LdxpStatusVerifyFailed, fieldErr.Code, fieldErr.Message); updateErr != nil {
-			return nil, updateErr
-		}
-		return &LdxpVerifyResult{
-			Verified:     false,
-			Redeemed:     false,
-			Status:       model.LdxpStatusVerifyFailed,
-			ErrorCode:    fieldErr.Code,
-			ErrorMessage: fieldErr.Message,
-		}, nil
-	}
-
-	if err := persistLdxpVerified(session, event); err != nil {
-		return nil, err
-	}
-	if err := RedeemLdxpSessionCard(session); err != nil {
-		if errors.Is(err, model.ErrRedemptionUsed) {
-			recovered, recoverErr := recoverLdxpSameUserUsedRedemption(session)
-			if recoverErr != nil {
-				return nil, recoverErr
-			}
-			if recovered {
-				if err := persistLdxpRedeemSuccess(session); err != nil {
-					return nil, err
-				}
-				return &LdxpVerifyResult{
-					Verified: true,
-					Redeemed: true,
-					Status:   model.LdxpStatusSuccess,
-				}, nil
-			}
-		}
-		message := strings.TrimSpace(err.Error())
-		if updateErr := persistLdxpRedeemFailure(session, message); updateErr != nil {
-			return nil, updateErr
-		}
-		return &LdxpVerifyResult{
-			Verified:     true,
-			Redeemed:     false,
-			Status:       model.LdxpStatusRedeemFailed,
-			ErrorCode:    ldxpVerifyCodeRedeemFailed,
-			ErrorMessage: message,
-		}, nil
-	}
-	if err := persistLdxpRedeemSuccess(session); err != nil {
-		return nil, err
-	}
-	return &LdxpVerifyResult{
-		Verified: true,
-		Redeemed: true,
-		Status:   model.LdxpStatusSuccess,
-	}, nil
+	return result, nil
 }
 
 func VerifyLdxpSessionFields(session *model.LdxpTopupSession, event *model.LdxpMailEvent) error {
@@ -189,6 +228,150 @@ func VerifyLdxpSessionFields(session *model.LdxpTopupSession, event *model.LdxpM
 		return newLdxpVerifyFieldError(ldxpVerifyCodeStatusNotPaid, "ldxp worker status is not paid or successful")
 	}
 	return nil
+}
+
+func getLdxpVerifySessionForUpdateTx(tx *gorm.DB, sessionID string) (*model.LdxpTopupSession, error) {
+	if tx == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, gorm.ErrInvalidData
+	}
+	var session model.LdxpTopupSession
+	query := tx.Where("session_id = ?", strings.TrimSpace(sessionID))
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.First(&session).Error; err != nil {
+		return nil, err
+	}
+	return &session, nil
+}
+
+func RedeemLdxpSessionCardTx(tx *gorm.DB, session *model.LdxpTopupSession) (*model.RedeemResult, error) {
+	if tx == nil || session == nil {
+		return nil, gorm.ErrInvalidData
+	}
+	result, err := model.RedeemWithTx(tx, strings.TrimSpace(session.WorkerCardKey), session.UserId)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
+		session.RedemptionId = result.Redemption.Id
+	}
+	session.TopupId = 0
+	return result, nil
+}
+
+func getLdxpVerifyMailEventTx(tx *gorm.DB, session *model.LdxpTopupSession, preferredEvent *model.LdxpMailEvent) (*model.LdxpMailEvent, error) {
+	if tx == nil || session == nil {
+		return nil, gorm.ErrInvalidData
+	}
+	if preferredEvent != nil {
+		var event model.LdxpMailEvent
+		if preferredEvent.Id > 0 {
+			if err := tx.Where("id = ?", preferredEvent.Id).First(&event).Error; err != nil {
+				return nil, err
+			}
+			return &event, nil
+		}
+		return preferredEvent, nil
+	}
+	if strings.TrimSpace(session.SessionId) != "" {
+		var event model.LdxpMailEvent
+		err := tx.
+			Where(&model.LdxpMailEvent{MatchedSessionId: session.SessionId, Processed: true}).
+			Order("id DESC").
+			First(&event).Error
+		if err == nil {
+			return &event, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	if messageID := strings.TrimSpace(session.MailMessageId); messageID != "" {
+		var event model.LdxpMailEvent
+		err := tx.
+			Where(&model.LdxpMailEvent{MessageId: &messageID}).
+			First(&event).Error
+		if err == nil {
+			return &event, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	workerOrderNo := strings.TrimSpace(session.WorkerOrderNo)
+	if workerOrderNo == "" {
+		return nil, gorm.ErrRecordNotFound
+	}
+	if workerCardKey := strings.TrimSpace(session.WorkerCardKey); workerCardKey != "" {
+		var event model.LdxpMailEvent
+		err := tx.
+			Where(&model.LdxpMailEvent{OrderNo: workerOrderNo, CardKey: workerCardKey}).
+			Order("id DESC").
+			First(&event).Error
+		if err == nil {
+			return &event, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+	}
+	var event model.LdxpMailEvent
+	err := tx.Where("order_no = ?", workerOrderNo).First(&event).Error
+	return &event, err
+}
+
+func rejectDuplicateSuccessfulLdxpSessionTx(tx *gorm.DB, session *model.LdxpTopupSession, event *model.LdxpMailEvent) error {
+	if tx == nil || session == nil {
+		return gorm.ErrInvalidData
+	}
+	orderValues := []string{session.WorkerOrderNo, session.MailOrderNo}
+	cardValues := []string{session.WorkerCardKey, session.MailCardKey}
+	if event != nil {
+		orderValues = append(orderValues, event.OrderNo)
+		cardValues = append(cardValues, event.CardKey)
+	}
+	for _, value := range orderValues {
+		if err := rejectDuplicateSuccessfulLdxpValueTx(tx, session.Id, ldxpVerifyCodeDuplicateOrder, []string{"worker_order_no", "mail_order_no"}, strings.TrimSpace(value)); err != nil {
+			return err
+		}
+	}
+	for _, value := range cardValues {
+		if err := rejectDuplicateSuccessfulLdxpValueTx(tx, session.Id, ldxpVerifyCodeDuplicateCard, []string{"worker_card_key", "mail_card_key"}, strings.TrimSpace(value)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rejectDuplicateSuccessfulLdxpValueTx(tx *gorm.DB, currentID int, code string, columns []string, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	var duplicate model.LdxpTopupSession
+	query := tx.Where("id <> ? AND status = ?", currentID, model.LdxpStatusSuccess)
+	if len(columns) == 2 {
+		query = query.Where(columns[0]+" = ? OR "+columns[1]+" = ?", value, value)
+	} else if len(columns) == 1 {
+		query = query.Where(columns[0]+" = ?", value)
+	} else {
+		return gorm.ErrInvalidData
+	}
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&duplicate).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if code == ldxpVerifyCodeDuplicateCard {
+		return newLdxpVerifyFieldError(code, fmt.Sprintf("ldxp card key is already used by successful session %s", duplicate.SessionId))
+	}
+	return newLdxpVerifyFieldError(code, fmt.Sprintf("ldxp order number is already used by successful session %s", duplicate.SessionId))
 }
 
 func RedeemLdxpSessionCard(session *model.LdxpTopupSession) error {
@@ -258,8 +441,8 @@ func getLdxpVerifyMailEvent(session *model.LdxpTopupSession, preferredEvent *mod
 	return model.GetLdxpMailEventByOrderNo(workerOrderNo)
 }
 
-func recoverLdxpSameUserUsedRedemption(session *model.LdxpTopupSession) (bool, error) {
-	if session == nil {
+func recoverLdxpSameUserUsedRedemptionTx(tx *gorm.DB, session *model.LdxpTopupSession) (bool, error) {
+	if tx == nil || session == nil {
 		return false, gorm.ErrInvalidData
 	}
 	key := strings.TrimSpace(session.WorkerCardKey)
@@ -268,7 +451,11 @@ func recoverLdxpSameUserUsedRedemption(session *model.LdxpTopupSession) (bool, e
 	}
 
 	var redemption model.Redemption
-	err := model.DB.Where(&model.Redemption{Key: key}).First(&redemption).Error
+	query := tx.Where(&model.Redemption{Key: key})
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&redemption).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, nil
 	}
@@ -278,12 +465,37 @@ func recoverLdxpSameUserUsedRedemption(session *model.LdxpTopupSession) (bool, e
 	if redemption.Status != common.RedemptionCodeStatusUsed || redemption.UsedUserId != session.UserId {
 		return false, nil
 	}
+	if !ldxpRecoveredRedemptionHasTopUpTx(tx, &redemption, session.UserId) {
+		return false, nil
+	}
 
 	session.RedemptionId = redemption.Id
 	if redemption.RedeemedTime > 0 {
 		session.RedeemedTime = redemption.RedeemedTime
 	}
 	return true, nil
+}
+
+func ldxpRecoveredRedemptionHasTopUpTx(tx *gorm.DB, redemption *model.Redemption, userID int) bool {
+	if tx == nil || redemption == nil {
+		return false
+	}
+	normalized := *redemption
+	if normalized.Kind == "" {
+		normalized.Kind = model.RedemptionKindLegacy
+	}
+	if normalized.Kind != model.RedemptionKindPaidTopUp || !normalized.CountAsTopUp {
+		return true
+	}
+	var count int64
+	err := tx.Model(&model.TopUp{}).
+		Where("user_id = ? AND trade_no = ? AND status = ?", userID, model.CreateRedemptionTopUpTradeNo(normalized.Id, userID), common.TopUpStatusSuccess).
+		Count(&count).Error
+	return err == nil && count > 0
+}
+
+func recoverLdxpSameUserUsedRedemption(session *model.LdxpTopupSession) (bool, error) {
+	return recoverLdxpSameUserUsedRedemptionTx(model.DB, session)
 }
 
 func shouldPersistLdxpVerifyMissingMail(session *model.LdxpTopupSession) bool {
@@ -319,6 +531,26 @@ func successLdxpVerifyResult(session *model.LdxpTopupSession) *LdxpVerifyResult 
 }
 
 func persistLdxpVerified(session *model.LdxpTopupSession, event *model.LdxpMailEvent) error {
+	return persistLdxpVerifiedWithDB(model.DB, session, event)
+}
+
+func persistLdxpRedeemSuccess(session *model.LdxpTopupSession) error {
+	return persistLdxpRedeemSuccessWithDB(model.DB, session)
+}
+
+func persistLdxpVerifyFailure(session *model.LdxpTopupSession, event *model.LdxpMailEvent, status string, code string, message string) error {
+	return persistLdxpVerifyFailureWithDB(model.DB, session, event, status, code, message)
+}
+
+func persistLdxpRedeemFailure(session *model.LdxpTopupSession, message string) error {
+	return persistLdxpRedeemFailureWithDB(model.DB, session, message)
+}
+
+func persistLdxpVerifiedTx(tx *gorm.DB, session *model.LdxpTopupSession, event *model.LdxpMailEvent) error {
+	return persistLdxpVerifiedWithDB(tx, session, event)
+}
+
+func persistLdxpVerifiedWithDB(db *gorm.DB, session *model.LdxpTopupSession, event *model.LdxpMailEvent) error {
 	now := common.GetTimestamp()
 	verifiedTime := session.VerifiedTime
 	if verifiedTime == 0 {
@@ -330,7 +562,7 @@ func persistLdxpVerified(session *model.LdxpTopupSession, event *model.LdxpMailE
 	updates["error_code"] = ""
 	updates["error_message"] = ""
 	updates["updated_time"] = now
-	if err := model.DB.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
+	if err := db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
 		return err
 	}
 	session.Status = model.LdxpStatusVerified
@@ -342,7 +574,11 @@ func persistLdxpVerified(session *model.LdxpTopupSession, event *model.LdxpMailE
 	return nil
 }
 
-func persistLdxpRedeemSuccess(session *model.LdxpTopupSession) error {
+func persistLdxpRedeemSuccessTx(tx *gorm.DB, session *model.LdxpTopupSession) error {
+	return persistLdxpRedeemSuccessWithDB(tx, session)
+}
+
+func persistLdxpRedeemSuccessWithDB(db *gorm.DB, session *model.LdxpTopupSession) error {
 	now := common.GetTimestamp()
 	verifiedTime := session.VerifiedTime
 	if verifiedTime == 0 {
@@ -362,7 +598,7 @@ func persistLdxpRedeemSuccess(session *model.LdxpTopupSession) error {
 		"error_message": "",
 		"updated_time":  now,
 	}
-	if err := model.DB.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
+	if err := db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
 		return err
 	}
 	session.Status = model.LdxpStatusSuccess
@@ -374,14 +610,18 @@ func persistLdxpRedeemSuccess(session *model.LdxpTopupSession) error {
 	return nil
 }
 
-func persistLdxpVerifyFailure(session *model.LdxpTopupSession, event *model.LdxpMailEvent, status string, code string, message string) error {
+func persistLdxpVerifyFailureTx(tx *gorm.DB, session *model.LdxpTopupSession, event *model.LdxpMailEvent, status string, code string, message string) error {
+	return persistLdxpVerifyFailureWithDB(tx, session, event, status, code, message)
+}
+
+func persistLdxpVerifyFailureWithDB(db *gorm.DB, session *model.LdxpTopupSession, event *model.LdxpMailEvent, status string, code string, message string) error {
 	now := common.GetTimestamp()
 	updates := ldxpMailFieldsFromEvent(session, event)
 	updates["status"] = status
 	updates["error_code"] = strings.TrimSpace(code)
 	updates["error_message"] = strings.TrimSpace(message)
 	updates["updated_time"] = now
-	if err := model.DB.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
+	if err := db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
 		return err
 	}
 	session.Status = status
@@ -392,7 +632,11 @@ func persistLdxpVerifyFailure(session *model.LdxpTopupSession, event *model.Ldxp
 	return nil
 }
 
-func persistLdxpRedeemFailure(session *model.LdxpTopupSession, message string) error {
+func persistLdxpRedeemFailureTx(tx *gorm.DB, session *model.LdxpTopupSession, message string) error {
+	return persistLdxpRedeemFailureWithDB(tx, session, message)
+}
+
+func persistLdxpRedeemFailureWithDB(db *gorm.DB, session *model.LdxpTopupSession, message string) error {
 	now := common.GetTimestamp()
 	verifiedTime := session.VerifiedTime
 	if verifiedTime == 0 {
@@ -405,7 +649,7 @@ func persistLdxpRedeemFailure(session *model.LdxpTopupSession, message string) e
 		"error_message": strings.TrimSpace(message),
 		"updated_time":  now,
 	}
-	if err := model.DB.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
+	if err := db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
 		return err
 	}
 	session.Status = model.LdxpStatusRedeemFailed
