@@ -49,6 +49,13 @@ func userQuotaForRedemptionTest(t *testing.T, userID int) int {
 	return user.Quota
 }
 
+func userGroupForRedemptionTest(t *testing.T, userID int) string {
+	t.Helper()
+	var user User
+	require.NoError(t, DB.Select("group").Where("id = ?", userID).First(&user).Error)
+	return user.Group
+}
+
 func topUpsForRedemptionTest(t *testing.T, userID int) []TopUp {
 	t.Helper()
 	var topUps []TopUp
@@ -323,4 +330,36 @@ func TestRedeemPaidTopupCannotBeRedeemedTwice(t *testing.T) {
 	require.ErrorIs(t, err, ErrRedemptionUsed)
 	assert.Equal(t, 750, userQuotaForRedemptionTest(t, userID))
 	require.Len(t, topUpsForRedemptionTest(t, userID), 1)
+}
+
+func TestRedeemPaidTopupAtThresholdUpgradesUserToVIP(t *testing.T) {
+	setupRedemptionTopUpTest(t)
+
+	const userID = 1010
+	const originalKey = "paid-topup-vip-key-1010"
+	require.NoError(t, DB.Create(&User{
+		Id:       userID,
+		Username: "redemption_vip_user",
+		Password: "password123",
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    UserGroupTiyan,
+		Quota:    0,
+	}).Error)
+	insertRedemptionCode(t, &Redemption{
+		Key:          originalKey,
+		Name:         "Paid topup VIP card",
+		Quota:        3000,
+		Kind:         RedemptionKindPaidTopUp,
+		Amount:       30,
+		Money:        30,
+		CountAsTopUp: true,
+		BatchId:      "batch-paid-vip",
+		Source:       RedemptionSourceLDXP,
+	})
+
+	_, err := Redeem(originalKey, userID)
+	require.NoError(t, err)
+
+	assert.Equal(t, UserGroupVIP, userGroupForRedemptionTest(t, userID))
 }

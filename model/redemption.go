@@ -268,6 +268,7 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 		return nil, ErrRedemptionInvalid
 	}
 	redemption := &Redemption{}
+	vipUpgraded := false
 
 	common.RandomSleep()
 	err := DB.Transaction(func(tx *gorm.DB) error {
@@ -320,12 +321,22 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 				CompleteTime:    now,
 				Status:          common.TopUpStatusSuccess,
 			}
-			return tx.Create(topUp).Error
+			if err := tx.Create(topUp).Error; err != nil {
+				return err
+			}
+			upgraded, err := MaybeUpgradeUserToVIPTx(tx, userId)
+			if err != nil {
+				return err
+			}
+			vipUpgraded = upgraded
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, redeemError(err)
+	}
+	if vipUpgraded {
+		_ = UpdateUserGroupCache(userId, UserGroupVIP)
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return buildRedeemResult(redemption), nil
