@@ -31,19 +31,19 @@ const LDXP_TERMINAL_STATUSES = new Set<LdxpTopupStatus>([
 ])
 
 const LDXP_STATUS_MESSAGE_KEYS: Record<LdxpTopupStatus, string> = {
-  created: 'Creating recharge session...',
-  worker_claimed: 'Preparing payment worker...',
+  created: 'Creating payment QR code',
+  worker_claimed: 'Creating payment QR code',
   qr_ready: 'Scan with Alipay to pay',
-  worker_paid: 'Payment submitted, waiting for verification...',
-  verified: 'Payment verified, redeeming...',
-  redeemed: 'Recharge credited, finalizing...',
+  worker_paid: 'Payment detected, verifying email',
+  verified: 'Verifying order',
+  redeemed: 'Verifying order',
   success: 'Recharge successful',
-  canceled: 'Recharge canceled',
-  expired: 'Recharge expired',
-  worker_failed: 'Payment worker failed',
-  mail_timeout: 'Payment verification timed out',
-  verify_failed: 'Payment verification failed',
-  redeem_failed: 'Recharge redemption failed',
+  canceled: 'The recharge session was canceled',
+  expired: 'Payment expired',
+  worker_failed: 'Recharge failed',
+  mail_timeout: 'Recharge failed',
+  verify_failed: 'Recharge failed',
+  redeem_failed: 'Recharge failed',
 }
 
 export function isLdxpTerminalStatus(status: LdxpTopupStatus): boolean {

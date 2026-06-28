@@ -34,12 +34,14 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
   const [session, setSession] = useState<LdxpTopupSession | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pollAttempt, setPollAttempt] = useState(0)
   const handledSuccessSessionIdRef = useRef<string | null>(null)
 
   const start = useCallback(async (amount: number) => {
     setLoading(true)
     setError(null)
     setSession(null)
+    setPollAttempt(0)
     handledSuccessSessionIdRef.current = null
 
     try {
@@ -94,6 +96,7 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
     handledSuccessSessionIdRef.current = null
     setSession(null)
     setError(null)
+    setPollAttempt(0)
     setLoading(false)
   }, [])
 
@@ -113,13 +116,16 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
 
         if (!isApiSuccess(response) || !response.data) {
           setError(response.message || 'Failed to refresh recharge session')
+          setPollAttempt((attempt) => attempt + 1)
           return
         }
 
+        setError(null)
         setSession(response.data)
       } catch (_error) {
         if (active) {
           setError('Failed to refresh recharge session')
+          setPollAttempt((attempt) => attempt + 1)
         }
       }
     }, session.poll_interval_ms || 2000)
@@ -128,7 +134,7 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
       active = false
       window.clearTimeout(timeoutId)
     }
-  }, [session])
+  }, [pollAttempt, session])
 
   useEffect(() => {
     if (!session || session.status !== 'success') {

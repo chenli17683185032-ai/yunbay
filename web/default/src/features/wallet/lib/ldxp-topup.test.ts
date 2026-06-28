@@ -16,27 +16,48 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// @ts-expect-error Bun resolves this module at test runtime; this project does not include Bun ambient types.
-import { describe, expect, it } from 'bun:test'
+import assert from 'node:assert/strict'
+import test from 'node:test'
 import {
   LDXP_TOPUP_AMOUNTS,
   getLdxpStatusMessageKey,
   isLdxpTerminalStatus,
 } from './ldxp-topup'
 
-describe('ldxp topup helpers', () => {
-  it('uses fixed allowed amounts', () => {
-    expect(LDXP_TOPUP_AMOUNTS).toEqual([10, 20, 30, 50, 100, 500])
-  })
+test('ldxp topup uses fixed allowed amounts', () => {
+  assert.deepEqual(LDXP_TOPUP_AMOUNTS, [10, 20, 30, 50, 100, 500])
+})
 
-  it('detects terminal status', () => {
-    expect(isLdxpTerminalStatus('success')).toBe(true)
-    expect(isLdxpTerminalStatus('qr_ready')).toBe(false)
-    expect(isLdxpTerminalStatus('verify_failed')).toBe(true)
-  })
+test('ldxp topup detects terminal status', () => {
+  assert.equal(isLdxpTerminalStatus('success'), true)
+  assert.equal(isLdxpTerminalStatus('qr_ready'), false)
+  assert.equal(isLdxpTerminalStatus('verify_failed'), true)
+})
 
-  it('maps status to message keys', () => {
-    expect(getLdxpStatusMessageKey('qr_ready')).toBe('Scan with Alipay to pay')
-    expect(getLdxpStatusMessageKey('success')).toBe('Recharge successful')
-  })
+test('ldxp topup maps status to message keys', () => {
+  assert.equal(getLdxpStatusMessageKey('qr_ready'), 'Scan with Alipay to pay')
+  assert.equal(getLdxpStatusMessageKey('success'), 'Recharge successful')
+})
+
+test('ldxp topup groups creation status message keys', () => {
+  assert.equal(
+    getLdxpStatusMessageKey('created'),
+    'Creating payment QR code'
+  )
+  assert.equal(
+    getLdxpStatusMessageKey('worker_claimed'),
+    'Creating payment QR code'
+  )
+})
+
+test('ldxp topup groups verified status message keys', () => {
+  assert.equal(getLdxpStatusMessageKey('verified'), 'Verifying order')
+  assert.equal(getLdxpStatusMessageKey('redeemed'), 'Verifying order')
+})
+
+test('ldxp topup groups failure status message keys', () => {
+  assert.equal(getLdxpStatusMessageKey('worker_failed'), 'Recharge failed')
+  assert.equal(getLdxpStatusMessageKey('mail_timeout'), 'Recharge failed')
+  assert.equal(getLdxpStatusMessageKey('verify_failed'), 'Recharge failed')
+  assert.equal(getLdxpStatusMessageKey('redeem_failed'), 'Recharge failed')
 })
