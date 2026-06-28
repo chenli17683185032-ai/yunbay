@@ -33,7 +33,8 @@ var (
 	ldxpWhitespaceRe  = regexp.MustCompile(`[\t\r\f\v ]+`)
 	ldxpBlankLineRe   = regexp.MustCompile(`\n{3,}`)
 	ldxpOrderRe       = regexp.MustCompile(`(?m)(?:订单号|订单编号|订单)\s*[:：]?\s*(LD[A-Z0-9]+)\b`)
-	ldxpCardRe        = regexp.MustCompile(`(?mi)` + ldxpSecretLabelPattern + `\s*[:：]?\s*(` + ldxpCardTokenPattern + `)`)
+	ldxpCardRe        = regexp.MustCompile(`(?i)` + ldxpSecretLabelPattern)
+	ldxpCardBlockedRe = regexp.MustCompile(`(?i)^\s*(?:支付金额|金额|付款时间|支付时间|付款日期|支付日期|订单号|订单编号|订单|商品名称|商品名|购买内容|` + ldxpSecretLabelPattern + `)(?:\s*[:：]\s*|\s+|$)`)
 	ldxpAmountRe      = regexp.MustCompile(`(?m)(?:支付金额|金额)\s*[:：]?\s*¥?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:元)?`)
 	ldxpProductNameRe = regexp.MustCompile(`(?m)` + ldxpProductContentLabelPattern + `\s*[:：]?\s*([^\n]+)`)
 	ldxpPaidTimeRe    = regexp.MustCompile(`(?m)(?:付款时间|支付时间|付款日期|支付日期)\s*[:：]?\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`)
@@ -65,9 +66,7 @@ func ParseLdxpMailText(input string) (*LdxpParsedMail, error) {
 	if matches := ldxpOrderRe.FindStringSubmatch(normalized); len(matches) > 1 {
 		parsed.OrderNo = strings.TrimSpace(matches[1])
 	}
-	if matches := ldxpCardRe.FindStringSubmatch(normalized); len(matches) > 1 {
-		parsed.CardKey = trimLdxpMailCardValue(matches[1])
-	}
+	parsed.CardKey = findLdxpMailCardKey(normalized)
 	if matches := ldxpAmountRe.FindStringSubmatch(normalized); len(matches) > 1 {
 		amount, err := strconv.ParseFloat(matches[1], 64)
 		if err != nil {
@@ -349,6 +348,7 @@ func ldxpAmountCents(amount float64) int64 {
 
 func trimLdxpMailCardValue(value string) string {
 	value = strings.TrimSpace(value)
+	value = strings.TrimLeft(value, " \t\r\f\v:：")
 	fieldKeywords := []string{
 		"支付金额", "金额", "付款时间", "支付时间", "付款日期", "支付日期",
 		"订单号", "订单编号", "订单", "商品名称", "商品名", "购买内容",
@@ -357,11 +357,62 @@ func trimLdxpMailCardValue(value string) string {
 	}
 	cut := len(value)
 	for _, keyword := range fieldKeywords {
-		if idx := strings.Index(value, keyword); idx > 0 && idx < cut {
+		if idx := strings.Index(value, keyword); idx == 0 {
+			return ""
+		} else if idx > 0 && idx < cut {
 			cut = idx
 		}
 	}
 	return strings.TrimSpace(value[:cut])
+}
+
+func findLdxpMailCardKey(body string) string {
+	if strings.TrimSpace(body) == "" {
+		return ""
+	}
+	lines := strings.Split(body, "\n")
+	for lineIdx, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		labelIndexes := ldxpCardRe.FindAllStringIndex(line, -1)
+		if len(labelIndexes) == 0 {
+			continue
+		}
+		for _, loc := range labelIndexes {
+			if value, ok := extractLdxpMailCardKeyFromLine(lines, lineIdx, line[loc[1]:]); ok {
+				return value
+			}
+		}
+	}
+	return ""
+}
+
+func extractLdxpMailCardKeyFromLine(lines []string, lineIdx int, rawValue string) (string, bool) {
+	if lineIdx < 0 || lineIdx >= len(lines) {
+		return "", false
+	}
+	value := trimLdxpMailCardValue(rawValue)
+	if value != "" {
+		return value, true
+	}
+
+	for nextIdx := lineIdx + 1; nextIdx < len(lines); nextIdx++ {
+		nextLine := strings.TrimSpace(lines[nextIdx])
+		if nextLine == "" {
+			continue
+		}
+		if ldxpCardBlockedRe.MatchString(nextLine) {
+			return "", false
+		}
+		value := trimLdxpMailCardValue(nextLine)
+		if value == "" {
+			return "", false
+		}
+		return value, true
+	}
+	return "", false
 }
 
 func trimLdxpMailFieldValue(value string) string {

@@ -80,6 +80,85 @@ func TestParseLdxpMailAcceptsAndRedactsNonSpaceCardTokens(t *testing.T) {
 	}
 }
 
+func TestParseLdxpMailDoesNotUseNextFieldAsCard(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{
+			name: "payment_time",
+			body: "订单号：LD260628UZJ97P\n商品名称：0.1 元测试\n金额：0.10\n卡密：\n付款时间：2026-06-28 03:10:00",
+		},
+		{
+			name: "payment_amount",
+			body: "订单号：LD260628UZJ97P\n商品名称：0.1 元测试\n金额：0.10\n卡密：\n支付金额：0.10",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := ParseLdxpMailText(tc.body)
+
+			require.NoError(t, err)
+			require.NotNil(t, parsed)
+			assert.Empty(t, parsed.CardKey)
+		})
+	}
+}
+
+func TestMatchLdxpMailEventRejectsMissingCardWhenWorkerCardEmpty(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:         "ldxp_mail_missing_card",
+		UserId:            1001,
+		Amount:            10,
+		Money:             0.10,
+		Status:            model.LdxpStatusWorkerPaid,
+		WorkerId:          "worker-a",
+		WorkerOrderNo:     "LD260628UZJ97P",
+		WorkerAmount:      0.10,
+		WorkerProductName: "0.1 元测试",
+		WorkerCardKey:     "",
+		CreatedTime:       100,
+		UpdatedTime:       100,
+		ExpiredTime:       2000,
+	})
+
+	body := "订单号：LD260628UZJ97P\n商品名称：0.1 元测试\n金额：0.10\n卡密：\n支付金额：0.10"
+	parsed, err := ParseLdxpMailText(body)
+	require.NoError(t, err)
+	require.NotNil(t, parsed)
+	assert.Empty(t, parsed.CardKey)
+
+	messageID := "message-missing-card"
+	event := &model.LdxpMailEvent{
+		MessageId:    &messageID,
+		RawHash:      HashLdxpMailRaw([]byte(body)),
+		OrderNo:      parsed.OrderNo,
+		Amount:       parsed.Amount,
+		ProductName:  parsed.ProductName,
+		CardKey:      parsed.CardKey,
+		MailFrom:     "sender@example.test",
+		MailTo:       "buyer@example.test",
+		Subject:      "paid",
+		ReceivedTime: 101,
+		CreatedTime:  102,
+	}
+	require.NoError(t, model.InsertLdxpMailEvent(event))
+
+	session, err := TryMatchLdxpMailEvent(event)
+
+	require.Error(t, err)
+	assert.Nil(t, session)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_mail_missing_card")
+	require.NoError(t, err)
+	assert.Empty(t, persisted.MailOrderNo)
+	assert.Empty(t, persisted.MailCardKey)
+	assert.Empty(t, persisted.MailMessageId)
+	var persistedEvent model.LdxpMailEvent
+	require.NoError(t, model.DB.First(&persistedEvent, event.Id).Error)
+	assert.False(t, persistedEvent.Processed)
+	assert.Empty(t, persistedEvent.MatchedSessionId)
+}
+
 func TestUpsertLdxpMailEventDedupesRawHash(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	raw := []byte(ldxpMailFixtureText)
