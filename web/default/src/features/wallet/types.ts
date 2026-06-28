@@ -64,6 +64,36 @@ export type WaffoPancakePaymentResponse = ApiResponse<
   | string
 >
 
+export type LdxpTopupStatus =
+  | 'created'
+  | 'worker_claimed'
+  | 'qr_ready'
+  | 'worker_paid'
+  | 'verified'
+  | 'redeemed'
+  | 'success'
+  | 'canceled'
+  | 'expired'
+  | 'worker_failed'
+  | 'mail_timeout'
+  | 'verify_failed'
+  | 'redeem_failed'
+
+export interface LdxpTopupSession {
+  session_id: string
+  amount: number
+  money: number
+  status: LdxpTopupStatus
+  qr_code?: string
+  worker_order_no?: string
+  expires_at: number
+  poll_interval_ms?: number
+  error_code?: string
+  error_message?: string
+}
+
+export type LdxpTopupSessionResponse = ApiResponse<LdxpTopupSession>
+
 /**
  * Creem product configuration
  */

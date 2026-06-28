@@ -38,6 +38,7 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  LdxpTopupSessionResponse,
 } from './types'
 
 // ============================================================================
@@ -168,6 +169,40 @@ export async function requestWaffoPancakePayment(
   const res = await api.post('/api/user/waffo-pancake/pay', request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
+  return res.data
+}
+
+/**
+ * Create an LDXP browser-worker topup session
+ */
+export async function createLdxpTopupSession(
+  amount: number
+): Promise<LdxpTopupSessionResponse> {
+  const res = await api.post('/api/user/ldxp/topup/session', { amount })
+  return res.data
+}
+
+/**
+ * Get an LDXP browser-worker topup session
+ */
+export async function getLdxpTopupSession(
+  sessionId: string
+): Promise<LdxpTopupSessionResponse> {
+  const res = await api.get(
+    `/api/user/ldxp/topup/session/${encodeURIComponent(sessionId)}`
+  )
+  return res.data
+}
+
+/**
+ * Cancel an LDXP browser-worker topup session
+ */
+export async function cancelLdxpTopupSession(
+  sessionId: string
+): Promise<ApiResponse> {
+  const res = await api.post(
+    `/api/user/ldxp/topup/session/${encodeURIComponent(sessionId)}/cancel`
+  )
   return res.data
 }
 
