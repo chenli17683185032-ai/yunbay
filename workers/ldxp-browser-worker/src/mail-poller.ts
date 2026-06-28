@@ -23,6 +23,14 @@ interface AddressLike {
   text?: string
 }
 
+export interface MailFlagClient {
+  messageFlagsAdd(uids: number[], flags: string[], options: { uid: true }): Promise<boolean>
+}
+
+interface PostFetchedMessagesDependencies {
+  parseAndPostMessage?: (config: WorkerConfig, message: FetchMessageObject) => Promise<boolean>
+}
+
 export async function pollMailboxOnce(config: WorkerConfig): Promise<number> {
   assertImapConfig(config)
 
@@ -46,21 +54,11 @@ export async function pollMailboxOnce(config: WorkerConfig): Promise<number> {
       return 0
     }
 
-    let postedCount = 0
-
-    for await (const message of client.fetch(uids, { uid: true, source: true, internalDate: true, envelope: true }, { uid: true })) {
-      if (!message.source) {
-        continue
-      }
-
-      const accepted = await parseAndPostMessage(config, message)
-      if (accepted) {
-        postedCount += 1
-        await markSeen(client, message.uid)
-      }
-    }
-
-    return postedCount
+    return postFetchedMessages(
+      config,
+      client.fetch(uids, { uid: true, source: true, internalDate: true, envelope: true }, { uid: true }),
+      client,
+    )
   } finally {
     await safeLogout(client)
   }
@@ -83,6 +81,36 @@ export async function runMailPoller(config: WorkerConfig, signal: AbortSignal): 
       throw error
     }
   }
+}
+
+export async function postFetchedMessages(
+  config: WorkerConfig,
+  messages: AsyncIterable<FetchMessageObject>,
+  client: MailFlagClient,
+  dependencies: PostFetchedMessagesDependencies = {},
+): Promise<number> {
+  let postedCount = 0
+  const postMessage = dependencies.parseAndPostMessage ?? parseAndPostMessage
+
+  const acceptedUids: number[] = []
+
+  for await (const message of messages) {
+    if (!message.source) {
+      continue
+    }
+
+    const accepted = await postMessage(config, message)
+    if (accepted) {
+      postedCount += 1
+      acceptedUids.push(message.uid)
+    }
+  }
+
+  if (acceptedUids.length > 0) {
+    await markSeen(client, acceptedUids)
+  }
+
+  return postedCount
 }
 
 async function findCandidateUids(client: ImapFlow): Promise<number[]> {
@@ -186,11 +214,16 @@ function assertImapConfig(config: WorkerConfig): asserts config is WorkerConfig 
   }
 }
 
-async function markSeen(client: ImapFlow, uid: number): Promise<void> {
+async function markSeen(client: MailFlagClient, uidOrUids: number | number[]): Promise<void> {
+  const uids = Array.isArray(uidOrUids) ? uidOrUids : [uidOrUids]
+  if (uids.length === 0) {
+    return
+  }
+
   try {
-    await client.messageFlagsAdd([uid], ['\\Seen'], { uid: true })
+    await client.messageFlagsAdd(uids, ['\\Seen'], { uid: true })
   } catch (error) {
-    console.warn(`Unable to mark LDXP mail uid=${uid} as seen: ${errorMessage(error)}`)
+    console.warn(`Unable to mark ${uids.length} LDXP mail message(s) as seen: ${errorMessage(error)}`)
   }
 }
 
