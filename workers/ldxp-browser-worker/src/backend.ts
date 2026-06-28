@@ -55,10 +55,10 @@ interface ApiResponse<T> {
   data?: T
 }
 
-export async function claimSession(config: WorkerConfig): Promise<ClaimedSession | null> {
+export async function claimSession(config: WorkerConfig, signal?: AbortSignal): Promise<ClaimedSession | null> {
   const response = await postJson<ClaimedSession>(config, '/api/ldxp/worker/sessions/claim', {
     worker_id: config.workerId,
-  }, { allowNotFound: true })
+  }, { allowNotFound: true, signal })
 
   if (response.status === 404 || response.data == null || isEmptyObject(response.data)) {
     return null
@@ -96,7 +96,7 @@ async function postJson<T>(
   config: WorkerConfig,
   path: string,
   body: unknown,
-  options: { allowNotFound?: boolean } = {},
+  options: { allowNotFound?: boolean; signal?: AbortSignal } = {},
 ): Promise<{ status: number; data: T | null }> {
   const response = await fetch(`${config.backendBaseUrl}${path}`, {
     method: 'POST',
@@ -105,6 +105,7 @@ async function postJson<T>(
       'x-ldxp-worker-token': config.workerToken,
     },
     body: JSON.stringify(body),
+    signal: options.signal,
   })
 
   if (response.status === 404 && options.allowNotFound) {

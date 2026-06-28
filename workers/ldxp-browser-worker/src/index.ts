@@ -110,12 +110,15 @@ export async function runClaimLoopOnce(runtime: WorkerRuntime): Promise<number> 
   while (!runtime.signal.aborted && runtime.activeSessions.size < runtime.config.maxConcurrentSessions) {
     let session: ClaimedSession | null
     try {
-      session = await runtime.dependencies.claimSession(runtime.config)
+      session = await runtime.dependencies.claimSession(runtime.config, runtime.signal)
     } catch (error) {
+      if (runtime.signal.aborted || isAbortError(error)) {
+        break
+      }
       runtime.logger.warn({ err: sanitizeError(error) }, 'claim session request failed')
       break
     }
-    if (!session) {
+    if (runtime.signal.aborted || !session) {
       break
     }
     started += 1
@@ -229,7 +232,7 @@ async function superviseMailPoller(
     }
 
     try {
-      await sleep(Math.min(config.pollIntervalMs, 5000), undefined, { signal })
+      await sleep(mailPollerRestartDelayMs(config), undefined, { signal })
     } catch (error) {
       if (signal.aborted || isAbortError(error)) {
         return
@@ -237,6 +240,10 @@ async function superviseMailPoller(
       throw error
     }
   }
+}
+
+function mailPollerRestartDelayMs(config: WorkerConfig): number {
+  return Math.max(1000, Math.min(config.pollIntervalMs, 5000))
 }
 
 function createLogger(config: WorkerConfig): LoggerLike {
@@ -276,11 +283,11 @@ function sanitizeError(error: unknown): string {
   return raw
     .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, '[redacted]')
     .replace(/\balipay:\/\/[^"',\s}]+/gi, '[redacted]')
-    .replace(/(\bAuthorization\b\s*[:=]\s*Bearer\s+)[^"',\s}]+/gi, '$1[redacted]')
-    .replace(/(\bX-LDXP-Worker-Token\b\s*[:=]\s*)[^"',\s}]+/gi, '$1[redacted]')
-    .replace(/([?&](?:token|password|secret|authorization)=)[^&"',\s}]+/gi, '$1[redacted]')
+    .replace(/(["']?\bAuthorization\b["']?\s*[:=]\s*["']?Bearer\s+)[^"',\s}]+/gi, '$1[redacted]')
+    .replace(/(["']?\b(?:X-LDXP-Worker-Token|x-api-key)\b["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[redacted]')
+    .replace(/([?&](?:access_token|refresh_token|api_key|apikey|token|password|secret|authorization)=)[^&"',\s}]+/gi, '$1[redacted]')
     .replace(
-      /(\b(?:workerToken|worker_token|worker-token|imapPassword|imap_password|imap-password|password|secret|token|authorization|card_key|card-key|worker_card_key|worker-card-key|qr_code|qr-code)\b\s*[:=]\s*["']?)[^"',\s}&]+/gi,
+      /(["']?\b(?:workerToken|worker_token|worker-token|imapPassword|imap_password|imap-password|access_token|refresh_token|api_key|apikey|password|secret|token|authorization|card_key|card-key|worker_card_key|worker-card-key|qr_code|qr-code)\b["']?\s*[:=]\s*["']?)[^"',\s}&]+/gi,
       '$1[redacted]',
     )
     .replace(/((?:卡密|授权码)\s*[:：]\s*)[^\s"',，。}]+/g, '$1[redacted]')

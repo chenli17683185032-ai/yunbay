@@ -72,6 +72,44 @@ test('runClaimLoopOnce tracks active sessions and claims freed slots on the next
   await runtime.shutdown()
 })
 
+
+test('runClaimLoopOnce does not start a session that resolves after shutdown', async () => {
+  const claim = deferred<ClaimedSession | null>()
+  let browserFlowCalls = 0
+  const runtime = createWorkerRuntime(config(), {
+    claimSession: async () => claim.promise,
+    runBrowserFlow: async () => {
+      browserFlowCalls += 1
+      return paidResult('late')
+    },
+    postQr: async () => undefined,
+    postResult: async () => undefined,
+    postError: async () => undefined,
+    runMailPoller: async () => undefined,
+    logger: createNoopLogger(),
+  })
+
+  const loopOnce = runClaimLoopOnce(runtime)
+  await runtime.shutdown()
+  claim.resolve(claimedSession('sess-late'))
+  const started = await loopOnce
+
+  assert.equal(started, 0)
+  assert.equal(browserFlowCalls, 0)
+  assert.equal(runtime.activeSessions.size, 0)
+})
+
+test('buildErrorPayload redacts JSON header and token field forms', async () => {
+  const payload = buildErrorPayload(
+    new Error('headers={"Authorization":"Bearer bearer_789","X-LDXP-Worker-Token":"head_123","workerToken":"tok_123","access_token":"access_123","api_key":"key_123"}'),
+    config(),
+  )
+
+  for (const sensitive of ['bearer_789', 'head_123', 'tok_123', 'access_123', 'key_123']) {
+    assert.doesNotMatch(payload.error_message, new RegExp(escapeRegExp(sensitive)))
+  }
+})
+
 test('processClaimedSession posts qr and result callbacks', async () => {
   const events: string[] = []
   const runtime = createWorkerRuntime(config(), {
@@ -223,7 +261,9 @@ test('startMailPoller restarts after unexpected poller exit and does not start d
 
   await runtime.startMailPoller()
   await runtime.startMailPoller()
-  await waitFor(() => starts === 2)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.equal(starts, 1)
+  await waitFor(() => starts === 2, 1500)
   await runtime.shutdown()
 
   assert.equal(starts, 2)

@@ -129,6 +129,24 @@ test('claimSession treats 404 and empty success data as no job', async () => {
   }
 })
 
+test('claimSession forwards AbortSignal to the backend request', async () => {
+  let requestCount = 0
+  const server = await withServer((_req, res) => {
+    requestCount += 1
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ success: true, data: { session_id: 'should-not-return' } }))
+  })
+  const controller = new AbortController()
+  controller.abort()
+
+  try {
+    await assert.rejects(() => claimSession(config(server.baseUrl), controller.signal), { name: 'AbortError' })
+    assert.equal(requestCount, 0)
+  } finally {
+    await server.close()
+  }
+})
+
 test('post worker callbacks send expected routes, token, and payloads', async () => {
   const captured: CapturedRequest[] = []
   const server = await withServer(async (req, res) => {
