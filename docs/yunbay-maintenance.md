@@ -274,7 +274,6 @@ sub2api_root=200
   - 否则直接用：`https://sub2api.yunbay.xyz`
 - Key：Sub2API 的普通 API Key，不是 admin key
 
-
 ## 2026-06-24 快速启动与生产部署维护记录
 
 本节记录 2026-06-24 对云贝网站快速启动流程、下载引导和生产部署方式的维护基线。此处只记录可公开的代码与运维事实，不记录后台密码、SSH 私钥、VNC 密码、API key、cookie 或 session。
@@ -469,7 +468,6 @@ npm run build
 /usage-logs/common?username=root&type=7&channel=123&model=gpt-test&token=tok&group=grp&requestId=req-1&startTime=1782316800000&endTime=1782324000000
 ```
 
-
 ### 2026-06-25 生产同步补充：消除使用日志 404
 
 生产同步时发现一个额外问题：生产目录曾混入一版尚未完整落地的 Sub2API usage billing 前端改动，common usage logs 会额外请求：
@@ -512,7 +510,6 @@ yunbay-new-api: healthy
 - **不要再回到 Channel Console / Cliproxy / Sub2API 深嵌 adapter 方案**；
 - 只维护 `new-api` 原生渠道管理 + `sub2api` 独立上游模式；
 - 涉及 `Caddyfile` 改动时，要记得 **force-recreate caddy**，不要只靠宿主机文件覆盖后假设容器会自动看到。
-
 
 ## 2026-06-25 控制台收敛与 Windows Codex 下载维护记录
 
@@ -652,7 +649,6 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 
 - 本轮未修改 `Caddyfile`，因此无需 `force-recreate caddy`。
 
-
 ### 2026-06-25 生产同步结果
 
 本轮修复已同步到生产环境。公开记录只保留可复现事实，不记录任何 SSH 私钥、API key、cookie、session 或环境变量值。
@@ -750,7 +746,6 @@ cd web/classic && bun run build
 ```
 
 生产同步仍按本文“非删除式同步生产”章节执行，不要在服务器上依赖失效 worktree 的 `git pull`。
-
 
 ### 2026-06-27 生产同步与复核结果
 
@@ -919,3 +914,95 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ```
 
 如需恢复源码，可从上述 `app-source.tgz` 恢复后重新 build/up。新增数据库列通常无需删除，旧代码会忽略多余字段；不要做破坏性 schema rollback，除非已经确认没有生产数据依赖这些列。
+
+## 2026-06-28 兑换成功后前端跳 500 热修
+
+用户反馈：普通用户点击兑换码兑换时，页面跳到 default 前端的 500 错误页，但额度实际上已经成功到账。
+
+### 根因结论
+
+本次不是后端 `POST /api/user/topup` 失败。生产日志显示相关兑换请求返回 `200`，且兑换后的 `GET /api/user/self` 也返回 `200`。截图中的 500 来自 default 前端错误页/错误边界，而不是后端 HTTP 500。
+
+最窄根因在前端成功路径：
+
+- Quick Start 兑换流程把 `POST /api/user/topup` 成功后的用户信息刷新作为同一个成功条件；
+- 钱包兑换 hook 也在成功后内部重复调用 `getSelf()`，页面层随后还会再刷新一次；
+- 后续刷新或刷新链路的非关键异常可能把一次已经落库成功的兑换表现成前端错误/失败页。
+
+### 修复内容
+
+- `web/default/src/features/quick-start/quick-start-redemption.ts`
+  - 兑换接口返回 `success: true` 后即视为兑换成功；
+  - 后续 `refreshSelf()` 改为最佳努力，失败时返回 `refreshed: false`，不再把已成功兑换变成失败。
+- `web/default/src/features/wallet/hooks/use-redemption.ts`
+  - 移除 hook 内部重复 `await getSelf()`；
+  - 继续由钱包页面层 `fetchUser()` 负责刷新用户信息，页面层已有错误兜底。
+- 新增回归测试：
+  - Quick Start 覆盖“兑换成功但刷新用户失败仍返回成功”；
+  - 钱包 hook 源码约束确保成功路径不再内联重复 `getSelf()`。
+
+### 本地验证
+
+```bash
+cd web/default
+bun test \
+  src/features/quick-start/quick-start-redemption.test.ts \
+  src/features/wallet/hooks/use-redemption-source.test.ts \
+  src/features/wallet/lib/redemption-result.test.ts \
+  src/features/redemption-codes/lib/export-utils.test.ts \
+  src/features/redemption-codes/lib/redemption-form.test.ts
+bunx prettier --check \
+  src/features/quick-start/quick-start-redemption.ts \
+  src/features/quick-start/quick-start-redemption.test.ts \
+  src/features/wallet/hooks/use-redemption.ts \
+  src/features/wallet/hooks/use-redemption-source.test.ts
+bun run typecheck
+bun run build
+```
+
+验证结果：
+
+```text
+16 pass / 0 fail
+Prettier matched files pass
+TypeScript typecheck pass
+Rsbuild production build pass
+```
+
+### GitHub 与生产同步
+
+- GitHub 分支：`codex/deploy-ldxp-card-redemption`
+- 修复提交：`10dca0ee fix(web): keep redemption success after refresh failure`
+- 同步方式：精确文件列表、非删除式 `rsync --files-from` 同步到 `/opt/new-api/app/`
+- 构建方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api`
+- 重启方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api`
+
+### 生产备份与回滚点
+
+部署前保留：
+
+```text
+/opt/new-api/backups/redemption-refresh-fix-predeploy-20260628-175639/changed-files.tgz
+yunbay-new-api:prod-pre-redemption-refresh-fix-20260628-175639
+```
+
+若需要回滚镜像：
+
+```bash
+docker tag yunbay-new-api:prod-pre-redemption-refresh-fix-20260628-175639 yunbay-new-api:prod
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api
+```
+
+### 生产复核结果
+
+最终复核时间：`2026-06-28T18:02:37+08:00`
+
+```text
+yunbay-new-api: healthy
+https://yunbay.xyz/             200
+https://yunbay.xyz/api/status   200
+https://yunbay.xyz/wallet       200
+https://yunbay.xyz/quick-start  200
+http://127.0.0.1:3000/api/status 返回 JSON
+```
