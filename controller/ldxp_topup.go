@@ -56,6 +56,46 @@ type ldxpSessionStatusResponse struct {
 	Status    string `json:"status"`
 }
 
+type ldxpAdminSessionResponse struct {
+	Id                 int     `json:"id"`
+	SessionID          string  `json:"session_id"`
+	UserID             int     `json:"user_id"`
+	Amount             int64   `json:"amount"`
+	Money              float64 `json:"money"`
+	ProductURL         string  `json:"product_url"`
+	ProductName        string  `json:"product_name"`
+	ContactEmail       string  `json:"contact_email"`
+	Status             string  `json:"status"`
+	WorkerID           string  `json:"worker_id"`
+	QrPageURL          string  `json:"qr_page_url"`
+	QrReadyTime        int64   `json:"qr_ready_time"`
+	WorkerOrderNo      string  `json:"worker_order_no"`
+	WorkerAmount       float64 `json:"worker_amount"`
+	WorkerProductName  string  `json:"worker_product_name"`
+	WorkerCardKey      string  `json:"worker_card_key"`
+	WorkerStatusText   string  `json:"worker_status_text"`
+	WorkerSuccessURL   string  `json:"worker_success_url"`
+	WorkerDetectedTime int64   `json:"worker_detected_time"`
+	MailMessageID      string  `json:"mail_message_id"`
+	MailOrderNo        string  `json:"mail_order_no"`
+	MailAmount         float64 `json:"mail_amount"`
+	MailProductName    string  `json:"mail_product_name"`
+	MailCardKey        string  `json:"mail_card_key"`
+	MailFrom           string  `json:"mail_from"`
+	MailTo             string  `json:"mail_to"`
+	MailSubject        string  `json:"mail_subject"`
+	MailReceivedTime   int64   `json:"mail_received_time"`
+	VerifiedTime       int64   `json:"verified_time"`
+	RedeemedTime       int64   `json:"redeemed_time"`
+	TopupID            int     `json:"topup_id"`
+	RedemptionID       int     `json:"redemption_id"`
+	ErrorCode          string  `json:"error_code"`
+	ErrorMessage       string  `json:"error_message"`
+	CreatedTime        int64   `json:"created_time"`
+	UpdatedTime        int64   `json:"updated_time"`
+	ExpiredTime        int64   `json:"expired_time"`
+}
+
 func CreateLdxpTopupSession(c *gin.Context) {
 	userID := c.GetInt("id")
 	if userID <= 0 {
@@ -71,7 +111,7 @@ func CreateLdxpTopupSession(c *gin.Context) {
 
 	cfg, err := service.LoadLdxpConfig()
 	if err != nil {
-		common.ApiError(c, err)
+		common.ApiErrorMsg(c, "ldxp topup unavailable")
 		return
 	}
 	view, err := service.CreateLdxpTopupSession(userID, req.Amount, cfg)
@@ -240,7 +280,8 @@ func WorkerRecordLdxpMailEvent(c *gin.Context) {
 		data["session"] = buildLdxpSessionStatusResponse(matched)
 	}
 	if matchErr != nil && !errors.Is(matchErr, gorm.ErrRecordNotFound) {
-		data["match_error"] = matchErr.Error()
+		common.ApiErrorMsg(c, "ldxp mail match failed")
+		return
 	}
 	common.ApiSuccess(c, data)
 }
@@ -268,9 +309,9 @@ func AdminListLdxpTopupSessions(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	items := make([]model.LdxpTopupSession, 0, len(sessions))
+	items := make([]ldxpAdminSessionResponse, 0, len(sessions))
 	for _, session := range sessions {
-		items = append(items, redactLdxpAdminSession(session))
+		items = append(items, buildLdxpAdminSessionResponse(session))
 	}
 	common.ApiSuccess(c, gin.H{
 		"page":      page,
@@ -292,7 +333,7 @@ func AdminRetryLdxpTopupVerify(c *gin.Context) {
 func requireLdxpWorkerToken(c *gin.Context) (*service.LdxpConfig, bool) {
 	cfg, err := service.LoadLdxpConfig()
 	if err != nil {
-		common.ApiError(c, err)
+		common.ApiErrorMsg(c, "worker auth unavailable")
 		return nil, false
 	}
 	if !isValidLdxpWorkerToken(c.GetHeader("X-LDXP-Worker-Token"), cfg.WorkerToken) {
@@ -361,8 +402,44 @@ func parsePositiveInt(value string, fallback int) int {
 	return parsed
 }
 
-func redactLdxpAdminSession(session model.LdxpTopupSession) model.LdxpTopupSession {
-	session.WorkerCardKey = service.RedactLdxpValue(session.WorkerCardKey)
-	session.MailCardKey = service.RedactLdxpValue(session.MailCardKey)
-	return session
+func buildLdxpAdminSessionResponse(session model.LdxpTopupSession) ldxpAdminSessionResponse {
+	return ldxpAdminSessionResponse{
+		Id:                 session.Id,
+		SessionID:          session.SessionId,
+		UserID:             session.UserId,
+		Amount:             session.Amount,
+		Money:              session.Money,
+		ProductURL:         session.ProductUrl,
+		ProductName:        session.ProductName,
+		ContactEmail:       session.ContactEmail,
+		Status:             session.Status,
+		WorkerID:           session.WorkerId,
+		QrPageURL:          session.QrPageUrl,
+		QrReadyTime:        session.QrReadyTime,
+		WorkerOrderNo:      session.WorkerOrderNo,
+		WorkerAmount:       session.WorkerAmount,
+		WorkerProductName:  session.WorkerProductName,
+		WorkerCardKey:      service.RedactLdxpValue(session.WorkerCardKey),
+		WorkerStatusText:   session.WorkerStatusText,
+		WorkerSuccessURL:   session.WorkerSuccessUrl,
+		WorkerDetectedTime: session.WorkerDetectedTime,
+		MailMessageID:      session.MailMessageId,
+		MailOrderNo:        session.MailOrderNo,
+		MailAmount:         session.MailAmount,
+		MailProductName:    session.MailProductName,
+		MailCardKey:        service.RedactLdxpValue(session.MailCardKey),
+		MailFrom:           session.MailFrom,
+		MailTo:             session.MailTo,
+		MailSubject:        session.MailSubject,
+		MailReceivedTime:   session.MailReceivedTime,
+		VerifiedTime:       session.VerifiedTime,
+		RedeemedTime:       session.RedeemedTime,
+		TopupID:            session.TopupId,
+		RedemptionID:       session.RedemptionId,
+		ErrorCode:          session.ErrorCode,
+		ErrorMessage:       session.ErrorMessage,
+		CreatedTime:        session.CreatedTime,
+		UpdatedTime:        session.UpdatedTime,
+		ExpiredTime:        session.ExpiredTime,
+	}
 }

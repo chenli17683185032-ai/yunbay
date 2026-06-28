@@ -681,8 +681,8 @@ func TestRecordLdxpWorkerErrorMovesClaimedOrQrSessionToWorkerFailed(t *testing.T
 		assert.Equal(t, model.LdxpStatusWorkerFailed, persisted.Status)
 		assert.Equal(t, "worker-a", persisted.WorkerId)
 		assert.Equal(t, "qr_failed", persisted.ErrorCode)
-		assert.Equal(t, "failed to fetch qr", persisted.ErrorMessage)
-		assert.Equal(t, "/tmp/ldxp-snapshot.png", persisted.DebugSnapshotPath)
+		assert.Equal(t, PublicLdxpWorkerFailedMessage(), persisted.ErrorMessage)
+		assert.Equal(t, "ldxp-snapshot.png", persisted.DebugSnapshotPath)
 		assert.Greater(t, persisted.UpdatedTime, int64(100))
 	}
 }

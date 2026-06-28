@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"sync"
 
@@ -13,6 +14,14 @@ import (
 )
 
 const defaultLdxpPollIntervalMs = 2000
+
+const (
+	MaxLdxpQRCodeLength             = 512 * 1024
+	MaxLdxpWorkerCardKeyLength      = 255
+	MaxLdxpWorkerErrorMessageLength = 2048
+	MaxLdxpWorkerSnapshotPathLength = 512
+	ldxpPublicWorkerFailedMessage   = "Worker failed, please contact support"
+)
 
 var (
 	ErrLdxpTopupDisabled         = errors.New("ldxp topup disabled")
@@ -178,6 +187,9 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 	if workerOrderNo == "" {
 		return fmt.Errorf("%w: missing worker order no", ErrLdxpInvalidSessionRequest)
 	}
+	if err := validateLdxpStringMax("qr_code", payload.QRCode, MaxLdxpQRCodeLength); err != nil {
+		return err
+	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
 		"status":              model.LdxpStatusQrReady,
@@ -209,6 +221,9 @@ func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (
 	workerOrderNo := strings.TrimSpace(payload.WorkerOrderNo)
 	if workerOrderNo == "" {
 		return nil, fmt.Errorf("%w: missing worker order no", ErrLdxpInvalidSessionRequest)
+	}
+	if err := validateLdxpStringMax("worker_card_key", payload.WorkerCardKey, MaxLdxpWorkerCardKeyLength); err != nil {
+		return nil, err
 	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
@@ -242,14 +257,20 @@ func RecordLdxpWorkerError(sessionID string, workerID string, code string, messa
 	if workerID == "" {
 		return fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
 	}
+	if err := validateLdxpStringMax("error_message", message, MaxLdxpWorkerErrorMessageLength); err != nil {
+		return err
+	}
+	if err := validateLdxpStringMax("snapshot_path", snapshotPath, MaxLdxpWorkerSnapshotPathLength); err != nil {
+		return err
+	}
 	now := common.GetTimestamp()
 	result := model.DB.Model(&model.LdxpTopupSession{}).
 		Where("session_id = ? AND worker_id = ? AND status IN ?", sessionID, workerID, []string{model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady}).
 		Updates(map[string]interface{}{
 			"status":              model.LdxpStatusWorkerFailed,
-			"error_code":          strings.TrimSpace(code),
-			"error_message":       strings.TrimSpace(message),
-			"debug_snapshot_path": strings.TrimSpace(snapshotPath),
+			"error_code":          sanitizeLdxpWorkerErrorCode(code),
+			"error_message":       PublicLdxpWorkerFailedMessage(),
+			"debug_snapshot_path": sanitizeLdxpSnapshotPath(snapshotPath),
 			"updated_time":        now,
 		})
 	if result.Error != nil {
@@ -259,6 +280,54 @@ func RecordLdxpWorkerError(sessionID string, workerID string, code string, messa
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func validateLdxpStringMax(field string, value string, max int) error {
+	if max <= 0 {
+		return nil
+	}
+	if len(strings.TrimSpace(value)) > max {
+		return fmt.Errorf("%w: %s too large", ErrLdxpInvalidSessionRequest, field)
+	}
+	return nil
+}
+
+func sanitizeLdxpWorkerErrorCode(code string) string {
+	code = strings.TrimSpace(code)
+	if len(code) > 64 {
+		return code[:64]
+	}
+	return code
+}
+
+func PublicLdxpWorkerFailedMessage() string {
+	return ldxpPublicWorkerFailedMessage
+}
+
+func publicLdxpErrorMessage(session *model.LdxpTopupSession) string {
+	if session == nil {
+		return ""
+	}
+	if session.Status == model.LdxpStatusWorkerFailed && strings.TrimSpace(session.ErrorMessage) != "" {
+		return PublicLdxpWorkerFailedMessage()
+	}
+	return session.ErrorMessage
+}
+
+func sanitizeLdxpSnapshotPath(snapshotPath string) string {
+	snapshotPath = strings.TrimSpace(snapshotPath)
+	if snapshotPath == "" {
+		return ""
+	}
+	normalized := strings.ReplaceAll(snapshotPath, "\\", "/")
+	base := path.Base(normalized)
+	if base == "." || base == "/" {
+		return ""
+	}
+	if len(base) > MaxLdxpWorkerSnapshotPathLength {
+		base = base[:MaxLdxpWorkerSnapshotPathLength]
+	}
+	return base
 }
 
 func generateLdxpSessionID() (string, error) {
@@ -282,7 +351,7 @@ func publicLdxpSessionView(session *model.LdxpTopupSession) *LdxpSessionPublicVi
 		ExpiresAt:      session.ExpiredTime,
 		PollIntervalMs: defaultLdxpPollIntervalMs,
 		ErrorCode:      session.ErrorCode,
-		ErrorMessage:   session.ErrorMessage,
+		ErrorMessage:   publicLdxpErrorMessage(session),
 	}
 	if session.Status == model.LdxpStatusQrReady {
 		view.QRCode = session.QrCode

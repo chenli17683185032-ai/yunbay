@@ -152,11 +152,11 @@ func SetApiRouter(router *gin.Engine) {
 
 		ldxpWorkerRoute := apiRouter.Group("/ldxp/worker")
 		{
-			ldxpWorkerRoute.POST("/sessions/claim", controller.WorkerClaimLdxpTopupSession)
-			ldxpWorkerRoute.POST("/sessions/:session_id/qr", controller.WorkerRecordLdxpQr)
-			ldxpWorkerRoute.POST("/sessions/:session_id/result", controller.WorkerRecordLdxpResult)
-			ldxpWorkerRoute.POST("/sessions/:session_id/error", controller.WorkerRecordLdxpError)
-			ldxpWorkerRoute.POST("/mail-events", controller.WorkerRecordLdxpMailEvent)
+			ldxpWorkerRoute.POST("/sessions/claim", anonymousRequestBodyLimit, controller.WorkerClaimLdxpTopupSession)
+			ldxpWorkerRoute.POST("/sessions/:session_id/qr", anonymousRequestBodyLimit, controller.WorkerRecordLdxpQr)
+			ldxpWorkerRoute.POST("/sessions/:session_id/result", anonymousRequestBodyLimit, controller.WorkerRecordLdxpResult)
+			ldxpWorkerRoute.POST("/sessions/:session_id/error", anonymousRequestBodyLimit, controller.WorkerRecordLdxpError)
+			ldxpWorkerRoute.POST("/mail-events", anonymousRequestBodyLimit, controller.WorkerRecordLdxpMailEvent)
 		}
 
 		ldxpAdminRoute := apiRouter.Group("/ldxp/admin")

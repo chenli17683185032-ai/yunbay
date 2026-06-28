@@ -303,3 +303,158 @@ func serviceSaveLdxpControllerMailEventForTest(orderNo string, cardKey string) (
 	}
 	return event, nil
 }
+
+func TestWorkerMailEventMatchErrorReturnsFailureWithoutLeakingDetails(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	user := createLdxpControllerTestUser(t, "ldxp_mail_match_error")
+	createLdxpControllerSession(t, user.Id, "ldxp-mail-match-error", model.LdxpStatusWorkerPaid)
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("session_id = ?", "ldxp-mail-match-error").Updates(map[string]interface{}{
+		"worker_card_key":      "SECRET-CARD-KEY-123",
+		"worker_amount":        0.20,
+		"worker_detected_time": common.GetTimestamp(),
+	}).Error)
+	messageID := "mail-match-error-new"
+	event := &model.LdxpMailEvent{
+		MessageId:        &messageID,
+		RawHash:          "mail-match-error-new-hash",
+		OrderNo:          "LDORDER123",
+		Amount:           0.20,
+		CardKey:          "SECRET-CARD-KEY-123",
+		Processed:        true,
+		MatchedSessionId: "ldxp-other-session",
+		CreatedTime:      common.GetTimestamp(),
+	}
+	require.NoError(t, model.InsertLdxpMailEvent(event))
+
+	recorder := performLdxpControllerRequest(WorkerRecordLdxpMailEvent, http.MethodPost, "/ldxp/worker/mail-events", gin.H{
+		"message_id":   messageID,
+		"raw_hash":     "mail-match-error-new-hash",
+		"order_no":     "LDORDER123",
+		"amount":       0.20,
+		"card_key":     "SECRET-CARD-KEY-123",
+		"body_excerpt": "card SECRET-CARD-KEY-123 internal raw error",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+
+	body := assertLdxpAPIResponse(t, recorder)
+	assert.Equal(t, false, body["success"])
+	message, _ := body["message"].(string)
+	assert.Equal(t, "ldxp mail match failed", message)
+	assert.NotContains(t, message, "SECRET-CARD-KEY-123")
+	assert.NotContains(t, message, "already attached")
+	assert.NotContains(t, message, "already processed")
+
+	var persistedEvent model.LdxpMailEvent
+	require.NoError(t, model.DB.Where("raw_hash = ?", "mail-match-error-new-hash").First(&persistedEvent).Error)
+	assert.True(t, persistedEvent.Processed)
+	assert.Equal(t, "ldxp-other-session", persistedEvent.MatchedSessionId)
+	persistedSession, err := model.GetLdxpTopupSessionBySessionId("ldxp-mail-match-error")
+	require.NoError(t, err)
+	assert.Empty(t, persistedSession.MailCardKey)
+}
+
+func TestWorkerClaimConfigErrorDoesNotLeakTokenFilePath(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	missingPath := "/tmp/definitely-missing-secret-file"
+	t.Setenv("LDXP_WORKER_TOKEN", "")
+	t.Setenv("LDXP_WORKER_TOKEN_FILE", missingPath)
+
+	recorder := performLdxpControllerRequest(WorkerClaimLdxpTopupSession, http.MethodPost, "/ldxp/worker/sessions/claim", gin.H{"worker_id": "worker-a"}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+
+	body := assertLdxpAPIResponse(t, recorder)
+	assert.Equal(t, false, body["success"])
+	message, _ := body["message"].(string)
+	assert.Equal(t, "worker auth unavailable", message)
+	assert.NotContains(t, message, missingPath)
+	assert.NotContains(t, message, "LDXP_WORKER_TOKEN_FILE")
+}
+
+func TestCreateLdxpTopupSessionConfigErrorDoesNotLeakConfigInternals(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	user := createLdxpControllerTestUser(t, "ldxp_create_config_error")
+	missingPath := "/tmp/definitely-missing-secret-file"
+	t.Setenv("LDXP_WORKER_TOKEN", "")
+	t.Setenv("LDXP_WORKER_TOKEN_FILE", missingPath)
+
+	recorder := performLdxpControllerRequest(CreateLdxpTopupSession, http.MethodPost, "/ldxp/topup/session", gin.H{"amount": 20}, user.Id, nil)
+
+	body := assertLdxpAPIResponse(t, recorder)
+	assert.Equal(t, false, body["success"])
+	message, _ := body["message"].(string)
+	assert.Equal(t, "ldxp topup unavailable", message)
+	assert.NotContains(t, message, missingPath)
+	assert.NotContains(t, message, "LDXP_WORKER_TOKEN_FILE")
+}
+
+func TestWorkerErrorPublicViewAndPersistenceDoNotExposeRawDebugFields(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	user := createLdxpControllerTestUser(t, "ldxp_worker_error_public")
+	createLdxpControllerSession(t, user.Id, "ldxp-worker-error-public", model.LdxpStatusQrReady)
+	rawError := "data:image/png;base64,AAA SECRET-CARD /private/path/ldxp-snapshot.png raw failure body"
+
+	recorder := performLdxpControllerRequest(WorkerRecordLdxpError, http.MethodPost, "/ldxp/worker/sessions/ldxp-worker-error-public/error", gin.H{
+		"worker_id":     "worker-a",
+		"error_code":    " browser_failed ",
+		"error_message": rawError,
+		"snapshot_path": " /private/path/ldxp-snapshot.png ",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+	body := assertLdxpAPIResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+
+	viewRecorder := performLdxpControllerRequest(GetLdxpTopupSession, http.MethodGet, "/ldxp/topup/session/ldxp-worker-error-public", nil, user.Id, nil)
+	viewBody := assertLdxpAPIResponse(t, viewRecorder)
+	require.Equal(t, true, viewBody["success"])
+	data, ok := viewBody["data"].(map[string]interface{})
+	require.True(t, ok)
+	publicError, _ := data["error_message"].(string)
+	assert.Equal(t, "Worker failed, please contact support", publicError)
+	assert.NotContains(t, publicError, "SECRET-CARD")
+	assert.NotContains(t, publicError, "data:image/png;base64")
+	assert.NotContains(t, publicError, "/private/path")
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp-worker-error-public")
+	require.NoError(t, err)
+	assert.Equal(t, "Worker failed, please contact support", persisted.ErrorMessage)
+	assert.Equal(t, "ldxp-snapshot.png", persisted.DebugSnapshotPath)
+	assert.NotContains(t, persisted.DebugSnapshotPath, "/private/path")
+}
+
+func TestWorkerQrRejectsOversizedQRCodeWithoutUpdatingSession(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	user := createLdxpControllerTestUser(t, "ldxp_qr_oversized")
+	createLdxpControllerSession(t, user.Id, "ldxp-qr-oversized", model.LdxpStatusWorkerClaimed)
+	oversizedQR := strings.Repeat("Q", 512*1024+1)
+
+	recorder := performLdxpControllerRequest(WorkerRecordLdxpQr, http.MethodPost, "/ldxp/worker/sessions/ldxp-qr-oversized/qr", gin.H{
+		"worker_id":       "worker-a",
+		"worker_order_no": "LDORDER123",
+		"worker_amount":   0.20,
+		"qr_code":         oversizedQR,
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+
+	body := assertLdxpAPIResponse(t, recorder)
+	assert.Equal(t, false, body["success"])
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp-qr-oversized")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, persisted.Status)
+	assert.Empty(t, persisted.QrCode)
+}
+
+func TestWorkerMailEventRejectsOversizedBodyExcerptWithoutInsert(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	oversizedExcerpt := strings.Repeat("M", 4097)
+
+	recorder := performLdxpControllerRequest(WorkerRecordLdxpMailEvent, http.MethodPost, "/ldxp/worker/mail-events", gin.H{
+		"message_id":   "mail-oversized-excerpt",
+		"raw_hash":     "mail-oversized-excerpt-hash",
+		"order_no":     "LDORDER123",
+		"amount":       0.20,
+		"card_key":     "SECRET-CARD-KEY-123",
+		"body_excerpt": oversizedExcerpt,
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+
+	body := assertLdxpAPIResponse(t, recorder)
+	assert.Equal(t, false, body["success"])
+	var count int64
+	require.NoError(t, model.DB.Model(&model.LdxpMailEvent{}).Where("raw_hash = ?", "mail-oversized-excerpt-hash").Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+}

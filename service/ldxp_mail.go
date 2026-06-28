@@ -21,6 +21,12 @@ import (
 const ldxpMailExcerptMaxRunes = 500
 
 const (
+	MaxLdxpMailSubjectLength     = 512
+	MaxLdxpMailBodyExcerptLength = 4096
+	MaxLdxpMailCardKeyLength     = 255
+)
+
+const (
 	ldxpSecretLabelPattern         = `(?:卡密信息|卡密内容|兑换码为|激活码|券码|序列号|CDKEY|卡密账号|卡密|兑换码|卡号|发货内容|购买内容(?:卡号|卡密账号|卡密(?:信息|内容)?|兑换码(?:为)?|激活码|序列号)|\b(?:code|secret|token|password)\b)`
 	ldxpProductContentLabelPattern = `(?:商品名称|商品名|购买内容)`
 	ldxpCardTokenPattern           = `\S*[A-Za-z0-9]\S*`
@@ -117,6 +123,10 @@ func SaveLdxpMailEvent(parsed *LdxpParsedMail) (*model.LdxpMailEvent, error) {
 		return nil, gorm.ErrInvalidData
 	}
 
+	if err := validateLdxpParsedMailLengths(parsed); err != nil {
+		return nil, err
+	}
+
 	rawHash := strings.TrimSpace(parsed.RawHash)
 	if existing, err := getLdxpMailEventByRawHash(rawHash); err == nil {
 		return existing, nil
@@ -164,6 +174,19 @@ func SaveLdxpMailEvent(parsed *LdxpParsedMail) (*model.LdxpMailEvent, error) {
 		return nil, err
 	}
 	return event, nil
+}
+
+func validateLdxpParsedMailLengths(parsed *LdxpParsedMail) error {
+	if err := validateLdxpStringMax("mail subject", parsed.Subject, MaxLdxpMailSubjectLength); err != nil {
+		return err
+	}
+	if err := validateLdxpStringMax("mail body excerpt", parsed.BodyExcerpt, MaxLdxpMailBodyExcerptLength); err != nil {
+		return err
+	}
+	if err := validateLdxpStringMax("mail card key", parsed.CardKey, MaxLdxpMailCardKeyLength); err != nil {
+		return err
+	}
+	return nil
 }
 
 func TryMatchLdxpMailEvent(event *model.LdxpMailEvent) (*model.LdxpTopupSession, error) {
