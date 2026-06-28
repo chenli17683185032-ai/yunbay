@@ -26,6 +26,7 @@ export interface WorkerRuntime {
   startMailPoller: () => Promise<void>
   dependencies: WorkerRuntimeDependencies
   activeSessions: Set<Promise<void>>
+  activeClaims: Set<Promise<void>>
 }
 
 interface LoggerLike {
@@ -67,6 +68,7 @@ export function createWorkerRuntime(
 
   const controller = new AbortController()
   const activeSessions = new Set<Promise<void>>()
+  const activeClaims = new Set<Promise<void>>()
   let mailPollerStarted = false
   let mailPollerTask: Promise<void> | undefined
   let shutdownPromise: Promise<void> | undefined
@@ -76,6 +78,7 @@ export function createWorkerRuntime(
     logger,
     signal: controller.signal,
     activeSessions,
+    activeClaims,
     dependencies: mergedDependencies,
     async shutdown() {
       if (!shutdownPromise) {
@@ -83,7 +86,7 @@ export function createWorkerRuntime(
         if (mailPollerStarted) {
           logger.info({ activeSessions: activeSessions.size }, 'shutdown requested')
         }
-        const tasks = [...activeSessions]
+        const tasks = [...activeSessions, ...activeClaims]
         if (mailPollerTask) {
           tasks.push(mailPollerTask)
         }
@@ -110,7 +113,7 @@ export async function runClaimLoopOnce(runtime: WorkerRuntime): Promise<number> 
   while (!runtime.signal.aborted && runtime.activeSessions.size < runtime.config.maxConcurrentSessions) {
     let session: ClaimedSession | null
     try {
-      session = await runtime.dependencies.claimSession(runtime.config, runtime.signal)
+      session = await claimSessionWithTracking(runtime)
     } catch (error) {
       if (runtime.signal.aborted || isAbortError(error)) {
         break
@@ -125,6 +128,20 @@ export async function runClaimLoopOnce(runtime: WorkerRuntime): Promise<number> 
     trackSession(runtime, processClaimedSession(runtime, session))
   }
   return started
+}
+
+async function claimSessionWithTracking(runtime: WorkerRuntime): Promise<ClaimedSession | null> {
+  const claim = runtime.dependencies.claimSession(runtime.config, runtime.signal)
+  const tracked = claim.then(
+    () => undefined,
+    () => undefined,
+  )
+  runtime.activeClaims.add(tracked)
+  try {
+    return await claim
+  } finally {
+    runtime.activeClaims.delete(tracked)
+  }
 }
 
 export async function runClaimLoop(runtime: WorkerRuntime): Promise<void> {
@@ -280,7 +297,8 @@ function trackSession(runtime: WorkerRuntime, promise: Promise<void>): void {
 
 function sanitizeError(error: unknown): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
-  return raw
+  const normalized = raw.replace(/\\+(["'])/g, '$1')
+  return normalized
     .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, '[redacted]')
     .replace(/\balipay:\/\/[^"',\s}]+/gi, '[redacted]')
     .replace(/(["']?\bAuthorization\b["']?\s*[:=]\s*["']?Bearer\s+)[^"',\s}]+/gi, '$1[redacted]')

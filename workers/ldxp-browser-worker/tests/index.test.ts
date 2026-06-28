@@ -90,11 +90,19 @@ test('runClaimLoopOnce does not start a session that resolves after shutdown', a
   })
 
   const loopOnce = runClaimLoopOnce(runtime)
-  await runtime.shutdown()
+  let shutdownSettled = false
+  const shutdown = runtime.shutdown().then(() => {
+    shutdownSettled = true
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(shutdownSettled, false)
+
   claim.resolve(claimedSession('sess-late'))
   const started = await loopOnce
+  await shutdown
 
   assert.equal(started, 0)
+  assert.equal(shutdownSettled, true)
   assert.equal(browserFlowCalls, 0)
   assert.equal(runtime.activeSessions.size, 0)
 })
@@ -106,6 +114,17 @@ test('buildErrorPayload redacts JSON header and token field forms', async () => 
   )
 
   for (const sensitive of ['bearer_789', 'head_123', 'tok_123', 'access_123', 'key_123']) {
+    assert.doesNotMatch(payload.error_message, new RegExp(escapeRegExp(sensitive)))
+  }
+})
+
+test('buildErrorPayload redacts escaped JSON header and token field forms', async () => {
+  const payload = buildErrorPayload(
+    new Error('headers={\\"Authorization\\":\\"Bearer bearer_789\\",\\"X-LDXP-Worker-Token\\":\\"head_123\\",\\"workerToken\\":\\"tok_123\\"}'),
+    config(),
+  )
+
+  for (const sensitive of ['bearer_789', 'head_123', 'tok_123']) {
     assert.doesNotMatch(payload.error_message, new RegExp(escapeRegExp(sensitive)))
   }
 })
