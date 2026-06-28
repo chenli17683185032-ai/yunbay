@@ -26,6 +26,7 @@ const productPatterns = [
 ]
 const labeledCardPattern = /(?:卡密账号|卡密|兑换码)\s*[:：]?\s*([^\s\n\r,，]+)/i
 const deliveryMarkerPattern = /以下是您的购买内容\s*[:：]?\s*\n+\s*([^\s\n\r,，]+)/i
+const fieldBoundaryPattern = /\s*(?:卡密账号|卡密|兑换码|订单编号|订单号|单号|支付金额|金额|实付|数量|付款时间|支付时间)\s*[:：]?/i
 
 export function hashRawMail(raw: Buffer): string {
   return createHash('sha256').update(raw).digest('hex')
@@ -84,10 +85,15 @@ function matchFirstRequired(body: string, patterns: RegExp[], fieldName: string)
   for (const pattern of patterns) {
     const value = body.match(pattern)?.[1]?.trim()
     if (value) {
-      return value
+      return trimFieldValue(value)
     }
   }
   throw new Error(`Unable to parse LDXP mail ${fieldName}`)
+}
+
+function trimFieldValue(value: string): string {
+  const boundary = value.search(fieldBoundaryPattern)
+  return (boundary === -1 ? value : value.slice(0, boundary)).trim()
 }
 
 function normalizeMailBody(body: string): string {

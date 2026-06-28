@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { parseLdxpMailBody, hashRawMail, makeBodyExcerpt } from '../src/mail-parser.js'
 
 test('parseLdxpMailBody extracts order/card/amount', () => {
-  const parsed = parseLdxpMailBody('订单号：LD260628UZJ97P\n支付金额：0.10 元\n商品名称：0.1 元测试\n卡密账号：abcd1234-card-key')
+  const parsed = parseLdxpMailBody('订单号：LD260628UZJ97P 支付金额：0.10 元 商品名称：0.1 元测试 卡密账号：abcd1234-card-key')
   assert.equal(parsed.order_no, 'LD260628UZJ97P')
   assert.equal(parsed.amount, 0.10)
   assert.equal(parsed.product_name, '0.1 元测试')
