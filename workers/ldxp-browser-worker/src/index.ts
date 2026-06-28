@@ -301,6 +301,12 @@ function sanitizeError(error: unknown): string {
   return normalized
     .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, '[redacted]')
     .replace(/\balipay:\/\/[^"',\s}]+/gi, '[redacted]')
+    .replace(/(["']?\bAuthorization\b["']?\s*[:=]\s*\[\s*["']?Bearer\s+)[^"',\]\s}]+/gi, '$1[redacted]')
+    .replace(/(["']?\b(?:X-LDXP-Worker-Token|x-api-key)\b["']?\s*[:=]\s*\[\s*["']?)[^"',\]\s}]+/gi, '$1[redacted]')
+    .replace(
+      /(["']?\b(?:workerToken|worker_token|worker-token|imapPassword|imap_password|imap-password|access_token|refresh_token|api_key|apikey|password|secret|token|authorization|card_key|card-key|worker_card_key|worker-card-key|qr_code|qr-code)\b["']?\s*[:=]\s*\[\s*["']?)[^"',\]\s}&]+/gi,
+      '$1[redacted]',
+    )
     .replace(/(["']?\bAuthorization\b["']?\s*[:=]\s*["']?Bearer\s+)[^"',\s}]+/gi, '$1[redacted]')
     .replace(/(["']?\b(?:X-LDXP-Worker-Token|x-api-key)\b["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[redacted]')
     .replace(/([?&](?:access_token|refresh_token|api_key|apikey|token|password|secret|authorization)=)[^&"',\s}]+/gi, '$1[redacted]')
