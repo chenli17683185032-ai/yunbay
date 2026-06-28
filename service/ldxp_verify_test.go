@@ -345,7 +345,8 @@ func TestVerifyLdxpSessionRecoversSameUserUsedRedemption(t *testing.T) {
 	setupLdxpVerifyServiceTest(t)
 	insertLdxpVerifyUser(t, 6452, 900)
 	redemption := insertLdxpVerifyPaidTopupCard(t, "verify-recover-used-card", 500)
-	redeemedTime := common.GetTimestamp() - 30
+	verifiedTime := int64(2100)
+	redeemedTime := verifiedTime + 1
 	require.NoError(t, model.DB.Model(&model.Redemption{}).
 		Where("id = ?", redemption.Id).
 		Updates(map[string]interface{}{
@@ -369,7 +370,7 @@ func TestVerifyLdxpSessionRecoversSameUserUsedRedemption(t *testing.T) {
 		Where("session_id = ?", "ldxp_verify_recover_used").
 		Updates(map[string]interface{}{
 			"status":        model.LdxpStatusVerified,
-			"verified_time": redeemedTime - 10,
+			"verified_time": verifiedTime,
 		}).Error)
 	insertLdxpVerifyMailEvent(t, "LDVERIFYRECOVER", "verify-recover-used-card", 0.10)
 	require.Equal(t, 900, ldxpVerifyUserQuota(t, 6452))
@@ -394,6 +395,61 @@ func TestVerifyLdxpSessionRecoversSameUserUsedRedemption(t *testing.T) {
 	assert.Equal(t, redeemedTime, persisted.RedeemedTime)
 	assert.Empty(t, persisted.ErrorCode)
 	assert.Empty(t, persisted.ErrorMessage)
+}
+
+func TestVerifyLdxpSessionRejectsOldSameUserUsedRedemptionRecovery(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	userID := 6453
+	insertLdxpVerifyUser(t, userID, 900)
+	redemption := insertLdxpVerifyPaidTopupCard(t, "verify-recover-old-used-card", 500)
+	oldRedeemedTime := int64(1000)
+	sessionVerifiedTime := int64(2100)
+	require.NoError(t, model.DB.Model(&model.Redemption{}).
+		Where("id = ?", redemption.Id).
+		Updates(map[string]interface{}{
+			"status":        common.RedemptionCodeStatusUsed,
+			"used_user_id":  userID,
+			"redeemed_time": oldRedeemedTime,
+		}).Error)
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:          userID,
+		Amount:          redemption.Amount,
+		Money:           redemption.Money,
+		TradeNo:         model.CreateRedemptionTopUpTradeNo(redemption.Id, userID),
+		PaymentMethod:   model.PaymentMethodRedemptionCode,
+		PaymentProvider: model.PaymentProviderRedemptionCode,
+		CreateTime:      oldRedeemedTime,
+		CompleteTime:    oldRedeemedTime,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+	session := completeLdxpVerifySession("ldxp_verify_reject_old_recover_used", userID, "LDVERIFYOLDRECOVER", "verify-recover-old-used-card", 0.10)
+	session.Status = model.LdxpStatusVerified
+	session.CreatedTime = 2000
+	session.VerifiedTime = sessionVerifiedTime
+	insertLdxpVerifySession(t, session)
+	insertLdxpVerifyMailEvent(t, "LDVERIFYOLDRECOVER", "verify-recover-old-used-card", 0.10)
+	require.Equal(t, 900, ldxpVerifyUserQuota(t, userID))
+	require.Len(t, ldxpVerifyTopUps(t, userID), 1)
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_reject_old_recover_used")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, result.Status)
+	assert.Equal(t, "redeem_failed", result.ErrorCode)
+	assert.Equal(t, 900, ldxpVerifyUserQuota(t, userID))
+	assert.Len(t, ldxpVerifyTopUps(t, userID), 1)
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_reject_old_recover_used")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, persisted.Status)
+	assert.Equal(t, "redeem_failed", persisted.ErrorCode)
+	assert.Equal(t, sessionVerifiedTime, persisted.VerifiedTime)
+	assert.Zero(t, persisted.RedeemedTime)
+	assert.Zero(t, persisted.RedemptionId)
+	assert.Zero(t, persisted.TopupId)
 }
 
 func TestVerifyLdxpSessionRejectsDuplicateOrderAcrossSuccessfulSessions(t *testing.T) {
@@ -605,6 +661,7 @@ func TestLdxpVerifyTask6Suite(t *testing.T) {
 	t.Run("RedeemsPaidTopupCard", TestVerifyLdxpSessionRedeemsPaidTopupCard)
 	t.Run("UsesMatchedMailEvent", TestVerifyLdxpSessionUsesMatchedMailEvent)
 	t.Run("RecoversSameUserUsedRedemption", TestVerifyLdxpSessionRecoversSameUserUsedRedemption)
+	t.Run("RejectsOldSameUserUsedRedemptionRecovery", TestVerifyLdxpSessionRejectsOldSameUserUsedRedemptionRecovery)
 	t.Run("RejectsDuplicateOrderAcrossSuccessfulSessions", TestVerifyLdxpSessionRejectsDuplicateOrderAcrossSuccessfulSessions)
 	t.Run("RejectsSameUserUsedRecoveryWithoutTopUp", TestVerifyLdxpSessionRejectsSameUserUsedRecoveryWithoutTopUp)
 	t.Run("RollsBackRedeemWritesWhenTopUpCreateFails", TestVerifyLdxpSessionRollsBackRedeemWritesWhenTopUpCreateFails)

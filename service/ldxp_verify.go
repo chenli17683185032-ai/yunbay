@@ -488,7 +488,7 @@ func recoverLdxpSameUserUsedRedemptionTx(tx *gorm.DB, session *model.LdxpTopupSe
 	if redemption.Status != common.RedemptionCodeStatusUsed || redemption.UsedUserId != session.UserId {
 		return false, nil
 	}
-	if !ldxpRecoveredRedemptionHasTopUpTx(tx, &redemption, session.UserId) {
+	if !ldxpRecoveredRedemptionHasCurrentSessionTopUpTx(tx, &redemption, session) {
 		return false, nil
 	}
 
@@ -499,20 +499,20 @@ func recoverLdxpSameUserUsedRedemptionTx(tx *gorm.DB, session *model.LdxpTopupSe
 	return true, nil
 }
 
-func ldxpRecoveredRedemptionHasTopUpTx(tx *gorm.DB, redemption *model.Redemption, userID int) bool {
-	if tx == nil || redemption == nil {
+func ldxpRecoveredRedemptionHasCurrentSessionTopUpTx(tx *gorm.DB, redemption *model.Redemption, session *model.LdxpTopupSession) bool {
+	if tx == nil || redemption == nil || session == nil || session.VerifiedTime <= 0 {
 		return false
 	}
-	normalized := *redemption
-	if normalized.Kind == "" {
-		normalized.Kind = model.RedemptionKindLegacy
+	if redemption.Kind != model.RedemptionKindPaidTopUp || !redemption.CountAsTopUp || redemption.Source != model.RedemptionSourceLDXP {
+		return false
 	}
-	if normalized.Kind != model.RedemptionKindPaidTopUp || !normalized.CountAsTopUp {
-		return true
+	if redemption.RedeemedTime < session.VerifiedTime {
+		return false
 	}
 	var count int64
 	err := tx.Model(&model.TopUp{}).
-		Where("user_id = ? AND trade_no = ? AND status = ?", userID, model.CreateRedemptionTopUpTradeNo(normalized.Id, userID), common.TopUpStatusSuccess).
+		Where("user_id = ? AND trade_no = ? AND status = ?", session.UserId, model.CreateRedemptionTopUpTradeNo(redemption.Id, session.UserId), common.TopUpStatusSuccess).
+		Where("create_time >= ? AND complete_time >= ?", session.VerifiedTime, session.VerifiedTime).
 		Count(&count).Error
 	return err == nil && count > 0
 }
