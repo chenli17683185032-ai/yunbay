@@ -1,3 +1,4 @@
+import { basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import pino, { type Logger } from 'pino'
@@ -67,6 +68,8 @@ export function createWorkerRuntime(
   const controller = new AbortController()
   const activeSessions = new Set<Promise<void>>()
   let mailPollerStarted = false
+  let mailPollerTask: Promise<void> | undefined
+  let shutdownPromise: Promise<void> | undefined
 
   return {
     config,
@@ -75,14 +78,21 @@ export function createWorkerRuntime(
     activeSessions,
     dependencies: mergedDependencies,
     async shutdown() {
-      controller.abort()
-      if (mailPollerStarted) {
-        logger.info({ activeSessions: activeSessions.size }, 'shutdown requested')
+      if (!shutdownPromise) {
+        controller.abort()
+        if (mailPollerStarted) {
+          logger.info({ activeSessions: activeSessions.size }, 'shutdown requested')
+        }
+        const tasks = [...activeSessions]
+        if (mailPollerTask) {
+          tasks.push(mailPollerTask)
+        }
+        shutdownPromise = Promise.allSettled(tasks).then(() => undefined)
       }
-      await Promise.allSettled([...activeSessions])
+      await shutdownPromise
     },
     async startMailPoller() {
-      if (mailPollerStarted) {
+      if (mailPollerStarted || controller.signal.aborted) {
         return
       }
       mailPollerStarted = true
@@ -90,9 +100,7 @@ export function createWorkerRuntime(
         logger.warn({ imapConfigured: false }, 'mail poller disabled because IMAP config is incomplete')
         return
       }
-      void mergedDependencies.runMailPoller(config, controller.signal).catch((error) => {
-        logger.error({ err: sanitizeError(error) }, 'mail poller exited unexpectedly')
-      })
+      mailPollerTask = superviseMailPoller(config, controller.signal, mergedDependencies.runMailPoller, logger)
     },
   }
 }
@@ -165,13 +173,27 @@ export async function processClaimedSession(runtime: WorkerRuntime, session: Cla
         },
       },
       runtime.config,
+      runtime.signal,
     )
 
     await runtime.dependencies.postResult(runtime.config, session.session_id, result)
     sessionLogger.info({ workerOrderNo: redactValue(result.worker_order_no) }, 'result posted')
   } catch (error) {
+    if (runtime.signal.aborted || isAbortError(error)) {
+      sessionLogger.warn({ err: sanitizeError(error) }, 'session processing aborted during shutdown')
+      return
+    }
+
     const payload = buildErrorPayload(error, runtime.config)
-    await runtime.dependencies.postError(runtime.config, session.session_id, payload)
+    try {
+      await runtime.dependencies.postError(runtime.config, session.session_id, payload)
+    } catch (postErrorFailure) {
+      sessionLogger.error(
+        { err: sanitizeError(postErrorFailure), originalErrorCode: payload.error_code },
+        'failed to post session error',
+      )
+      return
+    }
     sessionLogger.error({ err: sanitizeError(error), errorCode: payload.error_code }, 'session processing failed')
   }
 }
@@ -183,6 +205,37 @@ export function buildErrorPayload(error: unknown, config: WorkerConfig): WorkerE
     error_code: 'worker_flow_failed',
     error_message: truncateMessage(message, 500),
     ...(snapshotPath ? { snapshot_path: snapshotPath } : {}),
+  }
+}
+
+
+async function superviseMailPoller(
+  config: WorkerConfig,
+  signal: AbortSignal,
+  poller: typeof runMailPoller,
+  logger: LoggerLike,
+): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      await poller(config, signal)
+      if (!signal.aborted) {
+        logger.error({ err: 'mail poller returned without shutdown signal' }, 'mail poller exited unexpectedly')
+      }
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        return
+      }
+      logger.error({ err: sanitizeError(error) }, 'mail poller exited unexpectedly')
+    }
+
+    try {
+      await sleep(Math.min(config.pollIntervalMs, 5000), undefined, { signal })
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        return
+      }
+      throw error
+    }
   }
 }
 
@@ -222,7 +275,16 @@ function sanitizeError(error: unknown): string {
   const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
   return raw
     .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, '[redacted]')
-    .replace(/\b(worker_token|token|password|secret|authorization|card_key|qr_code)\b(?:\s*[:=]\s*|\s+)[^"',\s}]+/gi, '[redacted]')
+    .replace(/\balipay:\/\/[^"',\s}]+/gi, '[redacted]')
+    .replace(/(\bAuthorization\b\s*[:=]\s*Bearer\s+)[^"',\s}]+/gi, '$1[redacted]')
+    .replace(/(\bX-LDXP-Worker-Token\b\s*[:=]\s*)[^"',\s}]+/gi, '$1[redacted]')
+    .replace(/([?&](?:token|password|secret|authorization)=)[^&"',\s}]+/gi, '$1[redacted]')
+    .replace(
+      /(\b(?:workerToken|worker_token|worker-token|imapPassword|imap_password|imap-password|password|secret|token|authorization|card_key|card-key|worker_card_key|worker-card-key|qr_code|qr-code)\b\s*[:=]\s*["']?)[^"',\s}&]+/gi,
+      '$1[redacted]',
+    )
+    .replace(/((?:卡密|授权码)\s*[:：]\s*)[^\s"',，。}]+/g, '$1[redacted]')
+    .replace(/\b(?:worker[-_ ]?token|token|password|secret|authorization|card[-_ ]?key|qr[-_ ]?code)\s+[^"',\s}]+/gi, '[redacted]')
 }
 
 function truncateMessage(message: string, maxLength: number): string {
@@ -232,15 +294,26 @@ function truncateMessage(message: string, maxLength: number): string {
   return `${message.slice(0, maxLength - 1)}…`
 }
 
-function extractSnapshotPath(message: string, fallbackDir: string): string | undefined {
+function extractSnapshotPath(message: string, snapshotDir: string): string | undefined {
   const match = message.match(/snapshot=([^:]+?)(?::\s*|$)/i)
-  if (match?.[1]) {
-    return match[1].trim()
+  if (!match?.[1]) {
+    return undefined
   }
-  if (message.includes(fallbackDir)) {
-    return fallbackDir
-  }
-  return undefined
+
+  const normalizedDir = snapshotDir.replaceAll('\\', '/').replace(/\/+$/, '')
+  const parts = match[1]
+    .split(',')
+    .map((part) => part.trim().replaceAll('\\', '/'))
+    .filter(Boolean)
+    .map((part) => {
+      if (normalizedDir && part.startsWith(`${normalizedDir}/`)) {
+        return part.slice(normalizedDir.length + 1)
+      }
+      return basename(part)
+    })
+    .filter(Boolean)
+
+  return parts.length > 0 ? parts.join(',') : undefined
 }
 
 function hasMailConfig(config: WorkerConfig): boolean {

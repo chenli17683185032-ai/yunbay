@@ -4,6 +4,7 @@ import {
   createWorkerRuntime,
   buildErrorPayload,
   processClaimedSession,
+  runClaimLoop,
   runClaimLoopOnce,
   type WorkerRuntimeDependencies,
 } from '../src/index.js'
@@ -28,8 +29,9 @@ function config(overrides: Partial<WorkerConfig> = {}): WorkerConfig {
   }
 }
 
-test('runClaimLoopOnce claims only available slots', async () => {
+test('runClaimLoopOnce tracks active sessions and claims freed slots on the next loop', async () => {
   const claimed: string[] = []
+  const browserFlows: Array<Deferred<BrowserPaidResult>> = []
   const deps: WorkerRuntimeDependencies = {
     claimSession: async (_config) => {
       const next = ['sess-1', 'sess-2', 'sess-3'][claimed.length]
@@ -37,17 +39,12 @@ test('runClaimLoopOnce claims only available slots', async () => {
         return null
       }
       claimed.push(next)
-      return {
-        session_id: next,
-        amount: 10,
-        money: 10,
-        product_url: 'https://example.test/product',
-        product_name: 'Product',
-        contact_email: 'buyer@example.test',
-      } satisfies ClaimedSession
+      return claimedSession(next)
     },
     runBrowserFlow: async () => {
-      throw new Error('runBrowserFlow should not be called in claim test')
+      const flow = deferred<BrowserPaidResult>()
+      browserFlows.push(flow)
+      return flow.promise
     },
     postQr: async () => undefined,
     postResult: async () => undefined,
@@ -61,6 +58,17 @@ test('runClaimLoopOnce claims only available slots', async () => {
 
   assert.equal(started, 2)
   assert.deepEqual(claimed, ['sess-1', 'sess-2'])
+  assert.equal(runtime.activeSessions.size, 2)
+
+  browserFlows[0].resolve(paidResult('order-1'))
+  browserFlows[1].resolve(paidResult('order-2'))
+  await waitFor(() => runtime.activeSessions.size === 0)
+
+  const startedAfterRelease = await runClaimLoopOnce(runtime)
+  assert.equal(startedAfterRelease, 1)
+  assert.deepEqual(claimed, ['sess-1', 'sess-2', 'sess-3'])
+
+  browserFlows[2].resolve(paidResult('order-3'))
   await runtime.shutdown()
 })
 
@@ -144,7 +152,7 @@ test('processClaimedSession posts sanitized error payload on failure', async () 
   const errorPayload = payloads[0] as { error_code: string; error_message: string; snapshot_path?: string }
   assert.equal(errorPayload.error_code, 'worker_flow_failed')
   assert.match(errorPayload.error_message, /payment failed/i)
-  assert.doesNotMatch(errorPayload.error_message, /token/i)
+  assert.doesNotMatch(errorPayload.error_message, /secret/i)
   assert.doesNotMatch(errorPayload.error_message, /data:image\/png;base64/i)
   await runtime.shutdown()
 })
@@ -158,9 +166,110 @@ test('buildErrorPayload preserves snapshot path without leaking sensitive data',
   )
 
   assert.equal(payload.error_code, 'worker_flow_failed')
-  assert.equal(payload.snapshot_path, '/tmp/snapshots/sess-1-20240628010101.png,/tmp/snapshots/sess-1-20240628010101.html')
-  assert.doesNotMatch(payload.error_message, /token/i)
+  assert.equal(payload.snapshot_path, 'sess-1-20240628010101.png,sess-1-20240628010101.html')
+  assert.doesNotMatch(payload.error_message, /secret/i)
   assert.doesNotMatch(payload.error_message, /data:image\/png;base64/i)
+})
+
+
+test('runClaimLoop starts mail poller and exits when runtime is shut down', async () => {
+  let runtime!: ReturnType<typeof createWorkerRuntime>
+  let mailPollerStarts = 0
+  let claimAttempts = 0
+
+  runtime = createWorkerRuntime(config({ pollIntervalMs: 5, imapHost: 'imap.qq.com', imapUser: '10256345@qq.com', imapPassword: 'imap-secret' }), {
+    claimSession: async () => {
+      claimAttempts += 1
+      if (claimAttempts >= 2) {
+        queueMicrotask(() => void runtime.shutdown())
+      }
+      return null
+    },
+    runBrowserFlow: async () => paidResult('unused'),
+    postQr: async () => undefined,
+    postResult: async () => undefined,
+    postError: async () => undefined,
+    runMailPoller: async (_config, signal) => {
+      mailPollerStarts += 1
+      await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+    },
+    logger: createNoopLogger(),
+  })
+
+  await runClaimLoop(runtime)
+
+  assert.equal(mailPollerStarts, 1)
+  assert.ok(claimAttempts >= 2)
+  assert.equal(runtime.signal.aborted, true)
+})
+
+test('startMailPoller restarts after unexpected poller exit and does not start duplicates', async () => {
+  let starts = 0
+  const runtime = createWorkerRuntime(config({ pollIntervalMs: 1, imapHost: 'imap.qq.com', imapUser: '10256345@qq.com', imapPassword: 'imap-secret' }), {
+    claimSession: async () => null,
+    runBrowserFlow: async () => paidResult('unused'),
+    postQr: async () => undefined,
+    postResult: async () => undefined,
+    postError: async () => undefined,
+    runMailPoller: async (_config, signal) => {
+      starts += 1
+      if (starts === 1) {
+        throw new Error('temporary mail poller failure')
+      }
+      await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+    },
+    logger: createNoopLogger(),
+  })
+
+  await runtime.startMailPoller()
+  await runtime.startMailPoller()
+  await waitFor(() => starts === 2)
+  await runtime.shutdown()
+
+  assert.equal(starts, 2)
+})
+
+test('processClaimedSession does not hang shutdown while browser flow waits', async () => {
+  let receivedSignal: AbortSignal | undefined
+  const runtime = createWorkerRuntime(config(), {
+    claimSession: async () => null,
+    runBrowserFlow: (async (...args: unknown[]) => {
+      receivedSignal = args[3] as AbortSignal | undefined
+      await new Promise<never>((_resolve, reject) => {
+        receivedSignal?.addEventListener('abort', () => {
+          const error = new Error('aborted')
+          error.name = 'AbortError'
+          reject(error)
+        }, { once: true })
+      })
+    }) as unknown as typeof import('../src/browser-flow.js').runBrowserFlow,
+    postQr: async () => undefined,
+    postResult: async () => undefined,
+    postError: async () => {
+      throw new Error('postError should not be called during shutdown abort')
+    },
+    runMailPoller: async () => undefined,
+    logger: createNoopLogger(),
+  })
+
+  const processing = processClaimedSession(runtime, claimedSession('sess-shutdown'))
+  await waitFor(() => receivedSignal !== undefined)
+  await runtime.shutdown()
+  await processing
+
+  assert.equal(receivedSignal?.aborted, true)
+})
+
+test('buildErrorPayload redacts common secret, card, QR, and authorization forms', async () => {
+  const payload = buildErrorPayload(
+    new Error('workerToken=tok_123 imapPassword: pass_456 Authorization: Bearer bearer_789 X-LDXP-Worker-Token: head_123 token=query_secret&next=1 卡密：card_secret qr_code=data:image/png;base64,AAAA snapshot=/app/snapshots/shot.png,/app/snapshots/shot.html'),
+    config(),
+  )
+
+  assert.equal(payload.snapshot_path, 'shot.png,shot.html')
+  for (const sensitive of ['tok_123', 'pass_456', 'bearer_789', 'head_123', 'query_secret', 'card_secret', 'data:image/png;base64']) {
+    assert.doesNotMatch(payload.error_message, new RegExp(escapeRegExp(sensitive)))
+  }
 })
 
 function createNoopLogger() {
@@ -171,4 +280,58 @@ function createNoopLogger() {
     debug: () => undefined,
     child: () => createNoopLogger(),
   }
+}
+
+
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (error: unknown) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
+function claimedSession(sessionId: string): ClaimedSession {
+  return {
+    session_id: sessionId,
+    amount: 10,
+    money: 10,
+    product_url: 'https://example.test/product',
+    product_name: 'Product',
+    contact_email: 'buyer@example.test',
+  }
+}
+
+function paidResult(orderNo: string): BrowserPaidResult {
+  return {
+    worker_order_no: orderNo,
+    worker_amount: 10,
+    worker_product_name: 'Product',
+    worker_card_key: `card-${orderNo}`,
+    worker_status_text: '支付成功',
+    worker_success_url: 'https://example.test/success',
+  }
+}
+
+async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (predicate()) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+  assert.equal(predicate(), true)
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { chromium, type ElementHandle, type Locator, type Page } from 'playwright'
 import type { WorkerConfig } from './config.js'
 import { redactValue } from './redact.js'
@@ -106,31 +106,41 @@ export async function runBrowserFlow(
   input: BrowserFlowInput,
   callbacks: { onQr(result: BrowserQrResult): Promise<void> },
   config: WorkerConfig,
+  signal?: AbortSignal,
 ): Promise<BrowserPaidResult> {
   const browser = await chromium.launch({ headless: shouldRunHeadless() })
   const page = await browser.newPage()
+  const abortBrowser = () => {
+    void browser.close().catch(() => undefined)
+  }
   let qrCallbackCalled = false
+
+  if (signal?.aborted) {
+    await browser.close()
+    throw abortError()
+  }
+  signal?.addEventListener('abort', abortBrowser, { once: true })
 
   try {
     page.setDefaultTimeout(Math.max(config.productLoadTimeoutMs, config.qrTimeoutMs, config.resultTimeoutMs))
 
-    await page.goto(input.productUrl, {
+    await withAbort(page.goto(input.productUrl, {
       waitUntil: 'domcontentloaded',
       timeout: config.productLoadTimeoutMs,
-    })
+    }), signal)
 
-    await fillContactInput(page, input.contactEmail, config.productLoadTimeoutMs)
-    const workerProductName = input.expectedProductName ?? (await extractProductName(page))
-    await clickIfPresent(page.getByText('支付宝', { exact: false }), config.productLoadTimeoutMs)
-    await clickFirstVisible(page.getByText('立即购买', { exact: false }), config.productLoadTimeoutMs)
+    await withAbort(fillContactInput(page, input.contactEmail, config.productLoadTimeoutMs), signal)
+    const workerProductName = input.expectedProductName ?? (await withAbort(extractProductName(page), signal))
+    await withAbort(clickIfPresent(page.getByText('支付宝', { exact: false }), config.productLoadTimeoutMs), signal)
+    await withAbort(clickFirstVisible(page.getByText('立即购买', { exact: false }), config.productLoadTimeoutMs), signal)
 
-    await waitForCashierOrQr(page, config.qrTimeoutMs)
-    const cashierText = await page.locator('body').innerText({ timeout: config.qrTimeoutMs })
+    await withAbort(waitForCashierOrQr(page, config.qrTimeoutMs), signal)
+    const cashierText = await withAbort(page.locator('body').innerText({ timeout: config.qrTimeoutMs }), signal)
     const workerOrderNo = extractOrderNo(cashierText)
     const workerAmount = extractAmount(cashierText)
     assertExpectedAmount(workerAmount, input.expectedAmount)
 
-    const qrCode = await extractQrCode(page, config.qrTimeoutMs)
+    const qrCode = await withAbort(extractQrCode(page, config.qrTimeoutMs), signal)
     const qrResult: BrowserQrResult = {
       worker_order_no: workerOrderNo,
       worker_amount: workerAmount,
@@ -139,10 +149,10 @@ export async function runBrowserFlow(
       qr_page_url: page.url(),
     }
     qrCallbackCalled = true
-    await callbacks.onQr(qrResult)
+    await withAbort(callbacks.onQr(qrResult), signal)
 
-    await waitForPaidResult(page, config.paymentTimeoutMs, config.resultTimeoutMs)
-    const resultText = await page.locator('body').innerText({ timeout: config.resultTimeoutMs })
+    await withAbort(waitForPaidResult(page, config.paymentTimeoutMs, config.resultTimeoutMs), signal)
+    const resultText = await withAbort(page.locator('body').innerText({ timeout: config.resultTimeoutMs }), signal)
     const resultOrderNo = extractOrderNo(resultText)
     const resultAmount = extractAmount(resultText)
     const cardKey = extractCardKey(resultText)
@@ -157,6 +167,9 @@ export async function runBrowserFlow(
       worker_success_url: page.url(),
     }
   } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw abortError()
+    }
     const snapshots = await saveDebugSnapshots(page, input.sessionId, config.debugSnapshotDir)
     const detail = safeErrorDetail(error)
     const safeProductUrl = redactValue(input.productUrl)
@@ -165,10 +178,36 @@ export async function runBrowserFlow(
       `Browser flow failed for session ${input.sessionId} product ${safeProductUrl} qr=${qrState} snapshot=${snapshots.summary}: ${detail}`,
     )
   } finally {
-    await browser.close()
+    signal?.removeEventListener('abort', abortBrowser)
+    await browser.close().catch(() => undefined)
   }
 }
 
+
+function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return promise
+  }
+  if (signal.aborted) {
+    return Promise.reject(abortError())
+  }
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError())
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}
+
+function abortError(): Error {
+  const error = new Error('worker shutdown aborted browser flow')
+  error.name = 'AbortError'
+  return error
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
 
 function safeErrorDetail(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error)
@@ -404,7 +443,7 @@ async function saveDebugSnapshots(
     await mkdir(snapshotDir, { recursive: true })
     await page.screenshot({ path: screenshotPath, fullPage: true })
     await writeFile(htmlPath, await page.content(), 'utf8')
-    return { summary: `${screenshotPath},${htmlPath}`, screenshotPath, htmlPath }
+    return { summary: `${basename(screenshotPath)},${basename(htmlPath)}`, screenshotPath, htmlPath }
   } catch {
     // Best-effort debug artifact only; never hide the original browser-flow failure.
     return { summary: 'unavailable' }
