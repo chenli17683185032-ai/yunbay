@@ -100,6 +100,19 @@ func ReadLdxpSecret(envName string, fileEnvName string) string {
 	return strings.TrimSpace(os.Getenv(envName))
 }
 
+func GetLdxpAmountOptions(cfg *LdxpConfig) []int64 {
+	if cfg == nil || len(cfg.Products) == 0 {
+		return []int64{}
+	}
+
+	amounts := make([]int64, 0, len(cfg.Products))
+	for amount := range cfg.Products {
+		amounts = append(amounts, amount)
+	}
+	sort.Slice(amounts, func(i, j int) bool { return amounts[i] < amounts[j] })
+	return amounts
+}
+
 func readLdxpSecretStrict(envName string, fileEnvName string) (string, error) {
 	filePath := strings.TrimSpace(os.Getenv(fileEnvName))
 	if filePath != "" {

@@ -135,3 +135,18 @@ func TestLoadLdxpConfigRejectsInvalidTTL(t *testing.T) {
 	require.Nil(t, cfg)
 	require.Contains(t, err.Error(), "LDXP_SESSION_TTL_SECONDS")
 }
+
+func TestGetLdxpAmountOptionsReturnsSortedAmounts(t *testing.T) {
+	options := GetLdxpAmountOptions(&LdxpConfig{Products: map[int64]LdxpProductConfig{
+		100: {Amount: 100},
+		10:  {Amount: 10},
+		50:  {Amount: 50},
+	}})
+
+	require.Equal(t, []int64{10, 50, 100}, options)
+}
+
+func TestGetLdxpAmountOptionsReturnsEmptyForNilOrEmptyProducts(t *testing.T) {
+	require.Empty(t, GetLdxpAmountOptions(nil))
+	require.Empty(t, GetLdxpAmountOptions(&LdxpConfig{}))
+}
