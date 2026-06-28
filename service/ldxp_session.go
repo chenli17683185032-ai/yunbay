@@ -23,6 +23,14 @@ const (
 	ldxpPublicWorkerFailedMessage   = "Worker failed, please contact support"
 )
 
+var ldxpSafeQRDataPrefixes = []string{
+	"data:image/png;base64,",
+	"data:image/jpeg;base64,",
+	"data:image/jpg;base64,",
+	"data:image/webp;base64,",
+	"data:image/gif;base64,",
+}
+
 var (
 	ErrLdxpTopupDisabled         = errors.New("ldxp topup disabled")
 	ErrLdxpUnsupportedAmount     = errors.New("unsupported ldxp topup amount")
@@ -190,12 +198,16 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 	if err := validateLdxpStringMax("qr_code", payload.QRCode, MaxLdxpQRCodeLength); err != nil {
 		return err
 	}
+	qrCode := strings.TrimSpace(payload.QRCode)
+	if !isSafeLdxpQRCodeSource(qrCode) {
+		return fmt.Errorf("%w: invalid qr code source", ErrLdxpInvalidSessionRequest)
+	}
 	now := common.GetTimestamp()
 	updates := map[string]interface{}{
 		"status":              model.LdxpStatusQrReady,
 		"worker_amount":       payload.WorkerAmount,
 		"worker_product_name": strings.TrimSpace(payload.WorkerProductName),
-		"qr_code":             strings.TrimSpace(payload.QRCode),
+		"qr_code":             qrCode,
 		"qr_page_url":         strings.TrimSpace(payload.QRPageURL),
 		"worker_order_no":     workerOrderNo,
 		"qr_ready_time":       now,
@@ -211,6 +223,18 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func isSafeLdxpQRCodeSource(qrCode string) bool {
+	if qrCode == "" {
+		return false
+	}
+	for _, prefix := range ldxpSafeQRDataPrefixes {
+		if strings.HasPrefix(qrCode, prefix) {
+			return true
+		}
+	}
+	return strings.HasPrefix(qrCode, "https://")
 }
 
 func RecordLdxpWorkerResult(sessionID string, payload LdxpWorkerResultPayload) (*model.LdxpTopupSession, error) {

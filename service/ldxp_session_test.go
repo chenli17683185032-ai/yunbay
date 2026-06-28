@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -207,6 +208,51 @@ func TestRecordLdxpQrMovesSessionToQrReady(t *testing.T) {
 	assert.Equal(t, "data:image/png;base64,QR", view.QRCode)
 }
 
+func TestRecordLdxpQrRejectsUnsafeQRCodeSource(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		qrCode string
+	}{
+		{name: "javascript", qrCode: "javascript:alert(1)"},
+		{name: "svg data", qrCode: "data:image/svg+xml,<svg onload=alert(1)>"},
+		{name: "http", qrCode: "http://example.test/qr.png"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupLdxpSessionServiceTest(t)
+			insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+				SessionId:   "ldxp_qr_unsafe_reject_" + strings.ReplaceAll(tc.name, " ", "_"),
+				UserId:      1001,
+				Amount:      10,
+				Money:       0.10,
+				Status:      model.LdxpStatusWorkerClaimed,
+				WorkerId:    "worker-a",
+				CreatedTime: 100,
+				UpdatedTime: 100,
+				ExpiredTime: 2000,
+			})
+
+			sessionID := "ldxp_qr_unsafe_reject_" + strings.ReplaceAll(tc.name, " ", "_")
+			err := RecordLdxpQr(sessionID, LdxpWorkerQrPayload{
+				WorkerID:          "worker-a",
+				WorkerOrderNo:     "order-unsafe-1",
+				WorkerAmount:      0.10,
+				WorkerProductName: "LDXP 10",
+				QRCode:            tc.qrCode,
+				QRPageURL:         "https://example.test/qr",
+			})
+
+			require.Error(t, err)
+			assert.ErrorIs(t, err, ErrLdxpInvalidSessionRequest)
+
+			persisted, getErr := model.GetLdxpTopupSessionBySessionId(sessionID)
+			require.NoError(t, getErr)
+			assert.Equal(t, model.LdxpStatusWorkerClaimed, persisted.Status)
+			assert.Empty(t, persisted.QrCode)
+			assert.Empty(t, persisted.WorkerOrderNo)
+		})
+	}
+}
+
 func TestRecordLdxpWorkerResultMovesSessionToWorkerPaid(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
@@ -376,7 +422,7 @@ func TestRecordLdxpQrRejectsMissingOrderNo(t *testing.T) {
 		WorkerOrderNo:     "   ",
 		WorkerAmount:      0.10,
 		WorkerProductName: "LDXP 10",
-		QRCode:            "created-qr",
+		QRCode:            "data:image/png;base64,created",
 	})
 
 	require.Error(t, err)
@@ -408,7 +454,7 @@ func TestRecordLdxpQrRejectsOrderNoOverwrite(t *testing.T) {
 		WorkerOrderNo:     "order-A",
 		WorkerAmount:      0.10,
 		WorkerProductName: "UPDATED",
-		QRCode:            "updated-qr",
+		QRCode:            "data:image/png;base64,updated",
 		QRPageURL:         "https://example.test/updated",
 	})
 
@@ -530,7 +576,7 @@ func TestRecordLdxpQrRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
 	err := RecordLdxpQr("ldxp_qr_created_reject", LdxpWorkerQrPayload{
 		WorkerID:      "worker-a",
 		WorkerOrderNo: "order-created-should-not-write",
-		QRCode:        "created-qr",
+		QRCode:        "data:image/png;base64,created",
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
@@ -544,7 +590,7 @@ func TestRecordLdxpQrRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
 	err = RecordLdxpQr("ldxp_qr_worker_reject", LdxpWorkerQrPayload{
 		WorkerID:      "worker-b",
 		WorkerOrderNo: "order-wrong-worker",
-		QRCode:        "wrong-worker-qr",
+		QRCode:        "data:image/png;base64,wrongworker",
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)

@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/dialog'
 import {
+  getSafeLdxpQrCodeSrc,
   getLdxpStatusMessageKey,
   isLdxpTerminalStatus,
 } from '../lib/ldxp-topup'
@@ -101,6 +102,9 @@ export function LdxpPaymentDialog({
     ? t('Recharge successful')
     : t(getLdxpStatusMessageKey(session.status))
   const safeErrorMessage = session.error_message || error
+  const safeQrCodeSrc = getSafeLdxpQrCodeSrc(session.qr_code)
+  const hasInvalidQrCode =
+    session.status === 'qr_ready' && Boolean(session.qr_code) && !safeQrCodeSrc
 
   return (
     <Dialog
@@ -134,14 +138,22 @@ export function LdxpPaymentDialog({
       }
     >
       <div className='flex flex-col gap-4 py-3 sm:py-4'>
-        {session.status === 'qr_ready' && session.qr_code ? (
+        {session.status === 'qr_ready' && safeQrCodeSrc ? (
           <div className='bg-muted flex justify-center rounded-lg p-4'>
             <img
-              src={session.qr_code}
+              src={safeQrCodeSrc}
               alt={t('Alipay payment QR code')}
               className='size-48 rounded-md bg-background object-contain'
             />
           </div>
+        ) : null}
+
+        {hasInvalidQrCode ? (
+          <Alert variant='destructive'>
+            <AlertDescription>
+              {t('QR code is not configured. Please contact support.')}
+            </AlertDescription>
+          </Alert>
         ) : null}
 
         <div className='flex flex-col gap-3'>
@@ -185,7 +197,7 @@ export function LdxpPaymentDialog({
           </div>
         ) : null}
 
-        {isFailure && safeErrorMessage ? (
+        {(isFailure || !isTerminal) && safeErrorMessage ? (
           <Alert variant='destructive'>
             <AlertDescription>{safeErrorMessage}</AlertDescription>
           </Alert>

@@ -46,6 +46,7 @@ import {
 import {
   getDefaultPaymentType,
   getMinTopupAmount,
+  isLdxpTerminalStatus,
   isWaffoPancakePayment,
 } from './lib'
 import {
@@ -273,6 +274,13 @@ export function Wallet(props: WalletProps) {
     return topupInfo?.discount?.[topupAmount] || DEFAULT_DISCOUNT_RATE
   }, [topupInfo, topupAmount])
 
+  const ldxpTopupDisabled =
+    ldxpTopup.loading ||
+    Boolean(
+      ldxpTopup.session &&
+        !isLdxpTerminalStatus(ldxpTopup.session.status)
+    )
+
   const handleSubscriptionAvailabilityChange = useCallback(
     (available: boolean) => {
       setShowSubscriptionPanel(available)
@@ -300,6 +308,8 @@ export function Wallet(props: WalletProps) {
                   <LdxpTopupCard
                     topupInfo={topupInfo}
                     loading={topupLoading}
+                    disabled={ldxpTopupDisabled}
+                    error={!ldxpTopup.session ? ldxpTopup.error : null}
                     onStart={ldxpTopup.start}
                   />
                   <RechargeFormCard

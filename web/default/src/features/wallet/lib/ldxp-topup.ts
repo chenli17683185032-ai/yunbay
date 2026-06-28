@@ -46,10 +46,37 @@ const LDXP_STATUS_MESSAGE_KEYS: Record<LdxpTopupStatus, string> = {
   redeem_failed: 'Recharge failed',
 }
 
+const LDXP_SAFE_QR_DATA_PREFIXES = [
+  'data:image/png;base64,',
+  'data:image/jpeg;base64,',
+  'data:image/jpg;base64,',
+  'data:image/webp;base64,',
+  'data:image/gif;base64,',
+]
+
 export function isLdxpTerminalStatus(status: LdxpTopupStatus): boolean {
   return LDXP_TERMINAL_STATUSES.has(status)
 }
 
 export function getLdxpStatusMessageKey(status: LdxpTopupStatus): string {
   return LDXP_STATUS_MESSAGE_KEYS[status]
+}
+
+export function getSafeLdxpQrCodeSrc(
+  qrCode?: string
+): string | undefined {
+  const src = qrCode?.trim()
+  if (!src) {
+    return undefined
+  }
+
+  if (LDXP_SAFE_QR_DATA_PREFIXES.some((prefix) => src.startsWith(prefix))) {
+    return src
+  }
+
+  if (src.startsWith('https://')) {
+    return src
+  }
+
+  return undefined
 }

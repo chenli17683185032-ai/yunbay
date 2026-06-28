@@ -20,6 +20,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   LDXP_TOPUP_AMOUNTS,
+  getSafeLdxpQrCodeSrc,
   getLdxpStatusMessageKey,
   isLdxpTerminalStatus,
 } from './ldxp-topup'
@@ -60,4 +61,31 @@ test('ldxp topup groups failure status message keys', () => {
   assert.equal(getLdxpStatusMessageKey('mail_timeout'), 'Recharge failed')
   assert.equal(getLdxpStatusMessageKey('verify_failed'), 'Recharge failed')
   assert.equal(getLdxpStatusMessageKey('redeem_failed'), 'Recharge failed')
+})
+
+
+test('ldxp topup only allows safe QR code image sources', () => {
+  const allowed = [
+    'data:image/png;base64,QR',
+    'data:image/jpeg;base64,QR',
+    'data:image/jpg;base64,QR',
+    'data:image/webp;base64,QR',
+    'data:image/gif;base64,QR',
+    'https://example.test/qr.png',
+  ]
+
+  for (const qrCode of allowed) {
+    assert.equal(getSafeLdxpQrCodeSrc(qrCode), qrCode)
+  }
+
+  for (const qrCode of [
+    '',
+    '   ',
+    'http://example.test/qr.png',
+    'javascript:alert(1)',
+    'data:text/html;base64,PGgxPkJvb208L2gxPg==',
+    'data:image/svg+xml,<svg onload=alert(1)>',
+  ]) {
+    assert.equal(getSafeLdxpQrCodeSrc(qrCode), undefined)
+  }
 })

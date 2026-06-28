@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { WalletCards } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { TitledCard } from '@/components/ui/titled-card'
@@ -27,6 +28,8 @@ import type { TopupInfo } from '../types'
 interface LdxpTopupCardProps {
   topupInfo: TopupInfo | null
   loading?: boolean
+  disabled?: boolean
+  error?: string | null
   onStart: (amount: number) => void
 }
 
@@ -43,6 +46,8 @@ function getVisibleLdxpAmounts(topupInfo: TopupInfo | null): number[] {
 export function LdxpTopupCard({
   topupInfo,
   loading,
+  disabled,
+  error,
   onStart,
 }: LdxpTopupCardProps) {
   const { t } = useTranslation()
@@ -64,9 +69,20 @@ export function LdxpTopupCard({
       action={<Badge variant='secondary'>{t('Alipay')}</Badge>}
       contentClassName='flex flex-col gap-3'
     >
+      {error ? (
+        <Alert variant='destructive'>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+
       <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6'>
         {amounts.map((amount) => (
-          <Button key={amount} variant='outline' onClick={() => onStart(amount)}>
+          <Button
+            key={amount}
+            variant='outline'
+            disabled={disabled}
+            onClick={() => onStart(amount)}
+          >
             {amount}
           </Button>
         ))}
