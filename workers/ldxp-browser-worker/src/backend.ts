@@ -34,17 +34,17 @@ export interface WorkerErrorPayload {
 
 export interface WorkerMailEventPayload {
   message_id?: string
-  imap_uid?: number
+  imap_uid?: string
   raw_hash?: string
-  mail_from?: string
-  mail_to?: string
+  from?: string
+  to?: string
   subject?: string
-  received_time?: string
+  received_time?: number
   order_no?: string
   amount?: number
   product_name?: string
   card_key?: string
-  paid_time?: string
+  paid_time?: number
   body_excerpt?: string
 }
 

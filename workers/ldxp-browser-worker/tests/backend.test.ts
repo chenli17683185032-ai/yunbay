@@ -165,17 +165,17 @@ test('post worker callbacks send expected routes, token, and payloads', async ()
   }
   const mailPayload: WorkerMailEventPayload = {
     message_id: '<m1@example.test>',
-    imap_uid: 42,
+    imap_uid: '42',
     raw_hash: 'hash',
-    mail_from: 'seller@example.test',
-    mail_to: 'buyer@example.test',
+    from: 'seller@example.test',
+    to: 'buyer@example.test',
     subject: 'Paid',
-    received_time: '2026-06-28T00:00:00.000Z',
+    received_time: 1782604800,
     order_no: 'order-1',
     amount: 19.9,
     product_name: 'Product',
     card_key: 'abcd1234efgh5678',
-    paid_time: '2026-06-28T00:00:00.000Z',
+    paid_time: 1782604800,
     body_excerpt: 'excerpt',
   }
 
@@ -201,6 +201,8 @@ test('post worker callbacks send expected routes, token, and payloads', async ()
     assert.deepEqual(captured[1]?.body, { worker_id: 'worker-a', ...resultPayload })
     assert.deepEqual(captured[2]?.body, { worker_id: 'worker-a', ...errorPayload })
     assert.deepEqual(captured[3]?.body, mailPayload)
+    assert.equal(Object.hasOwn(captured[3]?.body as Record<string, unknown>, 'mail_from'), false)
+    assert.equal(Object.hasOwn(captured[3]?.body as Record<string, unknown>, 'mail_to'), false)
   } finally {
     await server.close()
   }
