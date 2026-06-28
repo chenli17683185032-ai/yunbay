@@ -178,7 +178,11 @@ export async function requestWaffoPancakePayment(
 export async function createLdxpTopupSession(
   amount: number
 ): Promise<LdxpTopupSessionResponse> {
-  const res = await api.post('/api/user/ldxp/topup/session', { amount })
+  const res = await api.post(
+    '/api/user/ldxp/topup/session',
+    { amount },
+    { skipBusinessError: true } satisfies ApiRequestConfig
+  )
   return res.data
 }
 
@@ -189,7 +193,8 @@ export async function getLdxpTopupSession(
   sessionId: string
 ): Promise<LdxpTopupSessionResponse> {
   const res = await api.get(
-    `/api/user/ldxp/topup/session/${encodeURIComponent(sessionId)}`
+    `/api/user/ldxp/topup/session/${encodeURIComponent(sessionId)}`,
+    { skipBusinessError: true } satisfies ApiRequestConfig
   )
   return res.data
 }
@@ -199,9 +204,11 @@ export async function getLdxpTopupSession(
  */
 export async function cancelLdxpTopupSession(
   sessionId: string
-): Promise<ApiResponse> {
+): Promise<LdxpTopupSessionResponse> {
   const res = await api.post(
-    `/api/user/ldxp/topup/session/${encodeURIComponent(sessionId)}/cancel`
+    `/api/user/ldxp/topup/session/${encodeURIComponent(sessionId)}/cancel`,
+    undefined,
+    { skipBusinessError: true } satisfies ApiRequestConfig
   )
   return res.data
 }

@@ -30,14 +30,19 @@ interface UseLdxpTopupOptions {
   onSuccess?: () => Promise<void> | void
 }
 
-export function useLdxpTopup(options: UseLdxpTopupOptions) {
+export function useLdxpTopup(options: UseLdxpTopupOptions = {}) {
   const [session, setSession] = useState<LdxpTopupSession | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pollAttempt, setPollAttempt] = useState(0)
   const handledSuccessSessionIdRef = useRef<string | null>(null)
+  const operationSeqRef = useRef(0)
+  const activeSessionIdRef = useRef<string | null>(null)
 
   const start = useCallback(async (amount: number) => {
+    const operationSeq = operationSeqRef.current + 1
+    operationSeqRef.current = operationSeq
+    activeSessionIdRef.current = null
     setLoading(true)
     setError(null)
     setSession(null)
@@ -47,18 +52,27 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
     try {
       const response = await createLdxpTopupSession(amount)
 
+      if (operationSeqRef.current !== operationSeq) {
+        return false
+      }
+
       if (!isApiSuccess(response) || !response.data) {
         setError(response.message || 'Failed to create recharge session')
         return false
       }
 
+      activeSessionIdRef.current = response.data.session_id
       setSession(response.data)
       return true
     } catch (_error) {
-      setError('Failed to create recharge session')
+      if (operationSeqRef.current === operationSeq) {
+        setError('Failed to create recharge session')
+      }
       return false
     } finally {
-      setLoading(false)
+      if (operationSeqRef.current === operationSeq) {
+        setLoading(false)
+      }
     }
   }, [])
 
@@ -67,32 +81,63 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
       return false
     }
 
+    const sessionId = session.session_id
+    if (activeSessionIdRef.current !== sessionId) {
+      return false
+    }
+
+    const operationSeq = operationSeqRef.current + 1
+    operationSeqRef.current = operationSeq
     setLoading(true)
     setError(null)
 
     try {
-      const response = await cancelLdxpTopupSession(session.session_id)
+      const response = await cancelLdxpTopupSession(sessionId)
 
-      if (!isApiSuccess(response)) {
-        setError(response.message || 'Failed to cancel recharge session')
+      if (
+        operationSeqRef.current !== operationSeq ||
+        activeSessionIdRef.current !== sessionId
+      ) {
         return false
       }
 
+      if (!isApiSuccess(response)) {
+        setError(response.message || 'Failed to cancel recharge session')
+        setPollAttempt((attempt) => attempt + 1)
+        return false
+      }
+
+      const canceledSession: LdxpTopupSession =
+        response.data?.session_id === sessionId
+          ? response.data
+          : { ...session, status: 'canceled' }
+      activeSessionIdRef.current = canceledSession.session_id
       setSession((current) =>
-        current?.session_id === session.session_id
-          ? { ...current, status: 'canceled' }
-          : current
+        current?.session_id === sessionId ? canceledSession : current
       )
       return true
     } catch (_error) {
-      setError('Failed to cancel recharge session')
+      if (
+        operationSeqRef.current === operationSeq &&
+        activeSessionIdRef.current === sessionId
+      ) {
+        setError('Failed to cancel recharge session')
+        setPollAttempt((attempt) => attempt + 1)
+      }
       return false
     } finally {
-      setLoading(false)
+      if (
+        operationSeqRef.current === operationSeq &&
+        activeSessionIdRef.current === sessionId
+      ) {
+        setLoading(false)
+      }
     }
   }, [session])
 
   const reset = useCallback(() => {
+    operationSeqRef.current += 1
+    activeSessionIdRef.current = null
     handledSuccessSessionIdRef.current = null
     setSession(null)
     setError(null)
@@ -105,12 +150,22 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
       return
     }
 
+    const operationSeq = operationSeqRef.current
+    const sessionId = session.session_id
+    if (activeSessionIdRef.current !== sessionId) {
+      return
+    }
+
     let active = true
     const timeoutId = window.setTimeout(async () => {
       try {
-        const response = await getLdxpTopupSession(session.session_id)
+        const response = await getLdxpTopupSession(sessionId)
 
-        if (!active) {
+        if (
+          !active ||
+          operationSeqRef.current !== operationSeq ||
+          activeSessionIdRef.current !== sessionId
+        ) {
           return
         }
 
@@ -120,10 +175,21 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
           return
         }
 
+        if (response.data.session_id !== sessionId) {
+          setError('Failed to refresh recharge session')
+          setPollAttempt((attempt) => attempt + 1)
+          return
+        }
+
+        activeSessionIdRef.current = response.data.session_id
         setError(null)
         setSession(response.data)
       } catch (_error) {
-        if (active) {
+        if (
+          active &&
+          operationSeqRef.current === operationSeq &&
+          activeSessionIdRef.current === sessionId
+        ) {
           setError('Failed to refresh recharge session')
           setPollAttempt((attempt) => attempt + 1)
         }
@@ -146,7 +212,9 @@ export function useLdxpTopup(options: UseLdxpTopupOptions) {
     }
 
     handledSuccessSessionIdRef.current = session.session_id
-    void options.onSuccess?.()
+    Promise.resolve(options.onSuccess?.()).catch(() => {
+      /* caller owns refresh error handling */
+    })
   }, [options, session])
 
   return {
