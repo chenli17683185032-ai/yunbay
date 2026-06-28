@@ -31,6 +31,7 @@ func clearLdxpEnv(t *testing.T) {
 		"LDXP_MAIL_MATCH_WINDOW_SECONDS",
 		"LDXP_REQUIRE_MAIL_MATCH",
 		"LDXP_DEBUG_SNAPSHOT_DIR",
+		"LDXP_ALLOWED_USERNAMES",
 	} {
 		t.Setenv(name, "")
 	}
@@ -74,6 +75,24 @@ func TestLoadLdxpConfigParsesSixProducts(t *testing.T) {
 		require.NotEmpty(t, product.ProductName)
 		require.Positive(t, product.Money)
 	}
+}
+
+func TestLoadLdxpConfigParsesAllowedUsernames(t *testing.T) {
+	clearLdxpEnv(t)
+	t.Setenv("LDXP_ALLOWED_USERNAMES", " jiance001, Alice ,jiance001,,BOB ")
+
+	cfg, err := LoadLdxpConfig()
+	require.NoError(t, err)
+	require.Equal(t, []string{"jiance001", "alice", "bob"}, cfg.AllowedUsernames)
+	require.True(t, IsLdxpUserAllowed(cfg, "jiance001"))
+	require.True(t, IsLdxpUserAllowed(cfg, "ALICE"))
+	require.False(t, IsLdxpUserAllowed(cfg, "charlie"))
+}
+
+func TestIsLdxpUserAllowedDefaultsOpenWhenNoAllowlist(t *testing.T) {
+	cfg := &LdxpConfig{}
+	require.True(t, IsLdxpUserAllowed(cfg, "anyone"))
+	require.True(t, IsLdxpUserAllowed(cfg, ""))
 }
 
 func TestLoadLdxpConfigRejectsMissingAmounts(t *testing.T) {

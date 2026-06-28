@@ -188,6 +188,32 @@ func TestCreateLdxpTopupSessionReturnsConfiguredAmounts(t *testing.T) {
 	assert.Equal(t, "created", data["status"])
 }
 
+func TestCreateLdxpTopupSessionRejectsUserOutsideAllowlist(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	t.Setenv("LDXP_ALLOWED_USERNAMES", "jiance001")
+	user := createLdxpControllerTestUser(t, "ordinary_user")
+
+	recorder := performLdxpControllerRequest(CreateLdxpTopupSession, http.MethodPost, "/ldxp/topup/session", gin.H{"amount": 20}, user.Id, nil)
+
+	body := assertLdxpAPIResponse(t, recorder)
+	assert.Equal(t, false, body["success"])
+	assert.Contains(t, body["message"], "ldxp topup disabled")
+}
+
+func TestCreateLdxpTopupSessionAllowsConfiguredUsername(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	t.Setenv("LDXP_ALLOWED_USERNAMES", " jiance001 ")
+	user := createLdxpControllerTestUser(t, "jiance001")
+
+	recorder := performLdxpControllerRequest(CreateLdxpTopupSession, http.MethodPost, "/ldxp/topup/session", gin.H{"amount": 20}, user.Id, nil)
+
+	body := assertLdxpAPIResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+	data, ok := body["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(20), data["amount"])
+}
+
 func TestGetLdxpTopupSessionRequiresOwner(t *testing.T) {
 	setupLdxpTopupControllerTest(t)
 	owner := createLdxpControllerTestUser(t, "ldxp_owner")

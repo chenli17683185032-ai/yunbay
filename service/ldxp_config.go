@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 )
 
 type LdxpProductConfig struct {
@@ -31,6 +32,7 @@ type LdxpConfig struct {
 	MailMatchWindowSeconds  int64
 	RequireMailMatch        bool
 	DebugSnapshotDir        string
+	AllowedUsernames        []string
 }
 
 const defaultLdxpProductsJSON = `[
@@ -89,7 +91,38 @@ func LoadLdxpConfig() (*LdxpConfig, error) {
 		MailMatchWindowSeconds:  mailMatchWindowSeconds,
 		RequireMailMatch:        common.GetEnvOrDefaultBool("LDXP_REQUIRE_MAIL_MATCH", true),
 		DebugSnapshotDir:        common.GetEnvOrDefaultString("LDXP_DEBUG_SNAPSHOT_DIR", "/opt/new-api/logs/ldxp-worker/snapshots"),
+		AllowedUsernames:        parseLdxpAllowedUsernames(os.Getenv("LDXP_ALLOWED_USERNAMES")),
 	}, nil
+}
+
+func IsLdxpUserAllowed(cfg *LdxpConfig, username string) bool {
+	if cfg == nil || len(cfg.AllowedUsernames) == 0 {
+		return true
+	}
+	username = strings.ToLower(strings.TrimSpace(username))
+	if username == "" {
+		return false
+	}
+	for _, allowed := range cfg.AllowedUsernames {
+		if username == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func IsLdxpUserIDAllowed(cfg *LdxpConfig, userID int) bool {
+	if cfg == nil || len(cfg.AllowedUsernames) == 0 {
+		return true
+	}
+	if userID <= 0 {
+		return false
+	}
+	username, err := model.GetUsernameById(userID, true)
+	if err != nil {
+		return false
+	}
+	return IsLdxpUserAllowed(cfg, username)
 }
 
 func ReadLdxpSecret(envName string, fileEnvName string) string {
@@ -201,4 +234,21 @@ func formatLdxpAmounts(amounts []int64) string {
 		parts = append(parts, fmt.Sprintf("%d", amount))
 	}
 	return strings.Join(parts, ",")
+}
+
+func parseLdxpAllowedUsernames(raw string) []string {
+	seen := map[string]struct{}{}
+	usernames := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		username := strings.ToLower(strings.TrimSpace(part))
+		if username == "" {
+			continue
+		}
+		if _, ok := seen[username]; ok {
+			continue
+		}
+		seen[username] = struct{}{}
+		usernames = append(usernames, username)
+	}
+	return usernames
 }
