@@ -58,6 +58,50 @@ func TestParseLdxpMailDoesNotTreatProductContentAsCard(t *testing.T) {
 	assert.NotContains(t, parsed.BodyExcerpt, "SECRET-CARD-999999")
 }
 
+func TestParseLdxpMailDoesNotTreatProductKeywordsAsCard(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		body        string
+		wantProduct string
+	}{
+		{
+			name:        "card_keyword_in_product_name",
+			body:        "订单号：LD260628UZJ97P\n商品名称：卡密套餐\n金额：0.10",
+			wantProduct: "卡密套餐",
+		},
+		{
+			name:        "english_code_in_product_name",
+			body:        "订单号：LD260628UZJ97P\n商品名称：code plan\n金额：0.10",
+			wantProduct: "code plan",
+		},
+		{
+			name:        "cdkey_in_purchase_content",
+			body:        "订单号：LD260628UZJ97P\n购买内容：CDKEY套餐\n金额：0.10",
+			wantProduct: "CDKEY套餐",
+		},
+		{
+			name:        "card_keyword_with_space_in_product_name",
+			body:        "订单号：LD260628UZJ97P\n商品名称：卡密 套餐\n金额：0.10",
+			wantProduct: "卡密 套餐",
+		},
+		{
+			name:        "cdkey_with_space_in_purchase_content",
+			body:        "订单号：LD260628UZJ97P\n购买内容：CDKEY plan\n金额：0.10",
+			wantProduct: "CDKEY plan",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			parsed, err := ParseLdxpMailText(tc.body)
+
+			require.NoError(t, err)
+			require.NotNil(t, parsed)
+			assert.Equal(t, "LD260628UZJ97P", parsed.OrderNo)
+			assert.Equal(t, tc.wantProduct, parsed.ProductName)
+			assert.Empty(t, parsed.CardKey)
+		})
+	}
+}
+
 func TestParseLdxpMailAcceptsAndRedactsNonSpaceCardTokens(t *testing.T) {
 	for _, token := range []string{
 		"SECRET.CARD.999999",
@@ -92,6 +136,10 @@ func TestParseLdxpMailDoesNotUseNextFieldAsCard(t *testing.T) {
 		{
 			name: "payment_amount",
 			body: "订单号：LD260628UZJ97P\n商品名称：0.1 元测试\n金额：0.10\n卡密：\n支付金额：0.10",
+		},
+		{
+			name: "plain_chinese_value",
+			body: "订单号：LD260628UZJ97P\n商品名称：0.1 元测试\n金额：0.10\n卡密：\n套餐",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
