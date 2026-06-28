@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	ldxpRedeemSavePointName          = "ldxp_redeem"
 	ldxpVerifyCodePending            = "pending"
 	ldxpVerifyCodeMissingWorkerOrder = "missing_worker_order"
 	ldxpVerifyCodeMailEventNotFound  = "mail_event_not_found"
@@ -127,8 +128,16 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 		if err := persistLdxpVerifiedTx(tx, session, event); err != nil {
 			return err
 		}
+		if err := beginLdxpRedeemSavePointTx(tx); err != nil {
+			return err
+		}
 		redeem, err := RedeemLdxpSessionCardTx(tx, session)
 		if err != nil {
+			if rollbackErr := rollbackLdxpRedeemSavePointTx(tx); rollbackErr != nil {
+				return rollbackErr
+			}
+			session.RedemptionId = 0
+			session.TopupId = 0
 			if errors.Is(err, model.ErrRedemptionUsed) {
 				recovered, recoverErr := recoverLdxpSameUserUsedRedemptionTx(tx, session)
 				if recoverErr != nil {
@@ -228,6 +237,20 @@ func VerifyLdxpSessionFields(session *model.LdxpTopupSession, event *model.LdxpM
 		return newLdxpVerifyFieldError(ldxpVerifyCodeStatusNotPaid, "ldxp worker status is not paid or successful")
 	}
 	return nil
+}
+
+func beginLdxpRedeemSavePointTx(tx *gorm.DB) error {
+	if tx == nil {
+		return gorm.ErrInvalidData
+	}
+	return tx.SavePoint(ldxpRedeemSavePointName).Error
+}
+
+func rollbackLdxpRedeemSavePointTx(tx *gorm.DB) error {
+	if tx == nil {
+		return gorm.ErrInvalidData
+	}
+	return tx.RollbackTo(ldxpRedeemSavePointName).Error
 }
 
 func getLdxpVerifySessionForUpdateTx(tx *gorm.DB, sessionID string) (*model.LdxpTopupSession, error) {

@@ -481,6 +481,53 @@ func TestVerifyLdxpSessionRejectsSameUserUsedRecoveryWithoutTopUp(t *testing.T) 
 	assert.Zero(t, persisted.TopupId)
 }
 
+func TestVerifyLdxpSessionRollsBackRedeemWritesWhenTopUpCreateFails(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	userID := 6463
+	insertLdxpVerifyUser(t, userID, 100)
+	redemption := insertLdxpVerifyPaidTopupCard(t, "verify-rollback-topup-conflict-card", 600)
+	tradeNo := model.CreateRedemptionTopUpTradeNo(redemption.Id, userID)
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:          userID,
+		Amount:          redemption.Amount,
+		Money:           redemption.Money,
+		TradeNo:         tradeNo,
+		PaymentMethod:   model.PaymentMethodRedemptionCode,
+		PaymentProvider: model.PaymentProviderRedemptionCode,
+		CreateTime:      common.GetTimestamp() - 60,
+		CompleteTime:    common.GetTimestamp() - 60,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+	insertLdxpVerifySession(t, completeLdxpVerifySession("ldxp_verify_rollback_topup_conflict", userID, "LDVERIFYROLLBACK", "verify-rollback-topup-conflict-card", 0.10))
+	insertLdxpVerifyMailEvent(t, "LDVERIFYROLLBACK", "verify-rollback-topup-conflict-card", 0.10)
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_rollback_topup_conflict")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, result.Status)
+	assert.Equal(t, "redeem_failed", result.ErrorCode)
+	assert.Equal(t, 100, ldxpVerifyUserQuota(t, userID))
+
+	var persistedRedemption model.Redemption
+	require.NoError(t, model.DB.Where("id = ?", redemption.Id).First(&persistedRedemption).Error)
+	assert.Equal(t, common.RedemptionCodeStatusEnabled, persistedRedemption.Status)
+	assert.Zero(t, persistedRedemption.UsedUserId)
+	assert.Zero(t, persistedRedemption.RedeemedTime)
+
+	topUps := ldxpVerifyTopUps(t, userID)
+	require.Len(t, topUps, 1)
+	assert.Equal(t, tradeNo, topUps[0].TradeNo)
+
+	persistedSession, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_rollback_topup_conflict")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, persistedSession.Status)
+	assert.Zero(t, persistedSession.RedemptionId)
+	assert.Zero(t, persistedSession.TopupId)
+}
+
 func TestVerifyLdxpSessionIsIdempotent(t *testing.T) {
 	setupLdxpVerifyServiceTest(t)
 	insertLdxpVerifyUser(t, 6501, 10)
@@ -560,6 +607,7 @@ func TestLdxpVerifyTask6Suite(t *testing.T) {
 	t.Run("RecoversSameUserUsedRedemption", TestVerifyLdxpSessionRecoversSameUserUsedRedemption)
 	t.Run("RejectsDuplicateOrderAcrossSuccessfulSessions", TestVerifyLdxpSessionRejectsDuplicateOrderAcrossSuccessfulSessions)
 	t.Run("RejectsSameUserUsedRecoveryWithoutTopUp", TestVerifyLdxpSessionRejectsSameUserUsedRecoveryWithoutTopUp)
+	t.Run("RollsBackRedeemWritesWhenTopUpCreateFails", TestVerifyLdxpSessionRollsBackRedeemWritesWhenTopUpCreateFails)
 	t.Run("IsIdempotent", TestVerifyLdxpSessionIsIdempotent)
 	t.Run("StoresRedeemFailure", TestVerifyLdxpSessionStoresRedeemFailure)
 }
