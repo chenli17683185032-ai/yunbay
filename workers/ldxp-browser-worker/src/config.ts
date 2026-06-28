@@ -35,24 +35,25 @@ const defaultConfig = {
 export function loadConfigFromEnv(env: Env = process.env): WorkerConfig {
   const backendBaseUrl = requireNonEmpty(env.BACKEND_BASE_URL, 'BACKEND_BASE_URL').replace(/\/+$/, '')
   const workerToken = loadWorkerToken(env)
+  const pollIntervalMs = parseOptionalPositiveInteger(
+    firstDefined(env.LDXP_WORKER_POLL_INTERVAL_MS, env.LDXP_POLL_INTERVAL_MS),
+    'LDXP_WORKER_POLL_INTERVAL_MS',
+    defaultConfig.pollIntervalMs,
+  )
 
   return {
     backendBaseUrl,
     workerToken,
     workerId: valueOrDefault(env.LDXP_WORKER_ID, defaultConfig.workerId),
-    pollIntervalMs: parseOptionalPositiveInteger(
-      env.LDXP_POLL_INTERVAL_MS,
-      'LDXP_POLL_INTERVAL_MS',
-      defaultConfig.pollIntervalMs,
-    ),
+    pollIntervalMs,
     claimIntervalMs: parseOptionalPositiveInteger(
       env.LDXP_CLAIM_INTERVAL_MS,
       'LDXP_CLAIM_INTERVAL_MS',
-      defaultConfig.claimIntervalMs,
+      pollIntervalMs,
     ),
     maxConcurrentSessions: parseOptionalPositiveInteger(
-      env.LDXP_MAX_CONCURRENT_SESSIONS,
-      'LDXP_MAX_CONCURRENT_SESSIONS',
+      firstDefined(env.LDXP_WORKER_CONCURRENCY, env.LDXP_MAX_CONCURRENT_SESSIONS),
+      'LDXP_WORKER_CONCURRENCY',
       defaultConfig.maxConcurrentSessions,
     ),
     productLoadTimeoutMs: parseOptionalPositiveInteger(
@@ -71,11 +72,15 @@ export function loadConfigFromEnv(env: Env = process.env): WorkerConfig {
       'LDXP_RESULT_TIMEOUT_MS',
       defaultConfig.resultTimeoutMs,
     ),
-    debugSnapshotDir: valueOrDefault(env.LDXP_DEBUG_SNAPSHOT_DIR, defaultConfig.debugSnapshotDir),
-    imapHost: optionalTrimmed(env.LDXP_IMAP_HOST),
-    imapPort: parseOptionalPositiveInteger(env.LDXP_IMAP_PORT, 'LDXP_IMAP_PORT'),
-    imapUser: optionalTrimmed(env.LDXP_IMAP_USER),
-    imapPassword: loadOptionalFileSecret(env.LDXP_IMAP_PASSWORD, env.LDXP_IMAP_PASSWORD_FILE, 'LDXP_IMAP_PASSWORD_FILE'),
+    debugSnapshotDir: valueOrDefault(firstDefined(env.LDXP_BROWSER_SNAPSHOT_DIR, env.LDXP_DEBUG_SNAPSHOT_DIR), defaultConfig.debugSnapshotDir),
+    imapHost: optionalTrimmed(firstDefined(env.LDXP_IMAP_HOST, env.QQ_IMAP_HOST)),
+    imapPort: parseOptionalPositiveInteger(firstDefined(env.LDXP_IMAP_PORT, env.QQ_IMAP_PORT), 'LDXP_IMAP_PORT'),
+    imapUser: optionalTrimmed(firstDefined(env.LDXP_IMAP_USER, env.QQ_IMAP_USER)),
+    imapPassword: loadOptionalFileSecret(
+      firstDefined(env.LDXP_IMAP_PASSWORD, env.QQ_IMAP_PASSWORD),
+      firstDefined(env.LDXP_IMAP_PASSWORD_FILE, env.QQ_IMAP_PASSWORD_FILE),
+      'LDXP_IMAP_PASSWORD_FILE or QQ_IMAP_PASSWORD_FILE',
+    ),
   }
 }
 
@@ -115,6 +120,16 @@ function requireNonEmpty(value: string | undefined, variableName: string): strin
 
 function valueOrDefault(value: string | undefined, fallback: string): string {
   return optionalTrimmed(value) ?? fallback
+}
+
+function firstDefined(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = optionalTrimmed(value)
+    if (trimmed) {
+      return trimmed
+    }
+  }
+  return undefined
 }
 
 function optionalTrimmed(value: string | undefined): string | undefined {
