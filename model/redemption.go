@@ -286,36 +286,46 @@ func Redeem(key string, userId int) (*RedeemResult, error) {
 
 	common.RandomSleep()
 	var result *RedeemResult
+	vipUpgraded := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var err error
-		result, err = RedeemWithTx(tx, key, userId)
+		result, vipUpgraded, err = redeemWithTxResult(tx, key, userId)
 		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	if vipUpgraded {
+		_ = UpdateUserGroupCache(userId, UserGroupVIP)
 	}
 	RecordRedeemLog(userId, result)
 	return result, nil
 }
 
 func RedeemWithTx(tx *gorm.DB, key string, userId int) (*RedeemResult, error) {
-	if tx == nil {
-		return nil, ErrRedemptionInvalid
-	}
-	if key == "" {
-		return nil, ErrRedemptionNotProvided
-	}
-	if userId == 0 {
-		return nil, ErrRedemptionInvalid
-	}
-	redemption := &Redemption{}
-	if err := redeemWithTx(tx, key, userId, redemption); err != nil {
-		return nil, redeemError(err)
-	}
-	return buildRedeemResult(redemption), nil
+	result, _, err := redeemWithTxResult(tx, key, userId)
+	return result, err
 }
 
-func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) error {
+func redeemWithTxResult(tx *gorm.DB, key string, userId int) (*RedeemResult, bool, error) {
+	if tx == nil {
+		return nil, false, ErrRedemptionInvalid
+	}
+	if key == "" {
+		return nil, false, ErrRedemptionNotProvided
+	}
+	if userId == 0 {
+		return nil, false, ErrRedemptionInvalid
+	}
+	redemption := &Redemption{}
+	vipUpgraded, err := redeemWithTx(tx, key, userId, redemption)
+	if err != nil {
+		return nil, false, redeemError(err)
+	}
+	return buildRedeemResult(redemption), vipUpgraded, nil
+}
+
+func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) (bool, error) {
 	query := tx.Where(commonKeyCol+" = ?", key)
 	if !common.UsingSQLite {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
@@ -323,39 +333,39 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) e
 	err := query.First(redemption).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrRedemptionInvalid
+			return false, ErrRedemptionInvalid
 		}
-		return err
+		return false, err
 	}
 	if redemption.Status != common.RedemptionCodeStatusEnabled {
-		return ErrRedemptionUsed
+		return false, ErrRedemptionUsed
 	}
 	now := common.GetTimestamp()
 	if redemption.ExpiredTime != 0 && redemption.ExpiredTime < now {
-		return ErrRedemptionExpired
+		return false, ErrRedemptionExpired
 	}
 	normalizeRedeemedRedemption(redemption)
 	if redemption.Kind == RedemptionKindCoupon || (redemption.Kind != RedemptionKindLegacy && redemption.Kind != RedemptionKindPaidTopUp && redemption.Kind != RedemptionKindPromoCredit) {
-		return ErrRedemptionUnsupportedKind
+		return false, ErrRedemptionUnsupportedKind
 	}
 	if redemption.Kind == RedemptionKindPaidTopUp && (!redemption.CountAsTopUp || redemption.Amount <= 0 || redemption.Money <= 0) {
-		return ErrRedemptionInvalid
+		return false, ErrRedemptionInvalid
 	}
 	if redemption.Kind == RedemptionKindPromoCredit && redemption.CountAsTopUp {
-		return ErrRedemptionInvalid
+		return false, ErrRedemptionInvalid
 	}
 	result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota))
 	if result.Error != nil {
-		return result.Error
+		return false, result.Error
 	}
 	if result.RowsAffected != 1 {
-		return ErrRedemptionInvalid
+		return false, ErrRedemptionInvalid
 	}
 	redemption.RedeemedTime = now
 	redemption.Status = common.RedemptionCodeStatusUsed
 	redemption.UsedUserId = userId
 	if err = tx.Save(redemption).Error; err != nil {
-		return err
+		return false, err
 	}
 	if redemption.Kind == RedemptionKindPaidTopUp && redemption.CountAsTopUp {
 		topUp := &TopUp{
@@ -369,9 +379,16 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) e
 			CompleteTime:    now,
 			Status:          common.TopUpStatusSuccess,
 		}
-		return tx.Create(topUp).Error
+		if err := tx.Create(topUp).Error; err != nil {
+			return false, err
+		}
+		upgraded, err := MaybeUpgradeUserToVIPTx(tx, userId)
+		if err != nil {
+			return false, err
+		}
+		return upgraded, nil
 	}
-	return nil
+	return false, nil
 }
 
 func RecordRedeemLog(userId int, result *RedeemResult) {

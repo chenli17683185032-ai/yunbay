@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -70,6 +71,8 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 	var result *LdxpVerifyResult
 	var redeemResult *model.RedeemResult
 	var redeemLogUserID int
+	var vipUpgradeUserID int
+	var vipUpgraded bool
 	err := model.DB.Transaction(func(tx *gorm.DB) error {
 		session, err := getLdxpVerifySessionForUpdateTx(tx, sessionID)
 		if err != nil {
@@ -77,6 +80,67 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 		}
 		if isLdxpSessionAlreadyRedeemed(session) {
 			result = successLdxpVerifyResult(session)
+			return nil
+		}
+
+		if !isLdxpMailMatchRequired() {
+			if err := VerifyLdxpWorkerPaidFields(session); err != nil {
+				fieldErr := asLdxpVerifyFieldError(err)
+				if updateErr := persistLdxpVerifyFailureTx(tx, session, nil, model.LdxpStatusVerifyFailed, fieldErr.Code, fieldErr.Message); updateErr != nil {
+					return updateErr
+				}
+				result = &LdxpVerifyResult{
+					Verified:     false,
+					Redeemed:     false,
+					Status:       model.LdxpStatusVerifyFailed,
+					ErrorCode:    fieldErr.Code,
+					ErrorMessage: fieldErr.Message,
+				}
+				return nil
+			}
+			if duplicateErr := rejectDuplicateSuccessfulLdxpSessionTx(tx, session, nil); duplicateErr != nil {
+				fieldErr := asLdxpVerifyFieldError(duplicateErr)
+				if updateErr := persistLdxpVerifyFailureTx(tx, session, nil, model.LdxpStatusVerifyFailed, fieldErr.Code, fieldErr.Message); updateErr != nil {
+					return updateErr
+				}
+				result = &LdxpVerifyResult{
+					Verified:     false,
+					Redeemed:     false,
+					Status:       model.LdxpStatusVerifyFailed,
+					ErrorCode:    fieldErr.Code,
+					ErrorMessage: fieldErr.Message,
+				}
+				return nil
+			}
+			if err := persistLdxpVerifiedTx(tx, session, nil); err != nil {
+				return err
+			}
+			directVIPUpgraded, err := directTopUpLdxpSessionTx(tx, session)
+			if err != nil {
+				if updateErr := persistLdxpRedeemFailureTx(tx, session, strings.TrimSpace(err.Error())); updateErr != nil {
+					return updateErr
+				}
+				result = &LdxpVerifyResult{
+					Verified:     true,
+					Redeemed:     false,
+					Status:       model.LdxpStatusRedeemFailed,
+					ErrorCode:    ldxpVerifyCodeRedeemFailed,
+					ErrorMessage: strings.TrimSpace(err.Error()),
+				}
+				return nil
+			}
+			if directVIPUpgraded {
+				vipUpgraded = true
+				vipUpgradeUserID = session.UserId
+			}
+			if err := persistLdxpRedeemSuccessTx(tx, session); err != nil {
+				return err
+			}
+			result = &LdxpVerifyResult{
+				Verified: true,
+				Redeemed: true,
+				Status:   model.LdxpStatusSuccess,
+			}
 			return nil
 		}
 
@@ -186,7 +250,31 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 	if result != nil && result.Redeemed && redeemResult != nil {
 		model.RecordRedeemLog(redeemLogUserID, redeemResult)
 	}
+	if vipUpgraded {
+		_ = model.UpdateUserGroupCache(vipUpgradeUserID, model.UserGroupVIP)
+	}
 	return result, nil
+}
+
+func VerifyLdxpWorkerPaidFields(session *model.LdxpTopupSession) error {
+	if session == nil {
+		return gorm.ErrInvalidData
+	}
+	workerOrderNo := strings.TrimSpace(session.WorkerOrderNo)
+	if workerOrderNo == "" {
+		return newLdxpVerifyFieldError(ldxpVerifyCodeMissingWorkerOrder, "ldxp worker order number is missing")
+	}
+	if session.WorkerAmount <= 0 {
+		return newLdxpVerifyFieldError(ldxpVerifyCodeAmountMismatch, "ldxp worker amount is missing")
+	}
+	if session.Money > 0 && math.Abs(session.Money-session.WorkerAmount) > 0.01 {
+		return newLdxpVerifyFieldError(ldxpVerifyCodeAmountMismatch, fmt.Sprintf("session money %.2f does not match worker amount %.2f", session.Money, session.WorkerAmount))
+	}
+	workerStatusText := strings.TrimSpace(session.WorkerStatusText)
+	if !strings.Contains(workerStatusText, "已付款") && !strings.Contains(workerStatusText, "成功") {
+		return newLdxpVerifyFieldError(ldxpVerifyCodeStatusNotPaid, "ldxp worker status is not paid or successful")
+	}
+	return nil
 }
 
 func VerifyLdxpSessionFields(session *model.LdxpTopupSession, event *model.LdxpMailEvent) error {
@@ -239,6 +327,10 @@ func VerifyLdxpSessionFields(session *model.LdxpTopupSession, event *model.LdxpM
 	return nil
 }
 
+func isLdxpMailMatchRequired() bool {
+	return common.GetEnvOrDefaultBool("LDXP_REQUIRE_MAIL_MATCH", true)
+}
+
 func beginLdxpRedeemSavePointTx(tx *gorm.DB) error {
 	if tx == nil {
 		return gorm.ErrInvalidData
@@ -281,6 +373,64 @@ func RedeemLdxpSessionCardTx(tx *gorm.DB, session *model.LdxpTopupSession) (*mod
 	}
 	session.TopupId = 0
 	return result, nil
+}
+
+func directTopUpLdxpSessionTx(tx *gorm.DB, session *model.LdxpTopupSession) (bool, error) {
+	if tx == nil || session == nil {
+		return false, gorm.ErrInvalidData
+	}
+	tradeNo := ldxpDirectTopUpTradeNo(session.WorkerOrderNo)
+	if tradeNo == "" {
+		return false, newLdxpVerifyFieldError(ldxpVerifyCodeMissingWorkerOrder, "ldxp worker order number is missing")
+	}
+	now := common.GetTimestamp()
+	quotaToAdd := int(decimal.NewFromInt(session.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+	if quotaToAdd <= 0 {
+		return false, newLdxpVerifyFieldError(ldxpVerifyCodeAmountMismatch, "ldxp topup amount is invalid")
+	}
+
+	var existing model.TopUp
+	err := tx.Where("trade_no = ?", tradeNo).First(&existing).Error
+	if err == nil {
+		if existing.UserId != session.UserId || existing.Status != common.TopUpStatusSuccess {
+			return false, newLdxpVerifyFieldError(ldxpVerifyCodeDuplicateOrder, "ldxp order number is already used by another topup")
+		}
+		session.TopupId = existing.Id
+		upgraded, err := model.MaybeUpgradeUserToVIPTx(tx, session.UserId)
+		return upgraded, err
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, err
+	}
+
+	topUp := &model.TopUp{
+		UserId:          session.UserId,
+		Amount:          session.Amount,
+		Money:           session.Money,
+		TradeNo:         tradeNo,
+		PaymentMethod:   model.PaymentMethodLDXP,
+		PaymentProvider: model.PaymentProviderLDXP,
+		CreateTime:      now,
+		CompleteTime:    now,
+		Status:          common.TopUpStatusSuccess,
+	}
+	if err := tx.Create(topUp).Error; err != nil {
+		return false, err
+	}
+	if err := tx.Model(&model.User{}).Where("id = ?", session.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+		return false, err
+	}
+	session.TopupId = topUp.Id
+	upgraded, err := model.MaybeUpgradeUserToVIPTx(tx, session.UserId)
+	return upgraded, err
+}
+
+func ldxpDirectTopUpTradeNo(workerOrderNo string) string {
+	workerOrderNo = strings.TrimSpace(workerOrderNo)
+	if workerOrderNo == "" {
+		return ""
+	}
+	return "ldxp:" + workerOrderNo
 }
 
 func getLdxpVerifyMailEventTx(tx *gorm.DB, session *model.LdxpTopupSession, preferredEvent *model.LdxpMailEvent) (*model.LdxpMailEvent, error) {

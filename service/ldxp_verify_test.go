@@ -34,6 +34,8 @@ func insertLdxpVerifyUser(t *testing.T, userID int, quota int) {
 		Id:       userID,
 		Username: fmt.Sprintf("ldxp-verify-user-%d", userID),
 		AffCode:  fmt.Sprintf("ldxp-verify-aff-%d", userID),
+		Role:     common.RoleCommonUser,
+		Group:    model.UserGroupTiyan,
 		Status:   common.UserStatusEnabled,
 		Quota:    quota,
 	}).Error)
@@ -128,6 +130,13 @@ func ldxpVerifyTopUps(t *testing.T, userID int) []model.TopUp {
 	var topUps []model.TopUp
 	require.NoError(t, model.DB.Where("user_id = ?", userID).Order("id asc").Find(&topUps).Error)
 	return topUps
+}
+
+func ldxpVerifyUserGroup(t *testing.T, userID int) string {
+	t.Helper()
+	var user model.User
+	require.NoError(t, model.DB.Select("group").Where("id = ?", userID).First(&user).Error)
+	return user.Group
 }
 
 func TestVerifyLdxpSessionRequiresWorkerAndMailOrderMatch(t *testing.T) {
@@ -300,6 +309,96 @@ func TestVerifyLdxpSessionRedeemsPaidTopupCard(t *testing.T) {
 	assert.EqualValues(t, 10, topUps[0].Amount)
 	assert.Equal(t, 0.10, topUps[0].Money)
 	assert.Equal(t, model.CreateRedemptionTopUpTradeNo(redemption.Id, 6401), topUps[0].TradeNo)
+}
+
+func TestVerifyLdxpSessionDirectTopupWithoutMailOrCardWhenMailMatchDisabled(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 6421, 100)
+	insertLdxpVerifySession(t, &model.LdxpTopupSession{
+		SessionId:         "ldxp_verify_direct_topup",
+		UserId:            6421,
+		Amount:            10,
+		Money:             0.10,
+		Status:            model.LdxpStatusWorkerPaid,
+		WorkerId:          "worker-a",
+		WorkerOrderNo:     "LDVERIFYDIRECT",
+		WorkerAmount:      0.10,
+		WorkerProductName: "0.1 元测试",
+		WorkerStatusText:  "已付款",
+		WorkerSuccessUrl:  "https://pay.ldxp.cn/order/result/LDVERIFYDIRECT",
+	})
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_direct_topup")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.True(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusSuccess, result.Status)
+	assert.Equal(t, 100+int(10*common.QuotaPerUnit), ldxpVerifyUserQuota(t, 6421))
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_direct_topup")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusSuccess, persisted.Status)
+	assert.NotZero(t, persisted.VerifiedTime)
+	assert.NotZero(t, persisted.RedeemedTime)
+	assert.Zero(t, persisted.RedemptionId)
+	assert.NotZero(t, persisted.TopupId)
+	assert.Empty(t, persisted.WorkerCardKey)
+	assert.Empty(t, persisted.MailOrderNo)
+	assert.Empty(t, persisted.MailCardKey)
+	assert.Empty(t, persisted.ErrorCode)
+	assert.Empty(t, persisted.ErrorMessage)
+
+	topUps := ldxpVerifyTopUps(t, 6421)
+	require.Len(t, topUps, 1)
+	assert.EqualValues(t, 10, topUps[0].Amount)
+	assert.Equal(t, 0.10, topUps[0].Money)
+	assert.Equal(t, "ldxp:LDVERIFYDIRECT", topUps[0].TradeNo)
+	assert.Equal(t, "ldxp", topUps[0].PaymentMethod)
+	assert.Equal(t, "ldxp", topUps[0].PaymentProvider)
+	assert.Equal(t, common.TopUpStatusSuccess, topUps[0].Status)
+
+	second, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_direct_topup")
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	assert.True(t, second.Redeemed)
+	assert.Equal(t, 100+int(10*common.QuotaPerUnit), ldxpVerifyUserQuota(t, 6421))
+	assert.Len(t, ldxpVerifyTopUps(t, 6421), 1)
+}
+
+func TestVerifyLdxpSessionDirectTopupUpgradesUserToVIPAtThreshold(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 6422, 100)
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:  6422,
+		Amount:  20,
+		Money:   20,
+		TradeNo: "ldxp-vip-existing",
+		Status:  common.TopUpStatusSuccess,
+	}).Error)
+	insertLdxpVerifySession(t, &model.LdxpTopupSession{
+		SessionId:         "ldxp_verify_direct_topup_vip",
+		UserId:            6422,
+		Amount:            10,
+		Money:             10,
+		Status:            model.LdxpStatusWorkerPaid,
+		WorkerId:          "worker-a",
+		WorkerOrderNo:     "LDVERIFYDIRECTVIP",
+		WorkerAmount:      10,
+		WorkerProductName: "10 元充值",
+		WorkerStatusText:  "支付成功",
+		WorkerSuccessUrl:  "https://pay.ldxp.cn/order/result/LDVERIFYDIRECTVIP",
+	})
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_direct_topup_vip")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, model.LdxpStatusSuccess, result.Status)
+	assert.Equal(t, model.UserGroupVIP, ldxpVerifyUserGroup(t, 6422))
 }
 
 func TestVerifyLdxpSessionUsesMatchedMailEvent(t *testing.T) {
@@ -659,6 +758,7 @@ func TestLdxpVerifyTask6Suite(t *testing.T) {
 	t.Run("RequiresCardMatch", TestVerifyLdxpSessionRequiresCardMatch)
 	t.Run("RequiresAmountMatchWhenConfigured", TestVerifyLdxpSessionRequiresAmountMatchWhenConfigured)
 	t.Run("RedeemsPaidTopupCard", TestVerifyLdxpSessionRedeemsPaidTopupCard)
+	t.Run("DirectTopupWithoutMailOrCardWhenMailMatchDisabled", TestVerifyLdxpSessionDirectTopupWithoutMailOrCardWhenMailMatchDisabled)
 	t.Run("UsesMatchedMailEvent", TestVerifyLdxpSessionUsesMatchedMailEvent)
 	t.Run("RecoversSameUserUsedRedemption", TestVerifyLdxpSessionRecoversSameUserUsedRedemption)
 	t.Run("RejectsOldSameUserUsedRedemptionRecovery", TestVerifyLdxpSessionRejectsOldSameUserUsedRedemptionRecovery)

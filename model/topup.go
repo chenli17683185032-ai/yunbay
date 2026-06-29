@@ -31,6 +31,7 @@ const (
 	PaymentMethodWaffoPancake   = "waffo_pancake"
 	PaymentMethodBalance        = "balance"
 	PaymentMethodRedemptionCode = "redemption_code"
+	PaymentMethodLDXP           = "ldxp"
 )
 
 const (
@@ -41,6 +42,7 @@ const (
 	PaymentProviderWaffoPancake   = "waffo_pancake"
 	PaymentProviderBalance        = "balance"
 	PaymentProviderRedemptionCode = "redemption_code"
+	PaymentProviderLDXP           = "ldxp"
 )
 
 var (
@@ -48,6 +50,77 @@ var (
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
 )
+
+const VIPUpgradeThresholdMoney = 30.0
+
+func isVIPUpgradeableUser(user User) bool {
+	if user.Role != common.RoleCommonUser {
+		return false
+	}
+	switch user.Group {
+	case "", UserGroupDefault, UserGroupTiyan:
+		return true
+	default:
+		return false
+	}
+}
+
+func MaybeUpgradeUserToVIPTx(tx *gorm.DB, userID int) (bool, error) {
+	if tx == nil {
+		return false, errors.New("nil transaction")
+	}
+	if userID <= 0 {
+		return false, nil
+	}
+
+	var user User
+	if err := tx.Where("id = ?", userID).First(&user).Error; err != nil {
+		return false, err
+	}
+	if user.Group == UserGroupVIP {
+		return false, nil
+	}
+	if !isVIPUpgradeableUser(user) {
+		return false, nil
+	}
+
+	var totalMoney float64
+	if err := tx.Model(&TopUp{}).
+		Where("user_id = ? AND status = ?", userID, common.TopUpStatusSuccess).
+		Select("COALESCE(SUM(money), 0)").
+		Scan(&totalMoney).Error; err != nil {
+		return false, err
+	}
+	if totalMoney < VIPUpgradeThresholdMoney {
+		return false, nil
+	}
+
+	result := tx.Model(&User{}).
+		Where("id = ?", userID).
+		Where("role = ?", common.RoleCommonUser).
+		Where("("+commonGroupCol+" IN ? OR "+commonGroupCol+" = '')", []string{UserGroupDefault, UserGroupTiyan}).
+		Update("group", UserGroupVIP)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func MaybeUpgradeUserToVIP(userID int) (bool, error) {
+	upgraded := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		upgraded, err = MaybeUpgradeUserToVIPTx(tx, userID)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	if upgraded {
+		_ = UpdateUserGroupCache(userID, UserGroupVIP)
+	}
+	return upgraded, nil
+}
 
 func (topUp *TopUp) Insert() error {
 	var err error

@@ -603,6 +603,61 @@ func TestRecordLdxpQrRejectsCreatedSessionAndDifferentWorker(t *testing.T) {
 	assert.EqualValues(t, 100, claimed.UpdatedTime)
 }
 
+func TestRecordLdxpQrIgnoresCanceledSessionForSameWorker(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:     "ldxp_qr_canceled_noop",
+		UserId:        1001,
+		Status:        model.LdxpStatusCanceled,
+		WorkerId:      "worker-a",
+		WorkerOrderNo: "",
+		CreatedTime:   100,
+		UpdatedTime:   150,
+		ExpiredTime:   2000,
+	})
+
+	err := RecordLdxpQr("ldxp_qr_canceled_noop", LdxpWorkerQrPayload{
+		WorkerID:          "worker-a",
+		WorkerOrderNo:     "order-after-cancel",
+		WorkerAmount:      0.10,
+		WorkerProductName: "LDXP 10",
+		QRCode:            "data:image/png;base64,lateqr",
+		QRPageURL:         "https://example.test/qr",
+	})
+
+	require.NoError(t, err)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_qr_canceled_noop")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusCanceled, persisted.Status)
+	assert.Empty(t, persisted.WorkerOrderNo)
+	assert.Empty(t, persisted.QrCode)
+	assert.EqualValues(t, 150, persisted.UpdatedTime)
+}
+
+func TestRecordLdxpWorkerErrorIgnoresCanceledSessionForSameWorker(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_error_canceled_noop",
+		UserId:      1001,
+		Status:      model.LdxpStatusCanceled,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 150,
+		ExpiredTime: 2000,
+	})
+
+	err := RecordLdxpWorkerError("ldxp_error_canceled_noop", "worker-a", "worker_flow_failed", "late worker error", "/app/snapshots/late.png")
+
+	require.NoError(t, err)
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_error_canceled_noop")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusCanceled, persisted.Status)
+	assert.Empty(t, persisted.ErrorCode)
+	assert.Empty(t, persisted.ErrorMessage)
+	assert.Empty(t, persisted.DebugSnapshotPath)
+	assert.EqualValues(t, 150, persisted.UpdatedTime)
+}
+
 func TestRecordLdxpWorkerResultRejectsMissingOrderNo(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{

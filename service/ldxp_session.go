@@ -220,6 +220,9 @@ func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
 		return result.Error
 	}
 	if result.RowsAffected != 1 {
+		if isLdxpSessionAlreadyCanceledByWorker(sessionID, workerID) {
+			return nil
+		}
 		return gorm.ErrRecordNotFound
 	}
 	return nil
@@ -301,9 +304,20 @@ func RecordLdxpWorkerError(sessionID string, workerID string, code string, messa
 		return result.Error
 	}
 	if result.RowsAffected != 1 {
+		if isLdxpSessionAlreadyCanceledByWorker(sessionID, workerID) {
+			return nil
+		}
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+func isLdxpSessionAlreadyCanceledByWorker(sessionID string, workerID string) bool {
+	var count int64
+	err := model.DB.Model(&model.LdxpTopupSession{}).
+		Where("session_id = ? AND worker_id = ? AND status = ?", sessionID, workerID, model.LdxpStatusCanceled).
+		Count(&count).Error
+	return err == nil && count > 0
 }
 
 func validateLdxpStringMax(field string, value string, max int) error {
