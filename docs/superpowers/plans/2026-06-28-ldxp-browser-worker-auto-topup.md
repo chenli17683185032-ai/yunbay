@@ -2260,3 +2260,162 @@ Known execution notes:
 - 真实支付 POC 只能用测试商品和低价值卡密，不能在所有正式金额仍指向测试商品时开放生产自动入账。
 - Worker selector 以运行时页面为准；如果联动小铺页面改版，Task 16 要通过 fixture 增补把修复固化。
 - Worker 邮箱轮询读取的是 QQ IMAP，不改变既有 SMTP 发信配置；`support@yunbay.xyz` 通过 Cloudflare 路由到 QQ 邮箱即可满足核验链路。
+
+---
+
+## 23. Execution Status Update / 执行状态更新（2026-06-29 09:20 CST）
+
+> 本节是执行过程中的滚动状态记录，用于反映真实实施与灰测过程中产生的补充工作。原计划中的详细 checkbox 保持作为施工步骤参考；本节作为当前事实源，用于判断“做到哪一步、还剩什么”。
+
+### 23.1 当前总体进度
+
+- **主线开发状态：约 85% 完成。** 后端模型/状态机/API、Worker、前端钱包入口与支付弹窗、生产灰测配置均已落地。
+- **当前卡点：真实灰测闭环还未用“修复后的新订单”完成最终确认。** 最新一次失败 `LD260629IK87P7` 已定位为 Worker 在链动小铺 SPA 结果页白屏/未渲染时过早读取文本导致；修复已部署，需用户重新发起一笔新订单验证。
+- **上线门禁仍未完成：** runbook 文件未落地、全量测试/敏感信息扫描/PR 准备未完成，生产仍应保持 `LDXP_ALLOWED_USERNAMES=jiance001` 灰测范围，不应全量开放。
+- **生产当前灰测策略：** 只允许账号 `jiance001`；`LDXP_REQUIRE_MAIL_MATCH=false`，后台识别支付成功后直接走网站充值入账；邮件链路保留为后续审计，不阻塞到账。
+
+### 23.2 原计划 Task 完成状态
+
+| Task | 原计划内容 | 当前状态 | 备注 |
+|---|---|---:|---|
+| Task 0 | 前置核验、隔离分支、凭据边界 | ✅ 已完成 | 使用隔离 worktree `/Users/ethan/Documents/yunbay/.worktrees/ldxp-browser-worker-auto-topup`；未输出 secret 明文。 |
+| Task 1 | paid_topup 卡密兑换前置能力 | ✅ 已完成 | 已具备 `paid_topup` 入账/VIP 升级相关能力；后续灰测追加了“不走卡密、直接充值入账”的替代路径。 |
+| Task 2 | LDXP 数据模型与迁移 | ✅ 已完成 | `LdxpTopupSession`、`LdxpMailEvent` 及迁移、测试已实现。 |
+| Task 3 | LDXP 配置解析与脱敏 helper | ✅ 已完成 | 追加了 `LDXP_ALLOWED_USERNAMES`、`LDXP_REQUIRE_MAIL_MATCH` 等灰测/直接入账配置。 |
+| Task 4 | 后端 session 状态机服务 | ✅ 已完成 | 追加修复：取消订单后 Worker 迟到回传 QR/error 时，同 worker 的迟到回传改为 no-op，避免把已取消订单写成失败。 |
+| Task 5 | 邮件解析与邮件事件落库 | ✅ 已完成 / 生产暂不阻塞 | IMAP/邮件事件能力保留；生产灰测按用户要求不等待邮件匹配，邮件仅用于后续审计。 |
+| Task 6 | 核验与入账幂等服务 | ✅ 已完成并变更路径 | 原计划是“Worker + 邮件 + 卡密兑换”；灰测中追加实现 `LDXP_REQUIRE_MAIL_MATCH=false` 时的 Worker paid fields 校验 + `top_ups` 直接成功充值 + VIP 升级 + 幂等防重。 |
+| Task 7 | 后端 HTTP API 与路由 | ✅ 已完成 | 用户 API、Worker API、Admin retry/list 等已实现；生产已用于灰测。 |
+| Task 8 | Worker 服务脚手架与后端客户端 | ✅ 已完成 | Worker claim、QR/result/error/mail callback 已实现。 |
+| Task 9 | Worker Playwright 商品页、二维码、结果页流程 | ✅ 已完成，仍需性能优化 | 已能生成二维码；追加了手动跳转 race、无卡密 paid result、结果页 paid marker 等待、结果页无订单号 fallback。二维码仍约 20+ 秒，已追加阶段 timing 日志等待下一笔定位。 |
+| Task 10 | Worker IMAP 邮件轮询 | ✅ 已实现 / 生产暂禁用 | 生产当前 `LDXP_REQUIRE_MAIL_MATCH=false`，IMAP 不作为入账前置。 |
+| Task 11 | Worker 主循环、并发控制、Dockerfile | ✅ 已完成 | 生产部署 `LDXP_WORKER_CONCURRENCY=1`、`LDXP_RELEASE_SLOT_AFTER_QR=false`；追加阶段耗时 diagnostics 日志。 |
+| Task 12 | 前端 API、hook 与纯函数测试 | ✅ 已完成 | 钱包页可创建、轮询、取消 LDXP session。 |
+| Task 13 | 前端固定金额卡片与支付弹窗 | ✅ 已完成 | 曾因入口/二维码展示问题做过联调修正；当前生产钱包页已可打开支付宝自动充值弹窗。 |
+| Task 14 | 前端 i18n 补齐 | ✅ 基本完成 | 仍需最终跑一次前端全量 build/i18n 检查作为上线门禁。 |
+| Task 15 | 本地端到端联调，不真实支付 | 🟡 部分完成 | 本地容器/前端曾启动供自测；后续用户要求进入生产灰测，本地 mock/E2E 未作为最终门禁收尾。 |
+| Task 16 | 真实测试商品 POC | 🟡 进行中 | 生产灰测已开始并发现/修复问题；还缺“修复后新订单支付成功并直接到账”的确认。 |
+| Task 17 | 部署配置和 runbook | 🟡 部分完成 | 生产配置/部署已做；正式 runbook 文件 `docs/ldxp-browser-worker-auto-topup-runbook.md` 尚未创建。 |
+| Task 18 | 全量验证、PR 准备与上线门禁 | ⏳ 未完成 | 需跑后端/前端/Worker 全量测试、敏感信息扫描、diff review、PR 模板准备。 |
+
+### 23.3 计划外补充工作清单
+
+以下事项不在最初计划的主路径中，是根据真实灰测反馈和用户新的产品要求追加完成或追加中的工作：
+
+1. **入账路径从“卡密兑换”扩展为“网站直接充值入账”。**
+   - 背景：用户要求“别走卡密入账，直接走网站的充值入账吧，不填卡密”。
+   - 结果：新增 `LDXP_REQUIRE_MAIL_MATCH=false` 模式；Worker 识别支付成功后，后端直接创建成功 `top_ups` 记录并给用户加 quota。
+   - 关键防护：仍校验 worker order no、金额、paid 状态文本、重复订单；不是无条件入账。
+
+2. **邮件核验从“入账前置条件”降级为“后续审计材料”。**
+   - 背景：用户要求“后台识别到支付成功，就直接充值到账，邮件核对用于后面的订单审计”。
+   - 结果：生产灰测关闭邮件阻塞：`LDXP_REQUIRE_MAIL_MATCH=false`。
+   - 保留：邮件解析/落库/匹配能力仍在，后续可用于审计或重新打开强校验模式。
+
+3. **生产灰测 allowlist。**
+   - 背景：用户要求“不全面上线，只用我的 `jiance001` 这个账号进行灰测”。
+   - 结果：生产配置 `LDXP_ALLOWED_USERNAMES=jiance001`，前端入口只对该账号开放。
+
+4. **直接充值也计入 VIP 升级阈值。**
+   - 背景：充值应等价网站充值，而不是普通赠送 quota。
+   - 结果：直接 LDXP topup 成功后会走 `MaybeUpgradeUserToVIPTx`，达到阈值时刷新 VIP 用户组缓存。
+
+5. **Worker 支持“支付成功但无卡密”的结果页。**
+   - 背景：直接网站充值模式不再依赖卡密。
+   - 结果：新增 `extractOptionalCardKey()`，无卡密不再导致 Worker 失败。
+
+6. **修复 `LDXP_RELEASE_SLOT_AFTER_QR` 生产环境偏差。**
+   - 发现：实际 worker env 一度为 `LDXP_RELEASE_SLOT_AFTER_QR=true`，导致出二维码后不继续等支付结果。
+   - 结果：生产已强制为 `false`，Worker 会继续等待支付完成。
+
+7. **取消订单后的 Worker 迟到回传 no-op。**
+   - 发现：用户取消/前端超时后，Worker 仍可能迟到回传 QR 或 error，旧逻辑会把已取消订单写成错误状态。
+   - 结果：`RecordLdxpQr` / `RecordLdxpWorkerError` 对“同 worker + 已取消 session”的迟到回传返回 nil，不污染最终状态。
+
+8. **联动小铺“立即跳转”页面优化。**
+   - 发现：购买后可能先出现“如页面未自动跳转支付页，请点击下方按钮跳转”。
+   - 结果：Worker 不再固定等待 popup；改为 popup、当前页 cashier ready、手动跳转三路 race。
+
+9. **支付结果页 SPA 白屏/未渲染防护。**
+   - 发现：订单 `LD260629IK87P7` 支付后失败，生产快照标题为“订单详情 - 链动小铺”但截图白屏；Worker 过早从空白结果页提取订单号导致 `worker_failed`。
+   - 结果：`waitForPaidResult` 现在不仅等 `/order/result/` URL，还要等 `已付款/支付成功` 等 paid marker；结果页缺订单号时复用收银台阶段已拿到的 worker order no。
+
+10. **二维码慢的阶段耗时 diagnostics。**
+    - 现状：二维码仍约 20+ 秒，盲目优化无效。
+    - 结果：生产 Worker 已追加 timings 日志，下一笔订单会记录 `browser_launch`、`product_goto`、`click_purchase_to_cashier`、`wait_cashier_ready`、`extract_qr`、`post_qr_callback` 等阶段耗时，用于定位瓶颈。
+
+11. **生产直接热修与备份流程。**
+    - 已做备份目录包括：
+      - `/opt/new-api/backups/ldxp-result-fallback-20260629091147`
+      - `/opt/new-api/backups/ldxp-prod-index-timings-20260629091400`
+    - 注意：生产 `workers/ldxp-browser-worker/src/index.ts` 做过最小 timing 补丁；不要直接用本地含 mock-mode 的 `index.ts` 覆盖生产，除非同步其所有依赖并重新 review。
+
+### 23.4 最近一次故障与修复状态
+
+- 故障订单：`LD260629IK87P7`
+- 用户看到：`Worker failed, please contact support`
+- DB/日志结论：QR 已回传，失败发生在支付后结果页读取阶段。
+- 生产快照结论：链动小铺订单详情 SPA 结果页白屏/未渲染，导致 Worker 提取订单号失败。
+- 已修复：
+  - paid result 必须等待 paid marker；
+  - 结果页无订单号时 fallback 到收银台订单号；
+  - 空白结果页不会误判成功；
+  - 对应 Worker 测试已通过。
+- 待验证：用户重新发起一笔新订单，确认支付后自动直接到账。
+
+### 23.5 已执行过的关键验证
+
+- Worker 本地验证：
+
+```bash
+cd /Users/ethan/Documents/yunbay/.worktrees/ldxp-browser-worker-auto-topup/workers/ldxp-browser-worker
+npm run check
+```
+
+最近结果：
+
+```text
+# tests 54
+# pass 54
+# fail 0
+```
+
+- 后端局部验证已覆盖：
+  - `service` LDXP session late callback no-op；
+  - `service/controller` LDXP 相关测试；
+  - direct topup / VIP upgrade 相关测试。
+
+- 生产部署验证：
+  - `yunbay-new-api` healthy；
+  - `yunbay-ldxp-browser-worker` up；
+  - worker dist 中已确认包含 `buildPaidResultFromText`、`waitForPaidMarker`、`extractOrderNoOrFallback`、`timings`。
+
+### 23.6 下一步任务队列
+
+1. **等待/执行一笔新的生产灰测订单。**
+   - 用户使用 `jiance001` 在 `https://yunbay.xyz/wallet` 新建订单并支付。
+   - 验证目标：支付完成后无需邮件，订单直接变 `success`，quota 到账，必要时 VIP 升级生效。
+
+2. **读取新订单 timing 日志，定位二维码 20+ 秒原因。**
+   - 若瓶颈在浏览器冷启动：考虑持久 browser/context 或预热。
+   - 若瓶颈在商品页/收银台加载：考虑更精确 selector、提前点击跳转、减少等待条件。
+   - 若瓶颈在后端轮询：调整前端轮询间隔或状态推送策略。
+
+3. **补齐正式 runbook。**
+   - 创建 `/Users/ethan/Documents/yunbay/.worktrees/ldxp-browser-worker-auto-topup/docs/ldxp-browser-worker-auto-topup-runbook.md`。
+   - 记录灰测/回滚/生产 secret 名称/日志排查步骤，不写 secret 明文。
+
+4. **做全量上线门禁。**
+   - 后端：`go test ./model ./service ./controller ./router -count=1`，必要时跑更大范围。
+   - Worker：`npm run check`。
+   - 前端：`bun run build`、i18n sync/check。
+   - 安全：敏感信息扫描、`git diff --check`、diff review。
+
+5. **决定是否保持 direct topup 为正式路径。**
+   - 如果正式采用：更新 spec/runbook，把“邮件 + 卡密兑换”从入账前置改为审计/可选强校验。
+   - 如果恢复强校验：重新启用 `LDXP_REQUIRE_MAIL_MATCH=true` 并完成 IMAP 生产验证。
+
+6. **PR/提交整理。**
+   - 当前 worktree 存在多类混合改动，不能整体无脑提交。
+   - 需要按后端、Worker、前端、docs 分组 review/stage。
+   - 创建 PR 时遵守 `.github/PULL_REQUEST_TEMPLATE.md` 和 AGENTS.md 的 AI-assisted 说明要求。
