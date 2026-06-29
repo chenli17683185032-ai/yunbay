@@ -24,7 +24,9 @@ function config(overrides: Partial<WorkerConfig> = {}): WorkerConfig {
     qrTimeoutMs: 60000,
     paymentTimeoutMs: 900000,
     resultTimeoutMs: 120000,
+    releaseSessionSlotAfterQr: false,
     debugSnapshotDir: '/app/snapshots',
+    mockMode: false,
     ...overrides,
   }
 }
@@ -48,8 +50,12 @@ test('runClaimLoopOnce tracks active sessions and claims freed slots on the next
     },
     postQr: async () => undefined,
     postResult: async () => undefined,
+    postMailEvent: async () => undefined,
     postError: async () => undefined,
     runMailPoller: async () => undefined,
+    runMockFlow: () => {
+      throw new Error('runMockFlow should not be called')
+    },
     logger: createNoopLogger(),
   }
 
@@ -84,6 +90,7 @@ test('runClaimLoopOnce does not start a session that resolves after shutdown', a
     },
     postQr: async () => undefined,
     postResult: async () => undefined,
+    postMailEvent: async () => undefined,
     postError: async () => undefined,
     runMailPoller: async () => undefined,
     logger: createNoopLogger(),
@@ -160,6 +167,9 @@ test('processClaimedSession posts qr and result callbacks', async () => {
       events.push(`result:${sessionId}`)
       assert.equal(payload.worker_card_key, 'abcd1234efgh5678')
     },
+    postMailEvent: async () => {
+      throw new Error('postMailEvent should not be called outside mock mode')
+    },
     postError: async () => {
       throw new Error('postError should not be called for success')
     },
@@ -180,6 +190,104 @@ test('processClaimedSession posts qr and result callbacks', async () => {
   await runtime.shutdown()
 })
 
+test('processClaimedSession releases the worker slot after posting qr', async () => {
+  const events: string[] = []
+  const runtime = createWorkerRuntime(config({ releaseSessionSlotAfterQr: true }), {
+    claimSession: async () => null,
+    runBrowserFlow: async (_input, callbacks) => {
+      const qr: BrowserQrResult = {
+        worker_order_no: 'order-qr-only',
+        worker_amount: 10,
+        worker_product_name: 'Product',
+        qr_code: 'data:image/png;base64,BBBB',
+        qr_page_url: 'https://example.test/qr',
+      }
+      await callbacks.onQr(qr)
+      return { kind: 'qr_posted', worker_order_no: qr.worker_order_no }
+    },
+    postQr: async (_config, sessionId, payload) => {
+      events.push(`qr:${sessionId}`)
+      assert.equal(sessionId, 'sess-qr-only')
+      assert.equal(payload.worker_order_no, 'order-qr-only')
+    },
+    postResult: async () => {
+      throw new Error('postResult should not be called before the user pays')
+    },
+    postMailEvent: async () => undefined,
+    postError: async () => {
+      throw new Error('postError should not be called after qr was posted')
+    },
+    runMailPoller: async () => undefined,
+    logger: createNoopLogger(),
+  })
+
+  const processing = processClaimedSession(runtime, claimedSession('sess-qr-only'))
+
+  await processing
+  assert.deepEqual(events, ['qr:sess-qr-only'])
+  await runtime.shutdown()
+})
+
+test('processClaimedSession posts mock qr, result, and mail without running browser flow', async () => {
+  const events: string[] = []
+  let browserFlowCalls = 0
+  const runtime = createWorkerRuntime(config({ mockMode: true, mockCardKey: 'mock-card-key-1234' }), {
+    claimSession: async () => null,
+    runBrowserFlow: async () => {
+      browserFlowCalls += 1
+      return paidResult('unexpected')
+    },
+    runMockFlow: () => ({
+      qr: {
+        worker_order_no: 'LDMOCKSESS1',
+        worker_amount: 0.1,
+        worker_product_name: 'Mock Product',
+        qr_code: 'data:image/png;base64,AAAA',
+        qr_page_url: 'https://example.test/qr',
+      },
+      result: {
+        worker_order_no: 'LDMOCKSESS1',
+        worker_amount: 0.1,
+        worker_product_name: 'Mock Product',
+        worker_card_key: 'mock-card-key-1234',
+        worker_status_text: 'mock paid',
+        worker_success_url: 'https://example.test/success',
+      },
+      mailEvent: {
+        order_no: 'LDMOCKSESS1',
+        amount: 0.1,
+        product_name: 'Mock Product',
+        card_key: 'mock-card-key-1234',
+        raw_hash: 'hash',
+      },
+    }),
+    postQr: async (_config, sessionId, payload) => {
+      events.push(`qr:${sessionId}:${payload.worker_order_no}`)
+    },
+    postResult: async (_config, sessionId, payload) => {
+      events.push(`result:${sessionId}:${payload.worker_order_no}:${payload.worker_card_key}`)
+    },
+    postMailEvent: async (_config, payload) => {
+      events.push(`mail:${payload.order_no}:${payload.card_key}`)
+    },
+    postError: async () => {
+      throw new Error('postError should not be called for mock success')
+    },
+    runMailPoller: async () => undefined,
+    logger: createNoopLogger(),
+  })
+
+  await processClaimedSession(runtime, claimedSession('sess-1'))
+
+  assert.equal(browserFlowCalls, 0)
+  assert.deepEqual(events, [
+    'qr:sess-1:LDMOCKSESS1',
+    'result:sess-1:LDMOCKSESS1:mock-card-key-1234',
+    'mail:LDMOCKSESS1:mock-card-key-1234',
+  ])
+  await runtime.shutdown()
+})
+
 test('processClaimedSession posts sanitized error payload on failure', async () => {
   const payloads: unknown[] = []
   const runtime = createWorkerRuntime(config(), {
@@ -189,6 +297,7 @@ test('processClaimedSession posts sanitized error payload on failure', async () 
     },
     postQr: async () => undefined,
     postResult: async () => undefined,
+    postMailEvent: async () => undefined,
     postError: async (_config, _sessionId, payload) => {
       payloads.push(payload)
     },
@@ -245,6 +354,7 @@ test('runClaimLoop starts mail poller and exits when runtime is shut down', asyn
     runBrowserFlow: async () => paidResult('unused'),
     postQr: async () => undefined,
     postResult: async () => undefined,
+    postMailEvent: async () => undefined,
     postError: async () => undefined,
     runMailPoller: async (_config, signal) => {
       mailPollerStarts += 1
@@ -267,6 +377,7 @@ test('startMailPoller restarts after unexpected poller exit and does not start d
     runBrowserFlow: async () => paidResult('unused'),
     postQr: async () => undefined,
     postResult: async () => undefined,
+    postMailEvent: async () => undefined,
     postError: async () => undefined,
     runMailPoller: async (_config, signal) => {
       starts += 1
@@ -304,6 +415,7 @@ test('processClaimedSession does not hang shutdown while browser flow waits', as
     }) as unknown as typeof import('../src/browser-flow.js').runBrowserFlow,
     postQr: async () => undefined,
     postResult: async () => undefined,
+    postMailEvent: async () => undefined,
     postError: async () => {
       throw new Error('postError should not be called during shutdown abort')
     },

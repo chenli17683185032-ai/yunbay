@@ -1,8 +1,7 @@
-FROM mcr.microsoft.com/playwright:latest
+FROM mcr.microsoft.com/playwright:v1.61.1-jammy
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
-# Playwright latest currently does not support corepack prepare bun@latest;
-# use the Task 11 npm fallback with package-lock for container builds.
+# Pin the image to package-lock playwright version so bundled browsers match npm ci.
 RUN npm ci
 COPY src ./src
 COPY tests ./tests

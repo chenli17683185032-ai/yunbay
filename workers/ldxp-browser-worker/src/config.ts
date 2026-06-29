@@ -11,11 +11,14 @@ export interface WorkerConfig {
   qrTimeoutMs: number
   paymentTimeoutMs: number
   resultTimeoutMs: number
+  releaseSessionSlotAfterQr: boolean
   debugSnapshotDir: string
   imapHost?: string
   imapPort?: number
   imapUser?: string
   imapPassword?: string
+  mockMode: boolean
+  mockCardKey?: string
 }
 
 type Env = Record<string, string | undefined>
@@ -29,12 +32,18 @@ const defaultConfig = {
   qrTimeoutMs: 60000,
   paymentTimeoutMs: 15 * 60 * 1000,
   resultTimeoutMs: 120000,
+  releaseSessionSlotAfterQr: false,
   debugSnapshotDir: '/app/snapshots',
 } as const
 
 export function loadConfigFromEnv(env: Env = process.env): WorkerConfig {
   const backendBaseUrl = requireNonEmpty(env.BACKEND_BASE_URL, 'BACKEND_BASE_URL').replace(/\/+$/, '')
   const workerToken = loadWorkerToken(env)
+  const mockMode = parseOptionalBoolean(env.LDXP_WORKER_MOCK_MODE, 'LDXP_WORKER_MOCK_MODE', false)
+  const mockCardKey = optionalTrimmed(env.LDXP_WORKER_MOCK_CARD_KEY)
+  if (mockMode && !mockCardKey) {
+    throw new Error('Missing required environment variable LDXP_WORKER_MOCK_CARD_KEY when LDXP_WORKER_MOCK_MODE is true')
+  }
   const pollIntervalMs = parseOptionalPositiveInteger(
     firstDefined(env.LDXP_WORKER_POLL_INTERVAL_MS, env.LDXP_POLL_INTERVAL_MS),
     'LDXP_WORKER_POLL_INTERVAL_MS',
@@ -72,6 +81,11 @@ export function loadConfigFromEnv(env: Env = process.env): WorkerConfig {
       'LDXP_RESULT_TIMEOUT_MS',
       defaultConfig.resultTimeoutMs,
     ),
+    releaseSessionSlotAfterQr: parseOptionalBoolean(
+      firstDefined(env.LDXP_RELEASE_SLOT_AFTER_QR, env.LDXP_WORKER_RELEASE_SLOT_AFTER_QR),
+      'LDXP_RELEASE_SLOT_AFTER_QR',
+      defaultConfig.releaseSessionSlotAfterQr,
+    ),
     debugSnapshotDir: valueOrDefault(firstDefined(env.LDXP_BROWSER_SNAPSHOT_DIR, env.LDXP_DEBUG_SNAPSHOT_DIR), defaultConfig.debugSnapshotDir),
     imapHost: optionalTrimmed(firstDefined(env.LDXP_IMAP_HOST, env.QQ_IMAP_HOST)),
     imapPort: parseOptionalPositiveInteger(firstDefined(env.LDXP_IMAP_PORT, env.QQ_IMAP_PORT), 'LDXP_IMAP_PORT'),
@@ -81,6 +95,8 @@ export function loadConfigFromEnv(env: Env = process.env): WorkerConfig {
       firstDefined(env.LDXP_IMAP_PASSWORD_FILE, env.QQ_IMAP_PASSWORD_FILE),
       'LDXP_IMAP_PASSWORD_FILE or QQ_IMAP_PASSWORD_FILE',
     ),
+    mockMode,
+    mockCardKey,
   }
 }
 
@@ -149,4 +165,26 @@ function parseOptionalPositiveInteger(value: string | undefined, variableName: s
     throw new Error(`${variableName} must be a positive integer`)
   }
   return parsed
+}
+
+function parseOptionalBoolean(value: string | undefined, variableName: string, fallback: boolean): boolean {
+  const trimmed = optionalTrimmed(value)
+  if (!trimmed) {
+    return fallback
+  }
+
+  switch (trimmed.toLowerCase()) {
+    case 'true':
+    case '1':
+    case 'yes':
+    case 'on':
+      return true
+    case 'false':
+    case '0':
+    case 'no':
+    case 'off':
+      return false
+    default:
+      throw new Error(`${variableName} must be a boolean`)
+  }
 }

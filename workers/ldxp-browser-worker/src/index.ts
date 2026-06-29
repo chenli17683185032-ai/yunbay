@@ -3,9 +3,18 @@ import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import pino, { type Logger } from 'pino'
 import { loadConfigFromEnv, type WorkerConfig } from './config.js'
-import { claimSession, postError, postQr, postResult, type ClaimedSession, type WorkerErrorPayload } from './backend.js'
-import { runBrowserFlow, type BrowserPaidResult, type BrowserQrResult } from './browser-flow.js'
+import {
+  claimSession,
+  postError,
+  postMailEvent,
+  postQr,
+  postResult,
+  type ClaimedSession,
+  type WorkerErrorPayload,
+} from './backend.js'
+import { runBrowserFlow, type BrowserFlowDiagnostics, type BrowserFlowResult, type BrowserPaidResult, type BrowserQrResult } from './browser-flow.js'
 import { runMailPoller } from './mail-poller.js'
+import { buildMockFlowArtifacts } from './mock-flow.js'
 import { redactValue } from './redact.js'
 
 export interface WorkerRuntimeDependencies {
@@ -13,8 +22,10 @@ export interface WorkerRuntimeDependencies {
   runBrowserFlow: typeof runBrowserFlow
   postQr: typeof postQr
   postResult: typeof postResult
+  postMailEvent: typeof postMailEvent
   postError: typeof postError
   runMailPoller: typeof runMailPoller
+  runMockFlow: typeof buildMockFlowArtifacts
   logger: LoggerLike
 }
 
@@ -42,8 +53,10 @@ const defaultDependencies: Omit<WorkerRuntimeDependencies, 'logger'> = {
   runBrowserFlow,
   postQr,
   postResult,
+  postMailEvent,
   postError,
   runMailPoller,
+  runMockFlow: buildMockFlowArtifacts,
 }
 
 export function createWorkerRuntime(
@@ -61,8 +74,10 @@ export function createWorkerRuntime(
     runBrowserFlow: dependencies.runBrowserFlow ?? defaultDependencies.runBrowserFlow,
     postQr: dependencies.postQr ?? defaultDependencies.postQr,
     postResult: dependencies.postResult ?? defaultDependencies.postResult,
+    postMailEvent: dependencies.postMailEvent ?? defaultDependencies.postMailEvent,
     postError: dependencies.postError ?? defaultDependencies.postError,
     runMailPoller: dependencies.runMailPoller ?? defaultDependencies.runMailPoller,
+    runMockFlow: dependencies.runMockFlow ?? defaultDependencies.runMockFlow,
     logger,
   }
 
@@ -99,6 +114,10 @@ export function createWorkerRuntime(
         return
       }
       mailPollerStarted = true
+      if (config.mockMode) {
+        logger.info({ mockMode: true }, 'mail poller disabled in mock mode')
+        return
+      }
       if (!hasMailConfig(config)) {
         logger.warn({ imapConfigured: false }, 'mail poller disabled because IMAP config is incomplete')
         return
@@ -176,8 +195,14 @@ export async function processClaimedSession(runtime: WorkerRuntime, session: Cla
   })
 
   sessionLogger.info({ sessionId: redactValue(session.session_id) }, 'processing claimed session')
+  const diagnostics: BrowserFlowDiagnostics = { timings: [] }
 
   try {
+    if (runtime.config.mockMode) {
+      await processMockClaimedSession(runtime, session, sessionLogger)
+      return
+    }
+
     const result = await runtime.dependencies.runBrowserFlow(
       {
         sessionId: session.session_id,
@@ -194,10 +219,16 @@ export async function processClaimedSession(runtime: WorkerRuntime, session: Cla
       },
       runtime.config,
       runtime.signal,
+      diagnostics,
     )
 
+    if (isQrPostedResult(result)) {
+      sessionLogger.info({ workerOrderNo: redactValue(result.worker_order_no), timings: diagnostics.timings }, 'qr posted; session slot released')
+      return
+    }
+
     await runtime.dependencies.postResult(runtime.config, session.session_id, result)
-    sessionLogger.info({ workerOrderNo: redactValue(result.worker_order_no) }, 'result posted')
+    sessionLogger.info({ workerOrderNo: redactValue(result.worker_order_no), timings: diagnostics.timings }, 'result posted')
   } catch (error) {
     if (runtime.signal.aborted || isAbortError(error)) {
       sessionLogger.warn({ err: sanitizeError(error) }, 'session processing aborted during shutdown')
@@ -214,8 +245,28 @@ export async function processClaimedSession(runtime: WorkerRuntime, session: Cla
       )
       return
     }
-    sessionLogger.error({ err: sanitizeError(error), errorCode: payload.error_code }, 'session processing failed')
+    sessionLogger.error({ err: sanitizeError(error), errorCode: payload.error_code, timings: diagnostics.timings }, 'session processing failed')
   }
+}
+
+function isQrPostedResult(result: BrowserFlowResult): result is Extract<BrowserFlowResult, { kind: 'qr_posted' }> {
+  return 'kind' in result && result.kind === 'qr_posted'
+}
+
+async function processMockClaimedSession(
+  runtime: WorkerRuntime,
+  session: ClaimedSession,
+  sessionLogger: LoggerLike,
+): Promise<void> {
+  const artifacts = runtime.dependencies.runMockFlow(session, runtime.config)
+  await runtime.dependencies.postQr(runtime.config, session.session_id, artifacts.qr)
+  sessionLogger.info({ workerOrderNo: redactValue(artifacts.qr.worker_order_no), mockMode: true }, 'mock qr posted')
+
+  await runtime.dependencies.postResult(runtime.config, session.session_id, artifacts.result)
+  sessionLogger.info({ workerOrderNo: redactValue(artifacts.result.worker_order_no), mockMode: true }, 'mock result posted')
+
+  await runtime.dependencies.postMailEvent(runtime.config, artifacts.mailEvent)
+  sessionLogger.info({ workerOrderNo: redactValue(artifacts.mailEvent.order_no ?? ''), mockMode: true }, 'mock mail event posted')
 }
 
 export function buildErrorPayload(error: unknown, config: WorkerConfig): WorkerErrorPayload {
@@ -272,6 +323,8 @@ function createLogger(config: WorkerConfig): LoggerLike {
         'worker_token',
         'imapPassword',
         'imap_password',
+        'mockCardKey',
+        'mock_card_key',
         'qr_code',
         'card_key',
         'worker_card_key',

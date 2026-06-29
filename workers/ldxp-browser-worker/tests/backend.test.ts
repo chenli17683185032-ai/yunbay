@@ -64,7 +64,9 @@ function config(baseUrl: string): WorkerConfig {
     qrTimeoutMs: 60000,
     paymentTimeoutMs: 900000,
     resultTimeoutMs: 120000,
+    releaseSessionSlotAfterQr: false,
     debugSnapshotDir: '/app/snapshots',
+    mockMode: false,
   }
 }
 

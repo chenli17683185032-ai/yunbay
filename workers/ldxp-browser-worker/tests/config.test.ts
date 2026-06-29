@@ -20,6 +20,57 @@ test('loadConfigFromEnv requires worker token without exposing secret contents',
   )
 })
 
+test('loadConfigFromEnv defaults mock mode to false without requiring a mock card key', () => {
+  const config = loadConfigFromEnv({
+    BACKEND_BASE_URL: 'https://backend.example',
+    LDXP_WORKER_TOKEN: 'token',
+  })
+
+  assert.equal(config.mockMode, false)
+  assert.equal(config.mockCardKey, undefined)
+})
+
+test('loadConfigFromEnv enables mock mode with a trimmed mock card key', () => {
+  const config = loadConfigFromEnv({
+    BACKEND_BASE_URL: 'https://backend.example',
+    LDXP_WORKER_TOKEN: 'token',
+    LDXP_WORKER_MOCK_MODE: '1',
+    LDXP_WORKER_MOCK_CARD_KEY: ' mock-card-key-1234 ',
+  })
+
+  assert.equal(config.mockMode, true)
+  assert.equal(config.mockCardKey, 'mock-card-key-1234')
+})
+
+test('loadConfigFromEnv requires mock card key when mock mode is enabled without exposing secret contents', () => {
+  assert.throws(
+    () =>
+      loadConfigFromEnv({
+        BACKEND_BASE_URL: 'https://backend.example',
+        LDXP_WORKER_TOKEN: 'token',
+        LDXP_WORKER_MOCK_MODE: 'true',
+      }),
+    (error) => {
+      assert.match(String(error), /LDXP_WORKER_MOCK_CARD_KEY/)
+      assert.doesNotMatch(String(error), /mock-card-key-1234/)
+      return true
+    },
+  )
+})
+
+test('loadConfigFromEnv rejects invalid mock mode boolean values', () => {
+  assert.throws(
+    () =>
+      loadConfigFromEnv({
+        BACKEND_BASE_URL: 'https://backend.example',
+        LDXP_WORKER_TOKEN: 'token',
+        LDXP_WORKER_MOCK_MODE: 'maybe',
+        LDXP_WORKER_MOCK_CARD_KEY: 'mock-card-key-1234',
+      }),
+    /LDXP_WORKER_MOCK_MODE/,
+  )
+})
+
 test('loadConfigFromEnv reads token file, trims whitespace, and parses numeric values', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ldxp-worker-config-'))
   const tokenFile = join(dir, 'token')
