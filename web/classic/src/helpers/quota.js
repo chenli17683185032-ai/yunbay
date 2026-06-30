@@ -45,3 +45,20 @@ export const displayAmountToQuota = (amount) => {
   const usd = type === 'USD' ? abs : abs / (rate || 1);
   return sign * Math.round(usd * getQuotaPerUnit());
 };
+
+const LEGACY_CHECKIN_DISPLAY_AMOUNT_MAX = 100;
+
+export const normalizeCheckinQuotaUnits = (value) => {
+  const val = Number(value || 0);
+  if (!Number.isFinite(val)) return 0;
+  if (val > 0 && val <= LEGACY_CHECKIN_DISPLAY_AMOUNT_MAX) {
+    return displayAmountToQuota(val);
+  }
+  return Math.round(val);
+};
+
+export const checkinQuotaUnitsToDisplayAmount = (value) =>
+  quotaToDisplayAmount(normalizeCheckinQuotaUnits(value));
+
+export const checkinDisplayAmountToQuotaUnits = (value) =>
+  displayAmountToQuota(value);

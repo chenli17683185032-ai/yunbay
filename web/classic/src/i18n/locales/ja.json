@@ -3644,6 +3644,9 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "签到最大金额": "チェックイン最大金額",
+    "签到最小金额": "チェックイン最小金額",
+    "输入展示金额，保存时会自动换算为内部额度": "表示金額を入力してください。保存時に自動的に内部クォータ単位へ換算されます"
   }
 }

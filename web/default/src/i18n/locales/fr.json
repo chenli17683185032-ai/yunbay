@@ -4759,6 +4759,9 @@
     "After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.": "Après avoir téléchargé et lancé le programme d’installation, ouvrez Yunbay Codex et collez votre clé API Yunbay dans Quick Start. L’application écrira automatiquement une configuration API personnalisée et se connectera à https://yunbay.xyz/v1. Elle prend aussi en charge la gestion des fournisseurs de modèles, les tests de connectivité, les requêtes de solde et d’utilisation, ainsi que la gestion des sessions Codex.",
     "Download and run the Windows installer.": "Téléchargez et lancez l’installateur Windows.",
     "Open Yunbay Codex and paste your Yunbay API key into Quick Start.": "Ouvrez Yunbay Codex et collez votre clé API Yunbay dans Quick Start.",
-    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "Enregistrez et activez, puis lancez Codex, testez la connectivité des modèles et gérez les sessions historiques."
+    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "Enregistrez et activez, puis lancez Codex, testez la connectivité des modèles et gérez les sessions historiques.",
+    "Enter the display amount; it is saved as quota units automatically.": "Saisissez le montant affiché ; il sera automatiquement enregistré en unités de quota.",
+    "Maximum check-in amount": "Montant maximal de check-in",
+    "Minimum check-in amount": "Montant minimal de check-in"
   }
 }

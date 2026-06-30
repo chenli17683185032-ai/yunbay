@@ -4759,6 +4759,9 @@
     "After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.": "Sau khi tải xuống và chạy bộ cài, hãy mở Yunbay Codex và dán khóa API Yunbay của bạn vào Quick Start. Ứng dụng sẽ tự động ghi cấu hình API tùy chỉnh và kết nối tới https://yunbay.xyz/v1. Ứng dụng cũng hỗ trợ quản lý nhà cung cấp mô hình, kiểm tra kết nối, truy vấn số dư/mức sử dụng và quản lý phiên Codex.",
     "Download and run the Windows installer.": "Tải xuống và chạy bộ cài Windows.",
     "Open Yunbay Codex and paste your Yunbay API key into Quick Start.": "Mở Yunbay Codex và dán khóa API Yunbay của bạn vào Quick Start.",
-    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "Lưu và bật, sau đó khởi động Codex, kiểm tra kết nối mô hình và quản lý các phiên lịch sử."
+    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "Lưu và bật, sau đó khởi động Codex, kiểm tra kết nối mô hình và quản lý các phiên lịch sử.",
+    "Enter the display amount; it is saved as quota units automatically.": "Nhập số tiền hiển thị; khi lưu sẽ tự động chuyển đổi thành đơn vị hạn ngạch nội bộ.",
+    "Maximum check-in amount": "Số tiền điểm danh tối đa",
+    "Minimum check-in amount": "Số tiền điểm danh tối thiểu"
   }
 }

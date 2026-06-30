@@ -3675,6 +3675,9 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "签到最大金额": "Montant maximal de check-in",
+    "签到最小金额": "Montant minimal de check-in",
+    "输入展示金额，保存时会自动换算为内部额度": "Saisissez le montant affiché ; il sera automatiquement enregistré en unités de quota"
   }
 }

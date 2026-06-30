@@ -4209,6 +4209,9 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "签到最大金额": "Số tiền điểm danh tối đa",
+    "签到最小金额": "Số tiền điểm danh tối thiểu",
+    "输入展示金额，保存时会自动换算为内部额度": "Nhập số tiền hiển thị; khi lưu sẽ tự động chuyển đổi thành đơn vị hạn ngạch nội bộ"
   }
 }

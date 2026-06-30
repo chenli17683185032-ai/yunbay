@@ -4759,6 +4759,9 @@
     "After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.": "インストーラーをダウンロードして実行した後、Yunbay Codex を開き、Quick Start に Yunbay API Key を貼り付けます。アプリはカスタム API 設定を自動で書き込み、https://yunbay.xyz/v1 に接続します。さらに、モデルプロバイダー管理、接続テスト、残高・使用量照会、Codex セッション管理にも対応しています。",
     "Download and run the Windows installer.": "Windows インストーラーをダウンロードして実行します。",
     "Open Yunbay Codex and paste your Yunbay API key into Quick Start.": "Yunbay Codex を開き、Quick Start に Yunbay API Key を貼り付けます。",
-    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "保存して有効化したら、Codex を起動し、モデル接続をテストして履歴セッションを管理します。"
+    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "保存して有効化したら、Codex を起動し、モデル接続をテストして履歴セッションを管理します。",
+    "Enter the display amount; it is saved as quota units automatically.": "表示金額を入力してください。保存時に自動的に内部クォータ単位へ換算されます。",
+    "Maximum check-in amount": "チェックイン最大金額",
+    "Minimum check-in amount": "チェックイン最小金額"
   }
 }

@@ -4759,6 +4759,9 @@
     "After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.": "下载并运行安装包后，打开 Yunbay Codex，在快速启动页粘贴你的云贝 API Key，即可自动写入自定 API 配置并连接 https://yunbay.xyz/v1。软件还支持模型供应商管理、连接测试、余额/用量查询和 Codex 会话管理。",
     "Download and run the Windows installer.": "下载并运行 Windows 安装包。",
     "Open Yunbay Codex and paste your Yunbay API key into Quick Start.": "打开 Yunbay Codex，在快速启动页粘贴云贝 API Key。",
-    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "保存并启用后，即可启动 Codex、测试模型连接并管理历史会话。"
+    "Save and enable it, then start Codex, test model connectivity, and manage historical sessions.": "保存并启用后，即可启动 Codex、测试模型连接并管理历史会话。",
+    "Enter the display amount; it is saved as quota units automatically.": "输入展示金额；保存时会自动换算为内部额度。",
+    "Maximum check-in amount": "签到最大金额",
+    "Minimum check-in amount": "签到最小金额"
   }
 }
