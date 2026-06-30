@@ -96,6 +96,9 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
+				selfRoute.POST("/ldxp/topup/session", middleware.CriticalRateLimit(), controller.CreateLdxpTopupSession)
+				selfRoute.GET("/ldxp/topup/session/:session_id", controller.GetLdxpTopupSession)
+				selfRoute.POST("/ldxp/topup/session/:session_id/cancel", controller.CancelLdxpTopupSession)
 				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
 				selfRoute.POST("/amount", controller.RequestAmount)
 				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
@@ -146,6 +149,22 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/2fa/stats", controller.Admin2FAStats)
 				adminRoute.DELETE("/:id/2fa", controller.AdminDisable2FA)
 			}
+		}
+
+		ldxpWorkerRoute := apiRouter.Group("/ldxp/worker")
+		{
+			ldxpWorkerRoute.POST("/sessions/claim", anonymousRequestBodyLimit, controller.WorkerClaimLdxpTopupSession)
+			ldxpWorkerRoute.POST("/sessions/:session_id/qr", anonymousRequestBodyLimit, controller.WorkerRecordLdxpQr)
+			ldxpWorkerRoute.POST("/sessions/:session_id/result", anonymousRequestBodyLimit, controller.WorkerRecordLdxpResult)
+			ldxpWorkerRoute.POST("/sessions/:session_id/error", anonymousRequestBodyLimit, controller.WorkerRecordLdxpError)
+			ldxpWorkerRoute.POST("/mail-events", anonymousRequestBodyLimit, controller.WorkerRecordLdxpMailEvent)
+		}
+
+		ldxpAdminRoute := apiRouter.Group("/ldxp/admin")
+		ldxpAdminRoute.Use(middleware.AdminAuth())
+		{
+			ldxpAdminRoute.GET("/sessions", controller.AdminListLdxpTopupSessions)
+			ldxpAdminRoute.POST("/sessions/:session_id/retry", controller.AdminRetryLdxpTopupVerify)
 		}
 
 		// Subscription billing (plans, purchase, admin management)

@@ -895,3 +895,45 @@ https://yunbay.xyz/wallet       200
 https://yunbay.xyz/quick-start  200
 http://127.0.0.1:3000/api/status 返回 JSON
 ```
+
+## 2026-06-29 LDXP 自动充值二维码等待动画灰测
+
+本节只记录可公开维护事实，不记录服务器登录凭据、Worker token、邮箱授权码、支付密钥或完整私密连接信息。
+
+### 本轮完成内容
+
+- 钱包 LDXP 支付弹窗在 `created` / `worker_claimed` 状态下显示更醒目的弹出式大转圈等待面板。
+- 金额位置保留 30 秒进度动画，给用户明确等待反馈。
+- 新增提示文案：`The payment QR code usually appears in about 20 seconds. Please wait.`，并补齐 `en/zh/fr/ja/ru/vi` 翻译。
+- 本轮只重建并重启 `new-api`，没有修改或重建 LDXP browser worker。
+
+### VIP 自动升级规则确认
+
+VIP 自动升级按成功充值记录中的实际支付金额累计判断：
+
+```text
+sum(top_ups.money where status='success') >= 30.0
+```
+
+不要用 `top_ups.amount` 或 `ldxp_topup_sessions.amount` 判断 VIP 阈值。灰测折扣订单可能出现 `amount=30` 但 `money=0.3` 的情况，此时不应自动升级 VIP。
+
+### 生产灰测验证
+
+2026-06-29 灰测验证结果：
+
+```text
+yunbay-new-api: healthy
+ldxp-browser-worker: running
+new-api image: sha256:6632a1ce50ede30f84c897820678c080f32899c9883e5c81e2d177ea3938a036
+worker image: sha256:d0596df45239b943f45b9de7881b2ddd96d26f62c7386cbeae2475409f62f55c
+served css markers: ldxp-qr-creation-pop / ldxp-qr-creation-pulse / ldxp-qr-creation-spinner
+```
+
+回滚点：
+
+```text
+backup dir: /opt/new-api/backups/ldxp-ui-popup-spinner-20260629164951
+rollback image: yunbay-new-api:pre-ui-popup-spinner-20260629164951
+```
+
+详细排障命令见：`docs/ldxp-browser-worker-auto-topup-runbook.md`。

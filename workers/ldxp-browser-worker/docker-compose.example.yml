@@ -1,0 +1,26 @@
+services:
+  ldxp-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      BACKEND_BASE_URL: http://host.docker.internal:3000
+      LDXP_WORKER_ID: ldxp-worker-local
+      LDXP_WORKER_TOKEN_FILE: /run/secrets/ldxp_worker_token
+      QQ_IMAP_PASSWORD_FILE: /run/secrets/qq_imap_password
+      QQ_IMAP_HOST: imap.qq.com
+      QQ_IMAP_PORT: "993"
+      QQ_IMAP_USER: 10256345@qq.com
+      LDXP_CONTACT_EMAIL: support@yunbay.xyz
+      LDXP_BROWSER_SNAPSHOT_DIR: /app/snapshots
+    secrets:
+      - ldxp_worker_token
+      - qq_imap_password
+    volumes:
+      - ./snapshots:/app/snapshots
+
+secrets:
+  ldxp_worker_token:
+    file: ./secrets/ldxp_worker_token
+  qq_imap_password:
+    file: ./secrets/qq_imap_password

@@ -95,12 +95,20 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	enableLdxpTopup := false
+	ldxpAmountOptions := []int64{}
+	if ldxpCfg, err := service.LoadLdxpConfig(); err == nil {
+		enableLdxpTopup = ldxpCfg.Enabled && service.IsLdxpUserIDAllowed(ldxpCfg, c.GetInt("id"))
+		ldxpAmountOptions = service.GetLdxpAmountOptions(ldxpCfg)
+	}
+
 	data := gin.H{
 		"enable_online_topup":              isEpayTopUpEnabled(),
 		"enable_stripe_topup":              isStripeTopUpEnabled(),
 		"enable_creem_topup":               isCreemTopUpEnabled(),
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
+		"enable_ldxp_topup":                enableLdxpTopup,
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
@@ -117,6 +125,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"waffo_min_topup":         setting.WaffoMinTopUp,
 		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
 		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
+		"ldxp_amount_options":     ldxpAmountOptions,
 		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
 		"topup_link":              common.TopUpLink,
 	}
