@@ -283,6 +283,7 @@ onMounted(async () => {
       hasRegisterData.value = false
     }
   } else if (activePendingSession) {
+    affCode.value = loadAffiliateReferralCode()
     pendingAuthToken.value = activePendingSession.token
     pendingAuthTokenField.value = activePendingSession.token_field
     pendingProvider.value = activePendingSession.provider
