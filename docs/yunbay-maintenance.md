@@ -729,3 +729,78 @@ docker restart yunbay-new-api
 然后重新走密码重置或邮箱验证码接口验证发信。
 
 详细公开说明见：`docs/email-delivery.md`。
+
+## 2026-06-30 全量上线与必读公告生产完成记录
+
+本节记录 2026-06-30 云贝全量上线与必读公告弹窗的生产完成事实。此处只记录可公开复核的信息，不记录 SSH 私钥、后台密码、cookie、session、access token、worker token、支付密钥、完整卡密、完整二维码或完整 session id。
+
+### 代码基线
+
+全量上线基线分支：
+
+```text
+codex/full-rollout-no-overlap-clean
+```
+
+关键生产基线提交：
+
+```text
+83479b48 fix(router): register user group tags route
+13925967 fix: restore quick start codex launcher support
+59756734 feat: require explicit announcement read confirmation
+434230f3 feat: prepare claude pricing gray rollout presets
+a8a85812 feat: add affiliate rewards and withdrawal rollout
+44b9d0cd feat: roll out ldxp auto topup without worker flow regression
+d8f29dcd feat: add paid redemption rollout baseline
+41360edd feat: separate user tags from model groups
+27d6bd0c fix: preserve rollout baseline fixes
+5eeb1035 docs: add full rollout no-overlap plan
+23cefff9 fix: normalize check-in reward amounts
+8fb008fb fix: preserve legacy usage log filters
+```
+
+### 公开侧生产复核
+
+```text
+https://yunbay.xyz/            HTTP 200
+https://yunbay.xyz/api/status  HTTP 200
+https://yunbay.xyz/api/notice  HTTP 200
+生产入口 JS: /static/js/index.599262f2f0.js
+```
+
+`/api/status` 当前公告形态：
+
+```text
+success=true
+announcements_enabled=true
+announcements_type=list
+announcements_count=6
+announcement_keys=content,extra,id,publishDate,type
+```
+
+生产入口 JS 已包含必读公告相关标记：
+
+```text
+I have read
+我已阅读
+notification-storage
+markNoticeRead
+markAnnouncementsRead
+```
+
+### 完成范围
+
+本次完成口径：
+
+- 全量上线基线已完成生产同步；
+- 必读公告弹窗已进入生产 bundle，保持必须点击“我已阅读”才清除未读的语义；
+- 用户标签与模型分组分离、卡密兑换、LDXP 自动充值、推荐返利/提现、Claude 灰测预设、Quick Start 恢复、usage logs 稳定修复、签到金额归一化等功能线按全量上线基线收敛；
+- `83479b48` 已补上用户标签路由注册；
+- Jeepay / Alipay 充值后台配置与钱包流程、Sub2API usage billing 真源仍不属于本轮上线范围。
+
+### 后续要求
+
+- 后续维护必须继续使用非删除式同步策略，避免旧本地文件覆盖生产已上线 wallet / LDXP / Quick Start /公告能力；
+- 涉及公告弹窗时必须保留显式已读语义，除非有新的产品需求；
+- 涉及 `infra/sub2api/**` 的改动不要混入全量上线回补提交；
+- 后续若有生产更正或回滚，只能追加记录，不要改写本节历史。
