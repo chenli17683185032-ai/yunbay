@@ -22,17 +22,28 @@ import { z } from 'zod'
 // Redemption Schema & Types
 // ============================================================================
 
+export const redemptionKindSchema = z
+  .enum(['legacy', 'paid_topup', 'promo_credit', 'coupon'])
+  .catch('legacy')
+
 export const redemptionSchema = z.object({
-  id: z.number(),
-  user_id: z.number(),
-  name: z.string(),
-  key: z.string(),
-  status: z.number(), // 1: enabled, 2: disabled, 3: used
-  quota: z.number(),
-  created_time: z.number(),
-  redeemed_time: z.number(),
-  expired_time: z.number(), // 0 for never expires
-  used_user_id: z.number(),
+  id: z.number().catch(0),
+  user_id: z.number().catch(0),
+  name: z.string().catch(''),
+  key: z.string().catch(''),
+  status: z.number().catch(1), // 1: enabled, 2: disabled, 3: used
+  quota: z.number().catch(0),
+  created_time: z.number().catch(0),
+  redeemed_time: z.number().catch(0),
+  expired_time: z.number().catch(0), // 0 for never expires
+  used_user_id: z.number().catch(0),
+  kind: redemptionKindSchema.default('legacy'),
+  amount: z.number().catch(0),
+  money: z.number().catch(0),
+  count_as_topup: z.boolean().catch(false),
+  batch_id: z.string().catch(''),
+  source: z.string().catch(''),
+  exported_time: z.number().catch(0),
 })
 
 export type Redemption = z.infer<typeof redemptionSchema>
@@ -76,6 +87,16 @@ export interface RedemptionFormData {
   expired_time: number
   count?: number // Only for create
   status?: number // Only for status update
+  kind?: z.infer<typeof redemptionKindSchema>
+  amount?: number
+  money?: number
+  count_as_topup?: boolean
+  batch_id?: string
+  source?: string
+}
+
+export type CreateRedemptionResponse = ApiResponse<string[]> & {
+  batch_id?: string
 }
 
 // ============================================================================

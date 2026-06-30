@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
+import { api, type ApiRequestConfig } from '@/lib/api'
 import type {
   RedemptionRequest,
   PaymentRequest,
@@ -65,7 +65,10 @@ export async function getTopupInfo(): Promise<TopupInfoResponse> {
 export async function redeemTopupCode(
   request: RedemptionRequest
 ): Promise<RedemptionResponse> {
-  const res = await api.post('/api/user/topup', request)
+  const res = await api.post('/api/user/topup', request, {
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  } satisfies ApiRequestConfig)
   return res.data
 }
 

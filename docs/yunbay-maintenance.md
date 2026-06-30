@@ -274,7 +274,6 @@ sub2api_root=200
   - 否则直接用：`https://sub2api.yunbay.xyz`
 - Key：Sub2API 的普通 API Key，不是 admin key
 
-
 ## 2026-06-24 快速启动与生产部署维护记录
 
 本节记录 2026-06-24 对云贝网站快速启动流程、下载引导和生产部署方式的维护基线。此处只记录可公开的代码与运维事实，不记录后台密码、SSH 私钥、VNC 密码、API key、cookie 或 session。
@@ -522,6 +521,7 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 f5121184b0496cd978eb32f97d1def4a2dc7cbb2cc997189ee428fcd8c9fc5da
 ```
 
+
 生产容器状态：
 
 ```text
@@ -565,6 +565,7 @@ yunbay-new-api:prod-pre-quick-start-20260626-230034
 - 只维护 `new-api` 原生渠道管理 + `sub2api` 独立上游模式；
 - 涉及 `Caddyfile` 改动时，要记得 **force-recreate caddy**，不要只靠宿主机文件覆盖后假设容器会自动看到。
 
+
 ## 2026-06-27 邮件投递切换：Resend SMTP + Cloudflare Routing
 
 当前生产邮件架构：
@@ -603,6 +604,7 @@ SystemName=yunbay
 ```
 
 回滚时不要在终端或文档中打印备份内容。恢复 `SMTP*` 与 `SystemName` 相关 options 后，重启 `yunbay-new-api` 并重新走密码重置或邮箱验证码接口验证发信。
+
 
 详细公开说明见：`docs/email-delivery.md`。
 
@@ -679,3 +681,217 @@ cd web/classic && bun run build
 ```
 
 生产同步仍按本文“非删除式同步生产”章节执行，不要在服务器上依赖失效 worktree 的 `git pull`。
+
+
+
+## 2026-06-28 LDXP 卡密兑换与充值统计生产维护
+
+本轮上线 LDXP 卡密兑换与充值统计能力，允许管理员创建付费充值卡和赠送额度码，并让真实付费卡密兑换后进入充值统计。公开文档只记录可复现事实，不记录 SSH 私钥、后台密码、cookie、session、token 或服务器 secret。
+
+### 功能范围
+
+- 新增兑换码类型：
+  - `paid_topup`：付费充值卡，兑换后增加额度并创建成功 `TopUp` 记录；
+  - `promo_credit`：赠送额度码，兑换后只增加额度，不计入真实充值统计。
+- `redemptions` 增加批次、来源、面额、实付金额、是否计入充值统计、导出时间等字段。
+- default 后台兑换码页支持批次创建、复制本次生成卡密、TXT/CSV 导出。
+- 钱包页兑换成功提示会区分付费充值卡与赠送额度码。
+- `POST /api/user/topup` 保持 `data` 为数字，同时额外返回可选 `redemption` 元信息，兼容 classic 前端和旧调用方。
+
+详细维护语义见：`docs/ldxp-redemption-cards.md`。
+
+### 部署来源
+
+- GitHub 分支：`codex/deploy-ldxp-card-redemption`
+- 部署提交：`54cd3e16 fix: complete redemption card frontend integration`
+- 合成基线：`codex/user-tags-model-groups`
+
+本轮没有直接部署单独的 LDXP 功能分支，而是在用户标签 / 模型分组生产修复基础上创建合成部署分支，避免覆盖已经上线的用户标签修复。
+
+### 本地验证
+
+部署前在合成 worktree 中完成：
+
+```bash
+go test ./model ./controller ./router ./common ./setting/... -count=1
+cd web/default
+bun test \
+  src/features/redemption-codes/lib/export-utils.test.ts \
+  src/features/redemption-codes/lib/redemption-form.test.ts \
+  src/features/wallet/lib/redemption-result.test.ts
+bun run typecheck
+bun run build
+git diff --check
+```
+
+### 生产同步方式
+
+- 生产目录 `/opt/new-api/app` 不是可信 git checkout，本轮没有在服务器上执行 `git pull`。
+- 同步方式：非删除式 `rsync` 到 `/opt/new-api/app/`。
+- 构建方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api`
+- 重启方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api`
+
+第一次 `rsync` 发现生产部分历史目录归属为 `501:staff`，导致 `deploy` 用户不能设置目录时间，也不能在部分目录写入新前端文件。已仅针对应用源码相关目录修正为 `deploy:deploy`，删除本轮误传的 worktree `.git` 文件，并使用 `--omit-dir-times --no-owner --no-group` 重新同步。最终确认 `/opt/new-api/app/.git` 不存在。
+
+### 备份
+
+部署前保留：
+
+```text
+/opt/new-api/backups/ldxp-card-redemption-predeploy-20260628-004211/app-source.tgz
+yunbay-new-api:prod-pre-ldxp-20260628-004211
+```
+
+源码备份约 477M。镜像备份可用于快速回滚。
+
+### 生产复核结果
+
+最终复核时间：`2026-06-28T01:01:28+08:00`
+
+容器状态：
+
+```text
+yunbay-new-api: running / healthy / restart_count=0
+yunbay-caddy:   running / healthy / restart_count=0
+yunbay-postgres running / healthy / restart_count=0
+yunbay-redis    running / healthy / restart_count=0
+```
+
+入口验证：
+
+```text
+http://127.0.0.1:3000/api/status                  success=true setup=true
+https://yunbay.xyz/                               200
+https://yunbay.xyz/api/status                     200
+https://yunbay.xyz/console/redemption-codes       200
+https://yunbay.xyz/wallet                         200
+GET /api/redemption/export?batch_id=__missing__   401（未登录预期）
+```
+
+数据库字段验证：
+
+```text
+amount
+batch_id
+count_as_top_up
+exported_time
+kind
+money
+source
+```
+
+字段类型：
+
+```text
+kind:character varying
+amount:bigint
+money:numeric
+count_as_top_up:boolean
+batch_id:character varying
+source:character varying
+exported_time:bigint
+```
+
+### 回滚提示
+
+优先回滚镜像：
+
+```bash
+docker tag yunbay-new-api:prod-pre-ldxp-20260628-004211 yunbay-new-api:prod
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api
+```
+
+如需恢复源码，可从上述 `app-source.tgz` 恢复后重新 build/up。新增数据库列通常无需删除，旧代码会忽略多余字段；不要做破坏性 schema rollback，除非已经确认没有生产数据依赖这些列。
+
+## 2026-06-28 兑换成功后前端跳 500 热修
+
+用户反馈：普通用户点击兑换码兑换时，页面跳到 default 前端的 500 错误页，但额度实际上已经成功到账。
+
+### 根因结论
+
+本次不是后端 `POST /api/user/topup` 失败。生产日志显示相关兑换请求返回 `200`，且兑换后的 `GET /api/user/self` 也返回 `200`。截图中的 500 来自 default 前端错误页/错误边界，而不是后端 HTTP 500。
+
+最窄根因在前端成功路径：
+
+- Quick Start 兑换流程把 `POST /api/user/topup` 成功后的用户信息刷新作为同一个成功条件；
+- 钱包兑换 hook 也在成功后内部重复调用 `getSelf()`，页面层随后还会再刷新一次；
+- 后续刷新或刷新链路的非关键异常可能把一次已经落库成功的兑换表现成前端错误/失败页。
+
+### 修复内容
+
+- `web/default/src/features/quick-start/quick-start-redemption.ts`
+  - 兑换接口返回 `success: true` 后即视为兑换成功；
+  - 后续 `refreshSelf()` 改为最佳努力，失败时返回 `refreshed: false`，不再把已成功兑换变成失败。
+- `web/default/src/features/wallet/hooks/use-redemption.ts`
+  - 移除 hook 内部重复 `await getSelf()`；
+  - 继续由钱包页面层 `fetchUser()` 负责刷新用户信息，页面层已有错误兜底。
+- 新增回归测试：
+  - Quick Start 覆盖“兑换成功但刷新用户失败仍返回成功”；
+  - 钱包 hook 源码约束确保成功路径不再内联重复 `getSelf()`。
+
+### 本地验证
+
+```bash
+cd web/default
+bun test \
+  src/features/quick-start/quick-start-redemption.test.ts \
+  src/features/wallet/hooks/use-redemption-source.test.ts \
+  src/features/wallet/lib/redemption-result.test.ts \
+  src/features/redemption-codes/lib/export-utils.test.ts \
+  src/features/redemption-codes/lib/redemption-form.test.ts
+bunx prettier --check \
+  src/features/quick-start/quick-start-redemption.ts \
+  src/features/quick-start/quick-start-redemption.test.ts \
+  src/features/wallet/hooks/use-redemption.ts \
+  src/features/wallet/hooks/use-redemption-source.test.ts
+bun run typecheck
+bun run build
+```
+
+验证结果：
+
+```text
+16 pass / 0 fail
+Prettier matched files pass
+TypeScript typecheck pass
+Rsbuild production build pass
+```
+
+### GitHub 与生产同步
+
+- GitHub 分支：`codex/deploy-ldxp-card-redemption`
+- 修复提交：`10dca0ee fix(web): keep redemption success after refresh failure`
+- 同步方式：精确文件列表、非删除式 `rsync --files-from` 同步到 `/opt/new-api/app/`
+- 构建方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api`
+- 重启方式：`docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api`
+
+### 生产备份与回滚点
+
+部署前保留：
+
+```text
+/opt/new-api/backups/redemption-refresh-fix-predeploy-20260628-175639/changed-files.tgz
+yunbay-new-api:prod-pre-redemption-refresh-fix-20260628-175639
+```
+
+若需要回滚镜像：
+
+```bash
+docker tag yunbay-new-api:prod-pre-redemption-refresh-fix-20260628-175639 yunbay-new-api:prod
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --force-recreate new-api
+```
+
+### 生产复核结果
+
+最终复核时间：`2026-06-28T18:02:37+08:00`
+
+```text
+yunbay-new-api: healthy
+https://yunbay.xyz/             200
+https://yunbay.xyz/api/status   200
+https://yunbay.xyz/wallet       200
+https://yunbay.xyz/quick-start  200
+http://127.0.0.1:3000/api/status 返回 JSON
+```

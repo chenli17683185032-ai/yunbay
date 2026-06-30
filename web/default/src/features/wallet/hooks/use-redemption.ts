@@ -19,9 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useCallback } from 'react'
 import i18next from 'i18next'
 import { toast } from 'sonner'
-import { getSelf } from '@/lib/api'
 import { formatQuota } from '@/lib/format'
 import { redeemTopupCode } from '../api'
+import { getRedemptionSuccessMessageKey } from '../lib/redemption-result'
 
 // ============================================================================
 // Redemption Hook
@@ -40,14 +40,13 @@ export function useRedemption() {
       setRedeeming(true)
       const response = await redeemTopupCode({ key: code })
 
-      if (response.success && response.data) {
+      if (response.success && typeof response.data === 'number') {
         const quotaAdded = response.data
         toast.success(
-          i18next.t('Redemption successful! Added: {{quota}}', {
+          i18next.t(getRedemptionSuccessMessageKey(response.redemption), {
             quota: formatQuota(quotaAdded),
           })
         )
-        await getSelf()
         return true
       }
 

@@ -50,3 +50,15 @@ test('quick start refuses an empty redemption code before calling the API', asyn
     /redemption code/i
   )
 })
+
+test('quick start keeps a successful redemption successful when user refresh fails', async () => {
+  const result = await redeemQuickStartCode('CODE-REFRESH-FAILS', {
+    redeemTopupCode: async () => ({ success: true, data: 500 }),
+    refreshSelf: async () => {
+      throw new Error('temporary refresh failure')
+    },
+  })
+
+  assert.equal(result.quotaAdded, 500)
+  assert.equal(result.refreshed, false)
+})
