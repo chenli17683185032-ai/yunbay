@@ -310,6 +310,12 @@ cb7ea3c9 fix: replace macos codex download bundle
   5. 没有任何可用分组时直接报错，不创建不可用 key。
 - 兑换码页面支持在快速启动页内直接粘贴并兑换，不跳转到控制台兑换码页面。
 - 新手引导 2~5 页中文文案已补齐，不应回退到英文界面。
+- 下载页新增与当前视觉风格协调的 `CC Switch` 小窗口式导入栏，展示：
+  1. 当前站点 API endpoint（自动规范化为 `<server>/v1`）；
+  2. 当前已选模型；
+  3. 当前已生成 API Key 的脱敏值。
+- 只要用户点击一次 `一键导入`，浏览器就会直接尝试打开 `ccswitch://v1/import?...`，把 `app=codex`、`name=Yunbay Codex`、`endpoint`、`apiKey`、`model`、`homepage` 与 `enabled=true` 一并传给本地 CC Switch。
+- 若尚未生成 API Key，导入按钮禁用并提示先生成 API Key；若没有可用模型，则提示未选择模型。
 - 主页宣传标语已去掉“不封号”。
 - macOS 下载入口指向云贝 Codex 构建产物；由于当前没有 Apple Developer ID / notarization，如 Gatekeeper 提示 App 损坏，引导用户使用页面中的 `xattr` 修复命令。
 
@@ -321,6 +327,8 @@ web/default/src/features/quick-start/quick-start-api-key.ts
 web/default/src/features/quick-start/quick-start-api-key.test.ts
 web/default/src/features/quick-start/quick-start-data.ts
 web/default/src/features/quick-start/quick-start-redemption.ts
+web/default/src/features/quick-start/quick-start-cc-switch.ts
+web/default/src/features/quick-start/quick-start-cc-switch.test.ts
 web/default/src/i18n/locales/{en,zh,fr,ru,ja,vi}.json
 web/default/src/components/layout/config/public-landing-brand.ts
 ```
@@ -341,24 +349,27 @@ npx --yes tsx --test \
   src/features/quick-start/quick-start-data.test.ts \
   src/features/quick-start/quick-start-redemption.test.ts \
   src/features/quick-start/quick-start-locales.test.ts \
+  src/features/quick-start/quick-start-cc-switch.test.ts \
   src/components/layout/config/public-landing-brand.test.ts \
   src/i18n/public-landing-locales.test.ts
 ```
 
-2026-06-24 验证结果：
+2026-06-25 验证结果：
 
 ```text
-25 tests
-25 pass
+32 tests
+32 pass
 0 fail
 ```
 
 类型检查和构建：
 
 ```bash
-npm run typecheck
-npm run build
+node /Users/ethan/Documents/yunbay/web/default/node_modules/typescript/bin/tsc -b
+node /Users/ethan/Documents/yunbay/web/default/node_modules/@rsbuild/core/bin/rsbuild.js build
 ```
+
+2026-06-25 验证结果：均通过。
 
 2026-06-24 验证结果：二者均通过。
 
@@ -399,6 +410,151 @@ web/default/src/features/quick-start/quick-start-api-key.test.ts
 yunbay-new-api: healthy
 GET https://yunbay.xyz/quick-start: HTTP 200
 当前入口 JS: /static/js/index.e8f3d7a543.js
+```
+
+
+## 2026-06-26 快速启动 Windows 安装包恢复与生产同步记录
+
+本节记录 2026-06-26 对 `codex/quick-start-cc-switch-import` 分支的补丁维护与生产同步。记录内容只包含可公开的代码、构建、部署和验证事实，不记录 SSH 私钥、后台密码、API key、cookie、session 或服务器 secret。
+
+### 背景
+
+`a5b68752 fix: simplify yunbay console and codex downloads` 曾把 Windows 下载恢复为站内托管的 Yunbay Codex `.exe`：
+
+```text
+/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe
+```
+
+后续 `codex/quick-start-cc-switch-import` 分支线引入 CC Switch 导入功能时，快速启动 Windows 卡片又回到了 Microsoft Store 下载地址，导致生产页面按钮不再下载用户上传的 Windows 安装包。
+
+本轮采用最小补丁方式修复：只恢复 Windows `.exe` 下载相关资产、数据、页面渲染、i18n 和回归测试，同时保留 CC Switch 一键导入功能；没有整条 cherry-pick 旧提交，也没有触碰后端、钱包、支付、认证、sidebar/top-nav 或 dashboard 行为。
+
+### GitHub 分支与提交
+
+```text
+repo:   chenli17683185032-ai/yunbay
+branch: codex/quick-start-cc-switch-import
+commit: 470337ca fix: restore quick start Windows launcher download
+PR:     https://github.com/chenli17683185032-ai/yunbay/pull/2
+```
+
+关键文件：
+
+```text
+web/default/public/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe
+web/default/src/features/quick-start/index.tsx
+web/default/src/features/quick-start/quick-start-data.ts
+web/default/src/features/quick-start/quick-start-data.test.ts
+web/default/src/features/quick-start/quick-start-locales.test.ts
+web/default/src/i18n/locales/{en,zh,fr,ja,ru,vi}.json
+```
+
+Windows 安装包 SHA256：
+
+```text
+f5121184b0496cd978eb32f97d1def4a2dc7cbb2cc997189ee428fcd8c9fc5da
+```
+
+### 本地验证
+
+验证目录：
+
+```bash
+cd /Users/ethan/Documents/yunbay/.worktrees/quick-start-cc-switch-import/web/default
+```
+
+执行过的检查：
+
+```bash
+bun test src/features/quick-start/quick-start-data.test.ts src/features/quick-start/quick-start-locales.test.ts
+bun run typecheck
+bun run build
+```
+
+结果：
+
+```text
+quick-start tests: 13 pass / 0 fail
+typecheck: pass
+build: pass
+```
+
+本地构建产物中的 Windows 安装包 hash 与源文件一致：
+
+```text
+f5121184b0496cd978eb32f97d1def4a2dc7cbb2cc997189ee428fcd8c9fc5da
+```
+
+### 生产同步方式
+
+生产 `/opt/new-api/app` 不是可信 git checkout，因此本轮没有在服务器上执行 `git pull`。同步方式为：
+
+1. 在生产机备份将要覆盖的前端文件、`Dockerfile`、`docker-compose.prod.yml` 和旧 `yunbay-new-api:prod` 镜像 tag；
+2. 使用精确文件列表 `rsync --files-from` 只覆盖本次补丁涉及文件；
+3. 在生产机重新构建 `yunbay-new-api:prod`；
+4. 仅重启 `yunbay-new-api`，不重启数据库、Redis、Sub2API 或 Caddy。
+
+生产备份目录：
+
+```text
+/opt/new-api/backups/quick-start-windows-predeploy-20260626-230034
+```
+
+生产构建和重启命令：
+
+```bash
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d new-api
+```
+
+### 生产验证结果
+
+生产源码同步后，`quick-start-data.ts` 中 Windows 下载路径为：
+
+```text
+/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe
+```
+
+生产机文件 hash：
+
+```text
+f5121184b0496cd978eb32f97d1def4a2dc7cbb2cc997189ee428fcd8c9fc5da
+```
+
+生产容器状态：
+
+```text
+yunbay-new-api: healthy
+```
+
+生产 HTML 已切换到新入口 bundle：
+
+```text
+/static/js/index.87fd8198e3.js
+```
+
+生产页面已由用户实际确认 Windows 下载恢复正常。
+
+### 回滚方式
+
+若后续需要回滚本轮生产同步，优先使用备份目录恢复本轮覆盖的前端文件，然后重建并重启 `new-api`：
+
+```bash
+cd /opt/new-api/app
+cp -a /opt/new-api/backups/quick-start-windows-predeploy-20260626-230034/files/web/default/src/features/quick-start/index.tsx web/default/src/features/quick-start/index.tsx
+cp -a /opt/new-api/backups/quick-start-windows-predeploy-20260626-230034/files/web/default/src/features/quick-start/quick-start-data.ts web/default/src/features/quick-start/quick-start-data.ts
+cp -a /opt/new-api/backups/quick-start-windows-predeploy-20260626-230034/files/web/default/src/features/quick-start/quick-start-data.test.ts web/default/src/features/quick-start/quick-start-data.test.ts
+cp -a /opt/new-api/backups/quick-start-windows-predeploy-20260626-230034/files/web/default/src/features/quick-start/quick-start-locales.test.ts web/default/src/features/quick-start/quick-start-locales.test.ts
+cp -a /opt/new-api/backups/quick-start-windows-predeploy-20260626-230034/files/web/default/src/i18n/locales/*.json web/default/src/i18n/locales/
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d new-api
+```
+
+也可回滚到镜像 tag：
+
+```text
+yunbay-new-api:prod-pre-quick-start-20260626-230034
 ```
 
 ## 结论
