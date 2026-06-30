@@ -41,7 +41,10 @@
     "remark-math": "^6.0.0",
     "sse.js": "catalog:",
     "unist-util-visit": "^5.0.0",
-    "use-debounce": "^10.0.4"
+    "use-debounce": "^10.0.4",
+    "hast-util-from-html": "^2.0.3",
+    "hast-util-sanitize": "^5.0.2",
+    "hast-util-to-html": "^9.0.5"
   },
   "scripts": {
     "dev": "rsbuild dev",

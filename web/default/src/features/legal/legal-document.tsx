@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Markdown } from '@/components/ui/markdown'
+import { SafeHtml } from '@/components/ui/safe-html'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PublicLayout } from '@/components/layout'
 import type { LegalDocumentResponse } from './types'
@@ -140,9 +141,9 @@ export function LegalDocument({
         </div>
 
         {isHtml ? (
-          <div
+          <SafeHtml
+            html={rawContent}
             className='prose prose-neutral dark:prose-invert max-w-none'
-            dangerouslySetInnerHTML={{ __html: rawContent }}
           />
         ) : (
           <Markdown className='prose-neutral dark:prose-invert max-w-none'>
