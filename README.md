@@ -173,7 +173,7 @@ docker run --name new-api -d --restart always \
 |------|------|
 | 🚀 Deployment Guide | [Installation Documentation](https://docs.newapi.pro/en/docs/installation) |
 | ⚙️ Environment Configuration | [Environment Variables](https://docs.newapi.pro/en/docs/installation/config-maintenance/environment-variables) |
-| 🛠️ Yunbay Maintenance | [README maintenance audit/log](#maintenance-audit-log) · [Repository maintenance notes, production sync notes, and usage logs compatibility](./docs/yunbay-maintenance.md) |
+| 🛠️ Yunbay Maintenance | [README maintenance audit/log](#maintenance-audit-log) · [Repository maintenance notes, production sync notes, and usage logs compatibility](./docs/yunbay-maintenance.md) · [GitHub project context and PR queue](./.github/README.md) |
 | 📡 API Documentation | [API Documentation](https://docs.newapi.pro/en/docs/api) |
 | ❓ FAQ | [FAQ](https://docs.newapi.pro/en/docs/support/faq) |
 | 💬 Community Interaction | [Communication Channels](https://docs.newapi.pro/en/docs/support/community-interaction) |
@@ -225,6 +225,7 @@ docker run --name new-api -d --restart always \
 | 2026-06-30 | Codex | `codex/fix-usage-logs-stat-null` / `0a420c3c` | 补提交已在生产执行并验证过的邮件链路维护文档：`docs/email-delivery.md`、`docs/yunbay-maintenance.md`、`infra/cloudflare-plan.md` | 已执行目标文档 diff 核对、敏感信息模式检查、`git diff --check`；提交 `docs: record yunbay email delivery setup` | 记录对应生产状态：Resend SMTP 出站、Cloudflare Email Routing 入站、应用发信验证、`yunbay-new-api` healthy；本次提交本身仅补仓库文档 | 后续邮件配置变更继续追加记录；不要写入 Resend API Key、SMTP Token、Cloudflare Token 或备份文件内容 |
 | 2026-06-30 | Codex | `codex/full-rollout-no-overlap-clean` / `83479b48`；公告实现 `59756734` | 补记全量上线与必读公告弹窗生产完成事实，修正旧设计文档中的“等待实现/落地”状态 | 已复核生产公开入口 `/`、`/api/status`、`/api/notice` 均为 HTTP 200；生产入口 JS `/static/js/index.599262f2f0.js` 包含 `I have read`、`我已阅读`、`notification-storage`、`markNoticeRead`、`markAnnouncementsRead` | 已完成生产同步；本次仓库维护只补文档事实，不重新部署服务 | 后续覆盖 wallet、Quick Start、公告、路由或分组逻辑前必须对照全量上线记录；Jeepay 与 Sub2API billing 仍不属于本轮完成范围 |
 | 2026-06-30 | Codex | 用户标签 `a1a38836` / `0f0ac266`；Claude 钱包灰测 `1ea932fd` | 补提交用户标签与模型分组分离设计、Claude 价格与钱包灰测设计，并修正旧状态为已生产同步/已生产灰测 | 已核对用户标签生产同步记录、用户标签接口与生产数据复核；已核对 Claude 钱包灰测记录、生产 smoke、bundle 脱敏字符串检查和 `jiance001` 灰测摘要 | 用户标签功能已同步生产并纳入全量上线；Claude 钱包改动已完成代码侧上线和灰测，但 Claude 真实价格 options 与 LDXP 折扣真实支付闭环保留后续变更窗口 | 后续不要把用户标签和模型分组混用；Claude/LDXP 扩大前必须备份 options/商品映射并追加维护记录 |
+| 2026-06-30 | Codex | `codex/fix-usage-logs-stat-null` / 本次 GitHub 文档维护提交；GitHub 仓库 `chenli17683185032-ai/yunbay` | 重新盘点 Git / GitHub 工作数量，并新增 `.github/README.md` 作为 GitHub 项目脉络、PR 队列和 workflow 维护入口 | 已执行 `git fetch --all --prune --tags`、`gh repo view`、`gh pr list`、`gh issue list`、分支/提交计数与 workflow 文件审阅；结果：全引用 `6071` 提交、当前 HEAD `5942` 提交、`origin/main` `5922` 提交、开放 Draft PR `7` 个、开放 issue `0` 个、workflow `7` 个、本地分支 `18` 个、远端 head `10` 个 | 本次仅维护 GitHub / README 文档，未同步生产、未重启服务；`infra/sub2api/**` 4 个未提交代码文件继续排除 | 推送当前分支前确认本地领先远端当前分支 `5` 个文档/维护提交；处理 PR 时优先看 `.github/README.md` 的队列关系，尤其 `#5` 冲突和 `#6 → #7` 依赖 |
 
 ---
 
