@@ -32,7 +32,7 @@
     "react-markdown": "catalog:",
     "react-router-dom": "^6.3.0",
     "react-telegram-login": "^1.1.2",
-    "react-toastify": "^9.0.8",
+    "react-toastify": "^11.1.0",
     "react-turnstile": "^1.0.5",
     "rehype-highlight": "^7.0.2",
     "rehype-katex": "^7.0.1",
