@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -51,6 +52,31 @@ func TestLoadLdxpConfigDisabledByDefault(t *testing.T) {
 	require.Equal(t, int64(1800), cfg.MailMatchWindowSeconds)
 	require.True(t, cfg.RequireMailMatch)
 	require.Equal(t, "/opt/new-api/logs/ldxp-worker/snapshots", cfg.DebugSnapshotDir)
+}
+
+func TestLoadLdxpConfigDefaultProductsUseRealSixLinks(t *testing.T) {
+	clearLdxpEnv(t)
+
+	cfg, err := LoadLdxpConfig()
+	require.NoError(t, err)
+	require.Len(t, cfg.Products, 6)
+
+	expectedURLs := map[int64]string{
+		10:  "https://pay.ldxp.cn/item/nzkyrt",
+		20:  "https://pay.ldxp.cn/item/ka4pg7",
+		30:  "https://pay.ldxp.cn/item/n8schm",
+		50:  "https://pay.ldxp.cn/item/5c4yft",
+		100: "https://pay.ldxp.cn/item/sb48mz",
+		500: "https://pay.ldxp.cn/item/y8t52c",
+	}
+	for amount, expectedURL := range expectedURLs {
+		product, ok := cfg.Products[amount]
+		require.True(t, ok, "amount %d must be present", amount)
+		require.Equal(t, amount, product.Amount)
+		require.Equal(t, expectedURL, product.ProductURL)
+		require.Equal(t, float64(amount), product.Money)
+		require.Equal(t, "LDXP "+strconv.FormatInt(amount, 10), product.ProductName)
+	}
 }
 
 func TestLoadLdxpConfigParsesSixProducts(t *testing.T) {

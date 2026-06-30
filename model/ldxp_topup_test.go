@@ -210,6 +210,125 @@ func TestGetClaimableLdxpSessionSkipsExpiredAndNonCreated(t *testing.T) {
 	assert.True(t, errors.Is(err, gorm.ErrRecordNotFound), "got %v", err)
 }
 
+func TestClaimNextLdxpPaidWatchSessionReturnsQrReadySession(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	now := int64(1_000)
+	sessions := []*LdxpTopupSession{
+		{SessionId: "paid-watch-missing-url", UserId: 1001, Status: LdxpStatusQrReady, WorkerId: "worker-a", WorkerOrderNo: "LDNOURL", CreatedTime: 10, UpdatedTime: 10, ExpiredTime: now + 100},
+		{SessionId: "paid-watch-other-worker", UserId: 1001, Status: LdxpStatusQrReady, WorkerId: "worker-b", WorkerOrderNo: "LDOTHER", QrPageUrl: "https://example.test/other", CreatedTime: 20, UpdatedTime: 20, ExpiredTime: now + 100},
+		{SessionId: "paid-watch-worker-paid", UserId: 1001, Status: LdxpStatusWorkerPaid, WorkerId: "worker-a", WorkerOrderNo: "LDPAID", QrPageUrl: "https://example.test/paid", CreatedTime: 30, UpdatedTime: 30, ExpiredTime: now + 100},
+		{SessionId: "paid-watch-ready", UserId: 1001, Status: LdxpStatusQrReady, WorkerId: "worker-a", WorkerOrderNo: "LDREADY", QrPageUrl: "https://example.test/ready", CreatedTime: 40, UpdatedTime: 40, ExpiredTime: now + 100},
+	}
+	for _, session := range sessions {
+		require.NoError(t, InsertLdxpTopupSession(session))
+	}
+
+	watch, err := ClaimNextLdxpPaidWatchSession("worker-a", now)
+
+	require.NoError(t, err)
+	require.NotNil(t, watch)
+	assert.Equal(t, "paid-watch-ready", watch.SessionId)
+	assert.Equal(t, LdxpStatusQrReady, watch.Status)
+	assert.Equal(t, "LDREADY", watch.WorkerOrderNo)
+	assert.Equal(t, "https://example.test/ready", watch.QrPageUrl)
+}
+
+func TestClaimNextLdxpPaidWatchSessionRotatesBetweenQrReadySessions(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	now := int64(1_000)
+	sessions := []*LdxpTopupSession{
+		{
+			SessionId:     "paid-watch-first",
+			UserId:        1001,
+			Status:        LdxpStatusQrReady,
+			WorkerId:      "worker-a",
+			WorkerOrderNo: "LDFIRST",
+			QrPageUrl:     "https://example.test/first",
+			CreatedTime:   10,
+			UpdatedTime:   10,
+			ExpiredTime:   now + 100,
+		},
+		{
+			SessionId:     "paid-watch-second",
+			UserId:        1002,
+			Status:        LdxpStatusQrReady,
+			WorkerId:      "worker-a",
+			WorkerOrderNo: "LDSECOND",
+			QrPageUrl:     "https://example.test/second",
+			CreatedTime:   20,
+			UpdatedTime:   20,
+			ExpiredTime:   now + 100,
+		},
+	}
+	for _, session := range sessions {
+		require.NoError(t, InsertLdxpTopupSession(session))
+	}
+
+	first, err := ClaimNextLdxpPaidWatchSession("worker-a", now)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, "paid-watch-first", first.SessionId)
+
+	second, err := ClaimNextLdxpPaidWatchSession("worker-a", now+1)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	assert.Equal(t, "paid-watch-second", second.SessionId)
+
+	persistedFirst, err := GetLdxpTopupSessionBySessionId("paid-watch-first")
+	require.NoError(t, err)
+	assert.Equal(t, "worker-a", persistedFirst.PaidWatchWorkerId)
+	assert.Equal(t, now, persistedFirst.PaidWatchClaimedTime)
+
+	persistedSecond, err := GetLdxpTopupSessionBySessionId("paid-watch-second")
+	require.NoError(t, err)
+	assert.Equal(t, "worker-a", persistedSecond.PaidWatchWorkerId)
+	assert.Equal(t, now+1, persistedSecond.PaidWatchClaimedTime)
+}
+
+func TestClaimNextLdxpPaidWatchSessionPrefersNeverWatchedSession(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	now := int64(1_000)
+	sessions := []*LdxpTopupSession{
+		{
+			SessionId:            "paid-watch-already-polled",
+			UserId:               1001,
+			Status:               LdxpStatusQrReady,
+			WorkerId:             "worker-a",
+			WorkerOrderNo:        "LDPOLLED",
+			QrPageUrl:            "https://example.test/polled",
+			CreatedTime:          10,
+			UpdatedTime:          10,
+			ExpiredTime:          now + 100,
+			PaidWatchWorkerId:    "worker-a",
+			PaidWatchClaimedTime: now - 1,
+		},
+		{
+			SessionId:     "paid-watch-never-polled",
+			UserId:        1002,
+			Status:        LdxpStatusQrReady,
+			WorkerId:      "worker-a",
+			WorkerOrderNo: "LDNEVER",
+			QrPageUrl:     "https://example.test/never",
+			CreatedTime:   20,
+			UpdatedTime:   20,
+			ExpiredTime:   now + 100,
+		},
+	}
+	for _, session := range sessions {
+		require.NoError(t, InsertLdxpTopupSession(session))
+	}
+
+	watch, err := ClaimNextLdxpPaidWatchSession("worker-a", now)
+
+	require.NoError(t, err)
+	require.NotNil(t, watch)
+	assert.Equal(t, "paid-watch-never-polled", watch.SessionId)
+	assert.Equal(t, now, watch.PaidWatchClaimedTime)
+}
+
 func TestUpdateLdxpSessionStatusPersistsWorkerFields(t *testing.T) {
 	setupLdxpTopupTest(t)
 

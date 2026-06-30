@@ -12,8 +12,10 @@ import (
 
 func setupRedemptionTopUpTest(t *testing.T) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&User{}, &Redemption{}, &TopUp{}, &Log{}))
+	require.NoError(t, DB.AutoMigrate(&User{}, &Redemption{}, &TopUp{}, &Log{}, &AffiliateCommission{}, &AffiliateWithdrawal{}))
 	cleanup := func() {
+		DB.Exec("DELETE FROM affiliate_withdrawals")
+		DB.Exec("DELETE FROM affiliate_commissions")
 		DB.Exec("DELETE FROM redemptions")
 		DB.Exec("DELETE FROM top_ups")
 		DB.Exec("DELETE FROM users")
@@ -62,6 +64,50 @@ func userGroupForRedemptionTest(t *testing.T, userID int) string {
 	var user User
 	require.NoError(t, DB.Select(commonGroupCol).Where("id = ?", userID).First(&user).Error)
 	return user.Group
+}
+
+func TestRedeemPaidTopupCreatesAffiliateCommissionForInviter(t *testing.T) {
+	setupRedemptionTopUpTest(t)
+
+	const inviterID = 11001
+	const inviteeID = 11002
+	const originalKey = "paid-topup-affiliate-key-11002"
+	require.NoError(t, DB.Create(&User{
+		Id:       inviterID,
+		Username: "redemption_inviter",
+		Password: "password123",
+		Status:   common.UserStatusEnabled,
+		AffCode:  "redemption-inviter-aff",
+	}).Error)
+	require.NoError(t, DB.Create(&User{
+		Id:        inviteeID,
+		Username:  "redemption_invitee",
+		Password:  "password123",
+		Status:    common.UserStatusEnabled,
+		AffCode:   "redemption-invitee-aff",
+		InviterId: inviterID,
+	}).Error)
+	insertRedemptionCode(t, &Redemption{
+		Key:          originalKey,
+		Name:         "Paid topup affiliate card",
+		Quota:        100,
+		Kind:         RedemptionKindPaidTopUp,
+		Amount:       20,
+		Money:        20,
+		CountAsTopUp: true,
+		BatchId:      "batch-paid-affiliate",
+		Source:       RedemptionSourceLDXP,
+	})
+
+	_, err := Redeem(originalKey, inviteeID)
+	require.NoError(t, err)
+
+	var commission AffiliateCommission
+	require.NoError(t, DB.Where("inviter_user_id = ? AND invitee_user_id = ?", inviterID, inviteeID).First(&commission).Error)
+	assert.Equal(t, inviterID, commission.InviterUserId)
+	assert.Equal(t, inviteeID, commission.InviteeUserId)
+	assert.Equal(t, 3.0, commission.CommissionMoney)
+	assert.Equal(t, AffiliateCommissionStatusAvailable, commission.Status)
 }
 
 func TestRedeemPaidTopupCreatesSuccessfulTopUp(t *testing.T) {

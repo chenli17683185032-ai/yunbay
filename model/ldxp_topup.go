@@ -26,46 +26,48 @@ const (
 )
 
 type LdxpTopupSession struct {
-	Id                 int            `json:"id"`
-	SessionId          string         `json:"session_id" gorm:"type:varchar(64);uniqueIndex"`
-	UserId             int            `json:"user_id" gorm:"index"`
-	Amount             int64          `json:"amount"`
-	Money              float64        `json:"money"`
-	ProductUrl         string         `json:"product_url" gorm:"type:text"`
-	ProductName        string         `json:"product_name" gorm:"type:text"`
-	ContactEmail       string         `json:"contact_email" gorm:"type:varchar(255)"`
-	Status             string         `json:"status" gorm:"type:varchar(64);index"`
-	WorkerId           string         `json:"worker_id" gorm:"type:varchar(128);index"`
-	QrCode             string         `json:"qr_code" gorm:"type:text"`
-	QrPageUrl          string         `json:"qr_page_url" gorm:"type:text"`
-	QrReadyTime        int64          `json:"qr_ready_time" gorm:"bigint"`
-	WorkerOrderNo      string         `json:"worker_order_no" gorm:"type:varchar(64);index"`
-	WorkerAmount       float64        `json:"worker_amount"`
-	WorkerProductName  string         `json:"worker_product_name" gorm:"type:text"`
-	WorkerCardKey      string         `json:"worker_card_key" gorm:"type:varchar(255);index"`
-	WorkerStatusText   string         `json:"worker_status_text" gorm:"type:varchar(64)"`
-	WorkerSuccessUrl   string         `json:"worker_success_url" gorm:"type:text"`
-	WorkerDetectedTime int64          `json:"worker_detected_time" gorm:"bigint"`
-	MailMessageId      string         `json:"mail_message_id" gorm:"type:varchar(255)"`
-	MailOrderNo        string         `json:"mail_order_no" gorm:"type:varchar(64);index"`
-	MailAmount         float64        `json:"mail_amount"`
-	MailProductName    string         `json:"mail_product_name" gorm:"type:text"`
-	MailCardKey        string         `json:"mail_card_key" gorm:"type:varchar(255);index"`
-	MailFrom           string         `json:"mail_from" gorm:"type:varchar(255)"`
-	MailTo             string         `json:"mail_to" gorm:"type:varchar(255)"`
-	MailSubject        string         `json:"mail_subject" gorm:"type:text"`
-	MailReceivedTime   int64          `json:"mail_received_time" gorm:"bigint"`
-	VerifiedTime       int64          `json:"verified_time" gorm:"bigint"`
-	RedeemedTime       int64          `json:"redeemed_time" gorm:"bigint"`
-	TopupId            int            `json:"topup_id" gorm:"index"`
-	RedemptionId       int            `json:"redemption_id" gorm:"index"`
-	ErrorCode          string         `json:"error_code" gorm:"type:varchar(64)"`
-	ErrorMessage       string         `json:"error_message" gorm:"type:text"`
-	DebugSnapshotPath  string         `json:"debug_snapshot_path" gorm:"type:text"`
-	CreatedTime        int64          `json:"created_time" gorm:"bigint;index"`
-	UpdatedTime        int64          `json:"updated_time" gorm:"bigint"`
-	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;index"`
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	Id                   int            `json:"id"`
+	SessionId            string         `json:"session_id" gorm:"type:varchar(64);uniqueIndex"`
+	UserId               int            `json:"user_id" gorm:"index"`
+	Amount               int64          `json:"amount"`
+	Money                float64        `json:"money"`
+	ProductUrl           string         `json:"product_url" gorm:"type:text"`
+	ProductName          string         `json:"product_name" gorm:"type:text"`
+	ContactEmail         string         `json:"contact_email" gorm:"type:varchar(255)"`
+	Status               string         `json:"status" gorm:"type:varchar(64);index"`
+	WorkerId             string         `json:"worker_id" gorm:"type:varchar(128);index"`
+	QrCode               string         `json:"qr_code" gorm:"type:text"`
+	QrPageUrl            string         `json:"qr_page_url" gorm:"type:text"`
+	QrReadyTime          int64          `json:"qr_ready_time" gorm:"bigint"`
+	WorkerOrderNo        string         `json:"worker_order_no" gorm:"type:varchar(64);index"`
+	WorkerAmount         float64        `json:"worker_amount"`
+	WorkerProductName    string         `json:"worker_product_name" gorm:"type:text"`
+	WorkerCardKey        string         `json:"worker_card_key" gorm:"type:varchar(255);index"`
+	WorkerStatusText     string         `json:"worker_status_text" gorm:"type:varchar(64)"`
+	WorkerSuccessUrl     string         `json:"worker_success_url" gorm:"type:text"`
+	WorkerDetectedTime   int64          `json:"worker_detected_time" gorm:"bigint"`
+	MailMessageId        string         `json:"mail_message_id" gorm:"type:varchar(255)"`
+	MailOrderNo          string         `json:"mail_order_no" gorm:"type:varchar(64);index"`
+	MailAmount           float64        `json:"mail_amount"`
+	MailProductName      string         `json:"mail_product_name" gorm:"type:text"`
+	MailCardKey          string         `json:"mail_card_key" gorm:"type:varchar(255);index"`
+	MailFrom             string         `json:"mail_from" gorm:"type:varchar(255)"`
+	MailTo               string         `json:"mail_to" gorm:"type:varchar(255)"`
+	MailSubject          string         `json:"mail_subject" gorm:"type:text"`
+	MailReceivedTime     int64          `json:"mail_received_time" gorm:"bigint"`
+	VerifiedTime         int64          `json:"verified_time" gorm:"bigint"`
+	RedeemedTime         int64          `json:"redeemed_time" gorm:"bigint"`
+	TopupId              int            `json:"topup_id" gorm:"index"`
+	RedemptionId         int            `json:"redemption_id" gorm:"index"`
+	ErrorCode            string         `json:"error_code" gorm:"type:varchar(64)"`
+	ErrorMessage         string         `json:"error_message" gorm:"type:text"`
+	DebugSnapshotPath    string         `json:"debug_snapshot_path" gorm:"type:text"`
+	CreatedTime          int64          `json:"created_time" gorm:"bigint;index"`
+	UpdatedTime          int64          `json:"updated_time" gorm:"bigint"`
+	ExpiredTime          int64          `json:"expired_time" gorm:"bigint;index"`
+	PaidWatchWorkerId    string         `json:"paid_watch_worker_id" gorm:"type:varchar(128);index"`
+	PaidWatchClaimedTime int64          `json:"paid_watch_claimed_time" gorm:"bigint;index"`
+	DeletedAt            gorm.DeletedAt `gorm:"index"`
 }
 
 type LdxpMailEvent struct {
@@ -137,6 +139,50 @@ func ClaimNextLdxpTopupSession(workerId string, now int64) (*LdxpTopupSession, e
 			}
 		}
 		return gorm.ErrRecordNotFound
+	})
+	if err != nil {
+		return nil, err
+	}
+	return claimed, nil
+}
+
+func ClaimNextLdxpPaidWatchSession(workerId string, now int64) (*LdxpTopupSession, error) {
+	workerId = strings.TrimSpace(workerId)
+	if workerId == "" {
+		return nil, gorm.ErrInvalidData
+	}
+	var claimed *LdxpTopupSession
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var candidate LdxpTopupSession
+		query := tx.
+			Where("status = ? AND worker_id = ? AND expired_time > ? AND worker_order_no <> '' AND qr_page_url <> ''", LdxpStatusQrReady, workerId, now).
+			Order("COALESCE(paid_watch_claimed_time, 0) ASC, updated_time ASC, id ASC")
+		if !common.UsingSQLite {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(&candidate).Error; err != nil {
+			return err
+		}
+
+		result := tx.Model(&LdxpTopupSession{}).
+			Where("id = ? AND status = ? AND worker_id = ? AND expired_time > ?", candidate.Id, LdxpStatusQrReady, workerId, now).
+			Updates(map[string]interface{}{
+				"paid_watch_worker_id":    workerId,
+				"paid_watch_claimed_time": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+
+		var updated LdxpTopupSession
+		if err := tx.Where("id = ?", candidate.Id).First(&updated).Error; err != nil {
+			return err
+		}
+		claimed = &updated
+		return nil
 	})
 	if err != nil {
 		return nil, err

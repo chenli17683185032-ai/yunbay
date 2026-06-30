@@ -45,6 +45,8 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
+export type AffiliateSummaryResponse = ApiResponse<AffiliateSummary>
+export type AffiliateWithdrawalResponse = ApiResponse<AffiliateWithdrawal>
 export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
 export type WaffoPaymentResponse = ApiResponse<
   { payment_url?: string } | string
@@ -256,6 +258,61 @@ export interface AmountRequest {
 export interface AffiliateTransferRequest {
   /** Quota amount to transfer */
   quota: number
+}
+
+/**
+ * Affiliate monetary reward summary.
+ */
+export interface AffiliateSummary {
+  /** Existing new-api affiliate code */
+  aff_code: string
+  /** Number of users invited by the current user */
+  invite_count: number
+  /** Commission rate, e.g. 0.15 means 15% */
+  rate: number
+  /** Total commission rewards earned */
+  total_money: number
+  /** Rewards available for withdrawal */
+  available_money: number
+  /** Rewards frozen by pending withdrawal requests */
+  frozen_money: number
+  /** Rewards already marked as paid out */
+  withdrawn_money: number
+}
+
+/**
+ * Affiliate reward withdrawal request.
+ */
+export interface AffiliateWithdrawalRequest {
+  /** Withdrawal amount in money units */
+  amount: number
+  /** Payout contact/account details */
+  contact: string
+  /** Optional user note */
+  remark?: string
+}
+
+export type AffiliateWithdrawalStatus =
+  | 'pending'
+  | 'paid'
+  | 'rejected'
+  | 'canceled'
+
+/**
+ * Affiliate reward withdrawal record.
+ */
+export interface AffiliateWithdrawal {
+  id: number
+  withdrawal_id: string
+  user_id: number
+  amount: number
+  contact: string
+  remark: string
+  status: AffiliateWithdrawalStatus
+  admin_remark: string
+  created_time: number
+  updated_time: number
+  processed_time: number
 }
 
 /**

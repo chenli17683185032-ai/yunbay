@@ -12,6 +12,8 @@ export interface WorkerConfig {
   paymentTimeoutMs: number
   resultTimeoutMs: number
   releaseSessionSlotAfterQr: boolean
+  browserPrewarm: boolean
+  paidWatchPollIntervalMs: number
   debugSnapshotDir: string
   imapHost?: string
   imapPort?: number
@@ -33,6 +35,8 @@ const defaultConfig = {
   paymentTimeoutMs: 15 * 60 * 1000,
   resultTimeoutMs: 120000,
   releaseSessionSlotAfterQr: false,
+  browserPrewarm: false,
+  paidWatchPollIntervalMs: 5000,
   debugSnapshotDir: '/app/snapshots',
 } as const
 
@@ -85,6 +89,12 @@ export function loadConfigFromEnv(env: Env = process.env): WorkerConfig {
       firstDefined(env.LDXP_RELEASE_SLOT_AFTER_QR, env.LDXP_WORKER_RELEASE_SLOT_AFTER_QR),
       'LDXP_RELEASE_SLOT_AFTER_QR',
       defaultConfig.releaseSessionSlotAfterQr,
+    ),
+    browserPrewarm: parseOptionalBoolean(env.LDXP_BROWSER_PREWARM, 'LDXP_BROWSER_PREWARM', defaultConfig.browserPrewarm),
+    paidWatchPollIntervalMs: parseOptionalPositiveInteger(
+      env.LDXP_PAID_WATCH_POLL_INTERVAL_MS,
+      'LDXP_PAID_WATCH_POLL_INTERVAL_MS',
+      defaultConfig.paidWatchPollIntervalMs,
     ),
     debugSnapshotDir: valueOrDefault(firstDefined(env.LDXP_BROWSER_SNAPSHOT_DIR, env.LDXP_DEBUG_SNAPSHOT_DIR), defaultConfig.debugSnapshotDir),
     imapHost: optionalTrimmed(firstDefined(env.LDXP_IMAP_HOST, env.QQ_IMAP_HOST)),

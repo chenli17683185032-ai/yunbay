@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -55,6 +56,8 @@ func setupLdxpTopupControllerTest(t *testing.T) *gorm.DB {
 		&model.Redemption{},
 		&model.TopUp{},
 		&model.Log{},
+		&model.AffiliateCommission{},
+		&model.AffiliateWithdrawal{},
 	))
 
 	t.Cleanup(func() {
@@ -106,6 +109,9 @@ func ldxpControllerRoutePattern(path string) string {
 		return "/ldxp/topup/session/:session_id"
 	}
 	if strings.HasPrefix(path, "/ldxp/worker/sessions/") {
+		if strings.HasSuffix(path, "/active") {
+			return "/ldxp/worker/sessions/:session_id/active"
+		}
 		if strings.HasSuffix(path, "/qr") {
 			return "/ldxp/worker/sessions/:session_id/qr"
 		}
@@ -247,6 +253,79 @@ func TestWorkerClaimRequiresToken(t *testing.T) {
 
 	body := assertLdxpAPIResponse(t, recorder)
 	assert.Equal(t, false, body["success"])
+}
+
+func TestWorkerGetLdxpSessionActiveReflectsUserCancel(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	user := createLdxpControllerTestUser(t, "ldxp_worker_active")
+	createLdxpControllerSession(t, user.Id, "ldxp-worker-active", model.LdxpStatusWorkerClaimed)
+
+	activeRecorder := performLdxpControllerRequest(WorkerGetLdxpSessionActive, http.MethodPost, "/ldxp/worker/sessions/ldxp-worker-active/active", gin.H{
+		"worker_id": "worker-a",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+	activeBody := assertLdxpAPIResponse(t, activeRecorder)
+	require.Equal(t, true, activeBody["success"])
+	activeData, ok := activeBody["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, activeData["active"])
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, activeData["status"])
+
+	require.NoError(t, service.CancelLdxpTopupSession("ldxp-worker-active", user.Id))
+
+	canceledRecorder := performLdxpControllerRequest(WorkerGetLdxpSessionActive, http.MethodPost, "/ldxp/worker/sessions/ldxp-worker-active/active", gin.H{
+		"worker_id": "worker-a",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+	canceledBody := assertLdxpAPIResponse(t, canceledRecorder)
+	require.Equal(t, true, canceledBody["success"])
+	canceledData, ok := canceledBody["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, false, canceledData["active"])
+	assert.Equal(t, model.LdxpStatusCanceled, canceledData["status"])
+}
+
+func TestWorkerGetLdxpSessionActiveTreatsMissingSessionAsInactive(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+
+	recorder := performLdxpControllerRequest(WorkerGetLdxpSessionActive, http.MethodPost, "/ldxp/worker/sessions/ldxp-missing/active", gin.H{
+		"worker_id": "worker-a",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+	body := assertLdxpAPIResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+	data, ok := body["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ldxp-missing", data["session_id"])
+	assert.Equal(t, false, data["active"])
+}
+
+func TestWorkerClaimPaidWatchReturnsQrReadySession(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+	user := createLdxpControllerTestUser(t, "ldxp_paid_watch")
+	session := createLdxpControllerSession(t, user.Id, "ldxp-paid-watch", model.LdxpStatusQrReady)
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).
+		Where("id = ?", session.Id).
+		Updates(map[string]interface{}{
+			"amount":              10,
+			"money":               10,
+			"worker_amount":       10.3,
+			"worker_product_name": "LDXP 10",
+			"qr_page_url":         "https://excashier.alipay.com/standard/auth.htm",
+		}).Error)
+
+	recorder := performLdxpControllerRequest(WorkerClaimLdxpPaidWatchSession, http.MethodPost, "/ldxp/worker/sessions/claim-paid-watch", gin.H{
+		"worker_id": "worker-a",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+
+	body := assertLdxpAPIResponse(t, recorder)
+	require.Equal(t, true, body["success"])
+	data, ok := body["data"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "ldxp-paid-watch", data["session_id"])
+	assert.Equal(t, float64(10), data["amount"])
+	assert.Equal(t, float64(10), data["money"])
+	assert.Equal(t, "LDORDER123", data["worker_order_no"])
+	assert.Equal(t, 10.3, data["worker_amount"])
+	assert.Equal(t, "LDXP 10", data["worker_product_name"])
+	assert.Equal(t, "https://excashier.alipay.com/standard/auth.htm", data["qr_page_url"])
 }
 
 func TestWorkerQrUpdateRequiresToken(t *testing.T) {

@@ -5,6 +5,8 @@ import type { AddressInfo } from 'node:net'
 import { once } from 'node:events'
 import {
   claimSession,
+  claimPaidWatchSession,
+  isSessionActive,
   postError,
   postMailEvent,
   postQr,
@@ -65,6 +67,8 @@ function config(baseUrl: string): WorkerConfig {
     paymentTimeoutMs: 900000,
     resultTimeoutMs: 120000,
     releaseSessionSlotAfterQr: false,
+    browserPrewarm: false,
+    paidWatchPollIntervalMs: 1000,
     debugSnapshotDir: '/app/snapshots',
     mockMode: false,
   }
@@ -109,6 +113,102 @@ test('claimSession posts worker id and returns claimed session data', async () =
   }
 })
 
+
+test('isSessionActive posts worker id and returns backend active flag', async () => {
+  let captured: CapturedRequest | undefined
+  const server = await withServer(async (req, res) => {
+    captured = {
+      method: req.method,
+      url: req.url,
+      token: req.headers['x-ldxp-worker-token'] as string | undefined,
+      body: await readBody(req),
+    }
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({
+      success: true,
+      data: {
+        session_id: 'sess-active',
+        status: 'worker_claimed',
+        active: true,
+      },
+    }))
+  })
+
+  try {
+    const active = await isSessionActive(config(server.baseUrl), 'sess-active')
+    assert.deepEqual(captured, {
+      method: 'POST',
+      url: '/api/ldxp/worker/sessions/sess-active/active',
+      token: 'worker-token-secret',
+      body: { worker_id: 'worker-a' },
+    })
+    assert.equal(active, true)
+  } finally {
+    await server.close()
+  }
+})
+
+test('isSessionActive treats missing or canceled sessions as inactive', async () => {
+  const server = await withServer(async (_req, res) => {
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({
+      success: true,
+      data: {
+        session_id: 'sess-canceled',
+        status: 'canceled',
+        active: false,
+      },
+    }))
+  })
+
+  try {
+    const active = await isSessionActive(config(server.baseUrl), 'sess-canceled')
+    assert.equal(active, false)
+  } finally {
+    await server.close()
+  }
+})
+
+test('claimPaidWatchSession posts worker id and returns qr-ready watch data', async () => {
+  let captured: CapturedRequest | undefined
+  const server = await withServer(async (req, res) => {
+    captured = {
+      method: req.method,
+      url: req.url,
+      token: req.headers['x-ldxp-worker-token'] as string | undefined,
+      body: await readBody(req),
+    }
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({
+      success: true,
+      data: {
+        session_id: 'sess-watch',
+        amount: 10,
+        money: 0.1,
+        worker_order_no: 'LDWATCH001',
+        worker_amount: 0.1,
+        worker_product_name: '0.1 元测试',
+        qr_page_url: 'https://example.test/qr',
+        expires_at: 2000,
+      },
+    }))
+  })
+
+  try {
+    const session = await claimPaidWatchSession(config(server.baseUrl))
+    assert.deepEqual(captured, {
+      method: 'POST',
+      url: '/api/ldxp/worker/sessions/claim-paid-watch',
+      token: 'worker-token-secret',
+      body: { worker_id: 'worker-a' },
+    })
+    assert.equal(session?.session_id, 'sess-watch')
+    assert.equal(session?.worker_order_no, 'LDWATCH001')
+  } finally {
+    await server.close()
+  }
+})
+
 test('claimSession treats 404 and empty success data as no job', async () => {
   const noJob = await withServer((_req, res) => {
     res.statusCode = 404
@@ -128,6 +228,19 @@ test('claimSession treats 404 and empty success data as no job', async () => {
     assert.equal(await claimSession(config(emptyData.baseUrl)), null)
   } finally {
     await emptyData.close()
+  }
+})
+
+test('claimPaidWatchSession treats 404 as no watch job', async () => {
+  const noJob = await withServer((_req, res) => {
+    res.statusCode = 404
+    res.end('not found')
+  })
+
+  try {
+    assert.equal(await claimPaidWatchSession(config(noJob.baseUrl)), null)
+  } finally {
+    await noJob.close()
   }
 })
 

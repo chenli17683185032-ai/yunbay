@@ -366,6 +366,53 @@ func TestPublicLdxpSessionViewDoesNotExposeCardKey(t *testing.T) {
 	assert.NotContains(t, renderedView, "SECRET-MAIL-CARD")
 }
 
+func TestGetLdxpWorkerSessionStateReflectsCancellation(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_worker_state",
+		UserId:      1001,
+		Status:      model.LdxpStatusWorkerClaimed,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: common.GetTimestamp() + 1200,
+	})
+
+	state, err := GetLdxpWorkerSessionState("ldxp_worker_state", " worker-a ")
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	assert.Equal(t, "ldxp_worker_state", state.SessionID)
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, state.Status)
+	assert.Equal(t, true, state.Active)
+
+	require.NoError(t, CancelLdxpTopupSession("ldxp_worker_state", 1001))
+
+	state, err = GetLdxpWorkerSessionState("ldxp_worker_state", "worker-a")
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	assert.Equal(t, model.LdxpStatusCanceled, state.Status)
+	assert.Equal(t, false, state.Active)
+}
+
+func TestGetLdxpWorkerSessionStateRejectsDifferentWorker(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_worker_state_wrong_worker",
+		UserId:      1001,
+		Status:      model.LdxpStatusWorkerClaimed,
+		WorkerId:    "worker-a",
+		CreatedTime: 100,
+		UpdatedTime: 100,
+		ExpiredTime: common.GetTimestamp() + 1200,
+	})
+
+	state, err := GetLdxpWorkerSessionState("ldxp_worker_state_wrong_worker", "worker-b")
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	assert.Equal(t, model.LdxpStatusWorkerClaimed, state.Status)
+	assert.Equal(t, false, state.Active)
+}
+
 func TestClaimLdxpTopupSessionMovesCreatedSessionToWorkerClaimed(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	now := common.GetTimestamp()
@@ -403,6 +450,46 @@ func TestClaimLdxpTopupSessionRejectsNilConfig(t *testing.T) {
 	require.Error(t, err)
 	assert.Nil(t, session)
 	assert.ErrorIs(t, err, ErrLdxpInvalidSessionRequest)
+}
+
+func TestClaimLdxpPaidWatchSessionReturnsQrReadySession(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	now := common.GetTimestamp()
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:         "ldxp_paid_watch_ready",
+		UserId:            1001,
+		Amount:            10,
+		Money:             10,
+		Status:            model.LdxpStatusQrReady,
+		WorkerId:          "worker-a",
+		WorkerOrderNo:     "LDWATCHREADY",
+		WorkerAmount:      10.3,
+		WorkerProductName: "LDXP 10",
+		QrPageUrl:         "https://excashier.alipay.com/standard/auth.htm",
+		CreatedTime:       now - 10,
+		UpdatedTime:       now - 5,
+		ExpiredTime:       now + 1200,
+	})
+	insertLdxpSessionForServiceTest(t, &model.LdxpTopupSession{
+		SessionId:   "ldxp_paid_watch_worker_paid",
+		UserId:      1002,
+		Amount:      20,
+		Money:       20,
+		Status:      model.LdxpStatusWorkerPaid,
+		WorkerId:    "worker-a",
+		CreatedTime: now - 20,
+		UpdatedTime: now - 20,
+		ExpiredTime: now + 1200,
+	})
+
+	session, err := ClaimLdxpPaidWatchSession(" worker-a ", testLdxpSessionConfig(true))
+
+	require.NoError(t, err)
+	require.NotNil(t, session)
+	assert.Equal(t, "ldxp_paid_watch_ready", session.SessionId)
+	assert.Equal(t, model.LdxpStatusQrReady, session.Status)
+	assert.Equal(t, "LDWATCHREADY", session.WorkerOrderNo)
+	assert.Equal(t, "https://excashier.alipay.com/standard/auth.htm", session.QrPageUrl)
 }
 
 func TestRecordLdxpQrRejectsMissingOrderNo(t *testing.T) {

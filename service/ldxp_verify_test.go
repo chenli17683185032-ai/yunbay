@@ -18,14 +18,30 @@ func setupLdxpVerifyServiceTest(t *testing.T) {
 	t.Helper()
 	initLdxpVerifyModelColumns()
 	setupLdxpSessionServiceTest(t)
-	require.NoError(t, model.DB.AutoMigrate(&model.Redemption{}, &model.TopUp{}, &model.Log{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.Redemption{}, &model.TopUp{}, &model.Log{}, &model.AffiliateCommission{}, &model.AffiliateWithdrawal{}))
 	cleanup := func() {
+		require.NoError(t, model.DB.Exec("DELETE FROM affiliate_withdrawals").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM affiliate_commissions").Error)
 		require.NoError(t, model.DB.Exec("DELETE FROM redemptions").Error)
 		require.NoError(t, model.DB.Exec("DELETE FROM top_ups").Error)
 		require.NoError(t, model.DB.Exec("DELETE FROM logs").Error)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
+}
+
+func insertLdxpVerifyUserWithInviter(t *testing.T, userID int, quota int, inviterID int) {
+	t.Helper()
+	require.NoError(t, model.DB.Create(&model.User{
+		Id:        userID,
+		Username:  fmt.Sprintf("ldxp-verify-user-%d", userID),
+		AffCode:   fmt.Sprintf("ldxp-verify-aff-%d", userID),
+		InviterId: inviterID,
+		Role:      common.RoleCommonUser,
+		Group:     model.UserGroupTiyan,
+		Status:    common.UserStatusEnabled,
+		Quota:     quota,
+	}).Error)
 }
 
 func insertLdxpVerifyUser(t *testing.T, userID int, quota int) {
@@ -391,6 +407,50 @@ func TestVerifyLdxpSessionDirectTopupWithoutMailOrCardWhenMailMatchDisabled(t *t
 	assert.True(t, second.Redeemed)
 	assert.Equal(t, 100+int(10*common.QuotaPerUnit), ldxpVerifyUserQuota(t, 6421))
 	assert.Len(t, ldxpVerifyTopUps(t, 6421), 1)
+}
+
+func TestVerifyLdxpSessionDirectTopupCreatesAffiliateCommission(t *testing.T) {
+	setupLdxpVerifyServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 6720, 0)
+	insertLdxpVerifyUserWithInviter(t, 6721, 100, 6720)
+	insertLdxpVerifySession(t, &model.LdxpTopupSession{
+		SessionId:         "ldxp_verify_direct_topup_affiliate",
+		UserId:            6721,
+		Amount:            100,
+		Money:             100,
+		Status:            model.LdxpStatusWorkerPaid,
+		WorkerId:          "worker-a",
+		WorkerOrderNo:     "LDVERIFYDIRECTAFFILIATE",
+		WorkerAmount:      100,
+		WorkerProductName: "100 元充值",
+		WorkerStatusText:  "支付成功",
+		WorkerSuccessUrl:  "https://pay.ldxp.cn/order/result/LDVERIFYDIRECTAFFILIATE",
+	})
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_direct_topup_affiliate")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, model.LdxpStatusSuccess, result.Status)
+	var commission model.AffiliateCommission
+	require.NoError(t, model.DB.Where("inviter_user_id = ? AND invitee_user_id = ?", 6720, 6721).First(&commission).Error)
+	assert.Equal(t, 6720, commission.InviterUserId)
+	assert.Equal(t, 6721, commission.InviteeUserId)
+	assert.Equal(t, 15.0, commission.CommissionMoney)
+	assert.Equal(t, model.AffiliateCommissionStatusAvailable, commission.Status)
+}
+
+func TestVerifyLdxpWorkerPaidFieldsAllowsCardNetworkFee(t *testing.T) {
+	session := &model.LdxpTopupSession{
+		SessionId:        "ldxp_verify_fee_allowed",
+		Money:            10,
+		WorkerOrderNo:    "LDFEEALLOWED",
+		WorkerAmount:     10.3,
+		WorkerStatusText: "支付成功",
+	}
+
+	require.NoError(t, VerifyLdxpWorkerPaidFields(session))
 }
 
 func TestVerifyLdxpSessionDirectTopupUpgradesUserToVIPAtThreshold(t *testing.T) {

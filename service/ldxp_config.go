@@ -12,7 +12,7 @@ import (
 )
 
 type LdxpProductConfig struct {
-	// Amount is the Yunbei top-up face value/tier and must be one of 10,20,30,50,100,500.
+	// Amount is the Yunbei top-up face value/tier and must be exactly one of 10,20,30,50,100,500.
 	Amount int64 `json:"amount"`
 	// Money is the actual LDXP checkout amount. Test/POC products may use a different
 	// payment amount from Amount (for example amount=10, money=0.10), but it must be positive.
@@ -36,12 +36,12 @@ type LdxpConfig struct {
 }
 
 const defaultLdxpProductsJSON = `[
-  {"amount":10,"money":10,"product_url":"https://example.test/ldxp/10","product_name":"LDXP 10"},
-  {"amount":20,"money":20,"product_url":"https://example.test/ldxp/20","product_name":"LDXP 20"},
-  {"amount":30,"money":30,"product_url":"https://example.test/ldxp/30","product_name":"LDXP 30"},
-  {"amount":50,"money":50,"product_url":"https://example.test/ldxp/50","product_name":"LDXP 50"},
-  {"amount":100,"money":100,"product_url":"https://example.test/ldxp/100","product_name":"LDXP 100"},
-  {"amount":500,"money":500,"product_url":"https://example.test/ldxp/500","product_name":"LDXP 500"}
+  {"amount":10,"money":10,"product_url":"https://pay.ldxp.cn/item/nzkyrt","product_name":"LDXP 10"},
+  {"amount":20,"money":20,"product_url":"https://pay.ldxp.cn/item/ka4pg7","product_name":"LDXP 20"},
+  {"amount":30,"money":30,"product_url":"https://pay.ldxp.cn/item/n8schm","product_name":"LDXP 30"},
+  {"amount":50,"money":50,"product_url":"https://pay.ldxp.cn/item/5c4yft","product_name":"LDXP 50"},
+  {"amount":100,"money":100,"product_url":"https://pay.ldxp.cn/item/sb48mz","product_name":"LDXP 100"},
+  {"amount":500,"money":500,"product_url":"https://pay.ldxp.cn/item/y8t52c","product_name":"LDXP 500"}
 ]`
 
 var requiredLdxpProductAmounts = []int64{10, 20, 30, 50, 100, 500}

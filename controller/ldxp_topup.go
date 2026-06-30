@@ -51,9 +51,26 @@ type ldxpWorkerClaimResponse struct {
 	ExpiresAt    int64   `json:"expires_at"`
 }
 
+type ldxpWorkerPaidWatchResponse struct {
+	SessionID         string  `json:"session_id"`
+	Amount            int64   `json:"amount"`
+	Money             float64 `json:"money"`
+	WorkerOrderNo     string  `json:"worker_order_no"`
+	WorkerAmount      float64 `json:"worker_amount"`
+	WorkerProductName string  `json:"worker_product_name"`
+	QRPageURL         string  `json:"qr_page_url"`
+	ExpiresAt         int64   `json:"expires_at"`
+}
+
 type ldxpSessionStatusResponse struct {
 	SessionID string `json:"session_id"`
 	Status    string `json:"status"`
+}
+
+type ldxpWorkerSessionActiveResponse struct {
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+	Active    bool   `json:"active"`
 }
 
 type ldxpAdminSessionResponse struct {
@@ -178,6 +195,54 @@ func WorkerClaimLdxpTopupSession(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, buildLdxpWorkerClaimResponse(session))
+}
+
+func WorkerClaimLdxpPaidWatchSession(c *gin.Context) {
+	cfg, ok := requireLdxpWorkerToken(c)
+	if !ok {
+		return
+	}
+
+	var req ldxpWorkerClaimRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	session, err := service.ClaimLdxpPaidWatchSession(req.WorkerID, cfg)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, buildLdxpWorkerPaidWatchResponse(session))
+}
+
+func WorkerGetLdxpSessionActive(c *gin.Context) {
+	if _, ok := requireLdxpWorkerToken(c); !ok {
+		return
+	}
+
+	var req ldxpWorkerClaimRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	state, err := service.GetLdxpWorkerSessionState(c.Param("session_id"), req.WorkerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			common.ApiSuccess(c, &ldxpWorkerSessionActiveResponse{
+				SessionID: c.Param("session_id"),
+				Active:    false,
+			})
+			return
+		}
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, &ldxpWorkerSessionActiveResponse{
+		SessionID: state.SessionID,
+		Status:    state.Status,
+		Active:    state.Active,
+	})
 }
 
 func WorkerRecordLdxpQr(c *gin.Context) {
@@ -370,6 +435,22 @@ func buildLdxpWorkerClaimResponse(session *model.LdxpTopupSession) *ldxpWorkerCl
 		ProductName:  session.ProductName,
 		ContactEmail: session.ContactEmail,
 		ExpiresAt:    session.ExpiredTime,
+	}
+}
+
+func buildLdxpWorkerPaidWatchResponse(session *model.LdxpTopupSession) *ldxpWorkerPaidWatchResponse {
+	if session == nil {
+		return nil
+	}
+	return &ldxpWorkerPaidWatchResponse{
+		SessionID:         session.SessionId,
+		Amount:            session.Amount,
+		Money:             session.Money,
+		WorkerOrderNo:     session.WorkerOrderNo,
+		WorkerAmount:      session.WorkerAmount,
+		WorkerProductName: session.WorkerProductName,
+		QRPageURL:         session.QrPageUrl,
+		ExpiresAt:         session.ExpiredTime,
 	}
 }
 

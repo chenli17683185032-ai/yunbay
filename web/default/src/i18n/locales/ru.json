@@ -4834,6 +4834,26 @@
     "Redemption code creation is not enabled": "Создание кодов погашения не включено",
     "Waffo": "Waffo",
     "Copy created codes": "Скопировать созданные коды",
-    "Face amount must be a whole number.": "Номинал должен быть целым числом."
+    "Face amount must be a whole number.": "Номинал должен быть целым числом.",
+    "After submitting, this amount will be frozen": "После отправки эта сумма будет заморожена",
+    "Alipay, WeChat, email, or other payout contact": "Alipay, WeChat, email или другой контакт для выплаты",
+    "Apply for Withdrawal": "Запросить вывод",
+    "Commission Rate": "Ставка комиссии",
+    "Contact information": "Контактная информация",
+    "Earn 15% monetary rewards when invited users complete paid top-ups.": "Получайте денежное вознаграждение 15%, когда приглашённые пользователи завершают платные пополнения.",
+    "Failed to submit withdrawal request": "Не удалось отправить заявку на вывод",
+    "Frozen Rewards": "Замороженные награды",
+    "Maximum available": "Максимум доступно",
+    "Optional note for the administrator": "Необязательное примечание для администратора",
+    "Submit Request": "Отправить заявку",
+    "Submit a withdrawal request for your referral rewards. The administrator will contact you for manual payout.": "Отправьте заявку на вывод реферальных наград. Администратор свяжется с вами для ручной выплаты.",
+    "The administrator will use this contact to process the payout.": "Администратор использует этот контакт для обработки выплаты.",
+    "Total Rewards": "Всего наград",
+    "Withdrawal Amount": "Сумма вывода",
+    "Withdrawal amount exceeds available rewards": "Сумма вывода превышает доступные награды",
+    "Withdrawal amount must be greater than 0": "Сумма вывода должна быть больше 0",
+    "Withdrawal contact is required": "Требуется контакт для вывода",
+    "Withdrawal request submitted": "Заявка на вывод отправлена",
+    "Withdrawn Rewards": "Выведенные награды"
   }
 }

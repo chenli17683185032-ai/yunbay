@@ -17,6 +17,8 @@ function config(): WorkerConfig {
     paymentTimeoutMs: 900000,
     resultTimeoutMs: 120000,
     releaseSessionSlotAfterQr: false,
+    browserPrewarm: false,
+    paidWatchPollIntervalMs: 1000,
     debugSnapshotDir: '/app/snapshots',
     mockMode: false,
   }

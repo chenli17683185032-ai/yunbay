@@ -4834,6 +4834,26 @@
     "Redemption code creation is not enabled": "交換コードの作成が有効になっていません",
     "Waffo": "Waffo",
     "Copy created codes": "作成したコードをコピー",
-    "Face amount must be a whole number.": "額面は整数である必要があります。"
+    "Face amount must be a whole number.": "額面は整数である必要があります。",
+    "After submitting, this amount will be frozen": "送信後、この金額は凍結されます",
+    "Alipay, WeChat, email, or other payout contact": "Alipay、WeChat、メール、またはその他の支払い連絡先",
+    "Apply for Withdrawal": "出金を申請",
+    "Commission Rate": "コミッション率",
+    "Contact information": "連絡先情報",
+    "Earn 15% monetary rewards when invited users complete paid top-ups.": "招待したユーザーが有料チャージを完了すると、15% の金銭報酬を獲得できます。",
+    "Failed to submit withdrawal request": "出金申請の送信に失敗しました",
+    "Frozen Rewards": "凍結中の報酬",
+    "Maximum available": "出金可能上限",
+    "Optional note for the administrator": "管理者への任意メモ",
+    "Submit Request": "申請を送信",
+    "Submit a withdrawal request for your referral rewards. The administrator will contact you for manual payout.": "紹介報酬の出金申請を送信します。管理者が手動支払いのために連絡します。",
+    "The administrator will use this contact to process the payout.": "管理者はこの連絡先を使用して支払いを処理します。",
+    "Total Rewards": "報酬合計",
+    "Withdrawal Amount": "出金額",
+    "Withdrawal amount exceeds available rewards": "出金額が利用可能な報酬を超えています",
+    "Withdrawal amount must be greater than 0": "出金額は 0 より大きくなければなりません",
+    "Withdrawal contact is required": "出金用の連絡先が必要です",
+    "Withdrawal request submitted": "出金申請を送信しました",
+    "Withdrawn Rewards": "出金済み報酬"
   }
 }

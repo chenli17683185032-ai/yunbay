@@ -30,6 +30,21 @@ test('loadConfigFromEnv defaults mock mode to false without requiring a mock car
   assert.equal(config.mockCardKey, undefined)
 })
 
+test('loadConfigFromEnv keeps the cashier page open by default and allows explicit slot release', () => {
+  const defaultConfig = loadConfigFromEnv({
+    BACKEND_BASE_URL: 'https://backend.example',
+    LDXP_WORKER_TOKEN: 'token',
+  })
+  const enabledConfig = loadConfigFromEnv({
+    BACKEND_BASE_URL: 'https://backend.example',
+    LDXP_WORKER_TOKEN: 'token',
+    LDXP_RELEASE_SLOT_AFTER_QR: 'true',
+  })
+
+  assert.equal(defaultConfig.releaseSessionSlotAfterQr, false)
+  assert.equal(enabledConfig.releaseSessionSlotAfterQr, true)
+})
+
 test('loadConfigFromEnv enables mock mode with a trimmed mock card key', () => {
   const config = loadConfigFromEnv({
     BACKEND_BASE_URL: 'https://backend.example',
@@ -87,6 +102,8 @@ test('loadConfigFromEnv reads token file, trims whitespace, and parses numeric v
     LDXP_PAYMENT_TIMEOUT_MS: '900000',
     LDXP_RESULT_TIMEOUT_MS: '150000',
     LDXP_BROWSER_SNAPSHOT_DIR: '/tmp/snapshots',
+    LDXP_BROWSER_PREWARM: 'true',
+    LDXP_PAID_WATCH_POLL_INTERVAL_MS: '3500',
     QQ_IMAP_HOST: 'imap.qq.com',
     QQ_IMAP_PORT: '993',
     QQ_IMAP_USER: '10256345@qq.com',
@@ -103,6 +120,8 @@ test('loadConfigFromEnv reads token file, trims whitespace, and parses numeric v
   assert.equal(config.qrTimeoutMs, 65000)
   assert.equal(config.paymentTimeoutMs, 900000)
   assert.equal(config.resultTimeoutMs, 150000)
+  assert.equal(config.browserPrewarm, true)
+  assert.equal(config.paidWatchPollIntervalMs, 3500)
   assert.equal(config.debugSnapshotDir, '/tmp/snapshots')
   assert.equal(config.imapHost, 'imap.qq.com')
   assert.equal(config.imapPort, 993)

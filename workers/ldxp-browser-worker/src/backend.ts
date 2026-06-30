@@ -9,6 +9,23 @@ export interface ClaimedSession {
   contact_email: string
 }
 
+export interface PaidWatchSession {
+  session_id: string
+  amount: number
+  money: number
+  worker_order_no: string
+  worker_amount: number
+  worker_product_name: string
+  qr_page_url: string
+  expires_at: number
+}
+
+export interface WorkerSessionState {
+  session_id: string
+  status: string
+  active: boolean
+}
+
 export interface WorkerQrPayload {
   worker_order_no: string
   worker_amount: number
@@ -65,6 +82,26 @@ export async function claimSession(config: WorkerConfig, signal?: AbortSignal): 
   }
 
   return response.data
+}
+
+export async function claimPaidWatchSession(config: WorkerConfig, signal?: AbortSignal): Promise<PaidWatchSession | null> {
+  const response = await postJson<PaidWatchSession>(config, '/api/ldxp/worker/sessions/claim-paid-watch', {
+    worker_id: config.workerId,
+  }, { allowNotFound: true, signal })
+
+  if (response.status === 404 || response.data == null || isEmptyObject(response.data)) {
+    return null
+  }
+
+  return response.data
+}
+
+export async function isSessionActive(config: WorkerConfig, sessionId: string, signal?: AbortSignal): Promise<boolean> {
+  const response = await postJson<WorkerSessionState>(config, `/api/ldxp/worker/sessions/${encodeURIComponent(sessionId)}/active`, {
+    worker_id: config.workerId,
+  }, { allowNotFound: true, signal })
+
+  return response.status !== 404 && response.data?.active === true
 }
 
 export async function postQr(config: WorkerConfig, sessionId: string, payload: WorkerQrPayload): Promise<void> {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type TopUp struct {
@@ -50,6 +51,8 @@ var (
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
 )
+
+var rechargeEpayCacheIncrUserQuota = cacheIncrUserQuota
 
 const VIPUpgradeThresholdMoney = 30.0
 
@@ -219,6 +222,9 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		quota = topUp.Money * common.QuotaPerUnit
 		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(map[string]interface{}{"stripe_customer": customerId, "quota": gorm.Expr("quota + ?", quota)}).Error
 		if err != nil {
+			return err
+		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
@@ -459,6 +465,9 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
 			return err
 		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
+			return err
+		}
 		var upgradeErr error
 		vipUpgraded, upgradeErr = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
 		if upgradeErr != nil {
@@ -483,6 +492,82 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
 	return nil
 }
+
+func RechargeEpay(referenceId string, actualPaymentMethod string, callerIp string) error {
+	if referenceId == "" {
+		return errors.New("未提供支付单号")
+	}
+
+	var quotaToAdd int
+	var vipUpgraded bool
+	topUp := &TopUp{}
+	completed := false
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := rechargeEpayTopUpQueryForUpdate(tx, referenceId).First(topUp).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderEpay {
+			return ErrPaymentMethodMismatch
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusPending {
+			return ErrTopUpStatusInvalid
+		}
+		if actualPaymentMethod != "" && topUp.PaymentMethod != actualPaymentMethod {
+			topUp.PaymentMethod = actualPaymentMethod
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err := tx.Save(topUp).Error; err != nil {
+			return err
+		}
+
+		quotaToAdd = int(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
+			return err
+		}
+		var upgradeErr error
+		vipUpgraded, upgradeErr = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
+		if upgradeErr != nil {
+			return upgradeErr
+		}
+		completed = true
+		return nil
+	})
+	if err != nil {
+		common.SysError("epay topup failed: " + err.Error())
+		return err
+	}
+	if vipUpgraded {
+		_ = UpdateUserGroupCache(topUp.UserId, UserGroupVIP)
+	}
+	if completed {
+		if err := rechargeEpayCacheIncrUserQuota(topUp.UserId, int64(quotaToAdd)); err != nil {
+			common.SysLog("failed to increase epay user quota cache: " + err.Error())
+		}
+		RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
+	}
+	return nil
+}
+
+func rechargeEpayTopUpQueryForUpdate(tx *gorm.DB, referenceId string) *gorm.DB {
+	query := tx.Where("trade_no = ?", referenceId)
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	return query
+}
+
 func RechargeCreem(referenceId string, customerEmail string, customerName string, callerIp string) (err error) {
 	if referenceId == "" {
 		return errors.New("未提供支付单号")
@@ -543,6 +628,9 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 
 		err = tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updateFields).Error
 		if err != nil {
+			return err
+		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
@@ -615,6 +703,9 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
 			return err
 		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
+			return err
+		}
 		var upgradeErr error
 		vipUpgraded, upgradeErr = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
 		if upgradeErr != nil {
@@ -684,6 +775,9 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		}
 
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 		var upgradeErr error
