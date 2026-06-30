@@ -31,6 +31,7 @@ const (
 	PaymentMethodWaffoPancake   = "waffo_pancake"
 	PaymentMethodBalance        = "balance"
 	PaymentMethodRedemptionCode = "redemption_code"
+	PaymentMethodLDXP           = "ldxp"
 )
 
 const (
@@ -41,6 +42,7 @@ const (
 	PaymentProviderWaffoPancake   = "waffo_pancake"
 	PaymentProviderBalance        = "balance"
 	PaymentProviderRedemptionCode = "redemption_code"
+	PaymentProviderLDXP           = "ldxp"
 )
 
 var (

@@ -1,0 +1,438 @@
+import { basename } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { setTimeout as sleep } from 'node:timers/promises'
+import pino, { type Logger } from 'pino'
+import { loadConfigFromEnv, type WorkerConfig } from './config.js'
+import {
+  claimSession,
+  postError,
+  postMailEvent,
+  postQr,
+  postResult,
+  type ClaimedSession,
+  type WorkerErrorPayload,
+} from './backend.js'
+import { runBrowserFlow, type BrowserFlowDiagnostics, type BrowserFlowResult, type BrowserPaidResult, type BrowserQrResult } from './browser-flow.js'
+import { runMailPoller } from './mail-poller.js'
+import { buildMockFlowArtifacts } from './mock-flow.js'
+import { redactValue } from './redact.js'
+
+export interface WorkerRuntimeDependencies {
+  claimSession: typeof claimSession
+  runBrowserFlow: typeof runBrowserFlow
+  postQr: typeof postQr
+  postResult: typeof postResult
+  postMailEvent: typeof postMailEvent
+  postError: typeof postError
+  runMailPoller: typeof runMailPoller
+  runMockFlow: typeof buildMockFlowArtifacts
+  logger: LoggerLike
+}
+
+export interface WorkerRuntime {
+  config: WorkerConfig
+  logger: LoggerLike
+  signal: AbortSignal
+  shutdown: () => Promise<void>
+  startMailPoller: () => Promise<void>
+  dependencies: WorkerRuntimeDependencies
+  activeSessions: Set<Promise<void>>
+  activeClaims: Set<Promise<void>>
+}
+
+interface LoggerLike {
+  info: (obj: unknown, msg?: string) => void
+  warn: (obj: unknown, msg?: string) => void
+  error: (obj: unknown, msg?: string) => void
+  debug: (obj: unknown, msg?: string) => void
+  child: (bindings: Record<string, unknown>) => LoggerLike
+}
+
+const defaultDependencies: Omit<WorkerRuntimeDependencies, 'logger'> = {
+  claimSession,
+  runBrowserFlow,
+  postQr,
+  postResult,
+  postMailEvent,
+  postError,
+  runMailPoller,
+  runMockFlow: buildMockFlowArtifacts,
+}
+
+export function createWorkerRuntime(
+  config: WorkerConfig = loadConfigFromEnv(),
+  dependencies: Partial<WorkerRuntimeDependencies> = {},
+): WorkerRuntime {
+  const baseLogger = dependencies.logger ?? createLogger(config)
+  const logger = baseLogger.child({
+    workerId: redactValue(config.workerId),
+    backendBaseUrl: config.backendBaseUrl,
+  })
+
+  const mergedDependencies: WorkerRuntimeDependencies = {
+    claimSession: dependencies.claimSession ?? defaultDependencies.claimSession,
+    runBrowserFlow: dependencies.runBrowserFlow ?? defaultDependencies.runBrowserFlow,
+    postQr: dependencies.postQr ?? defaultDependencies.postQr,
+    postResult: dependencies.postResult ?? defaultDependencies.postResult,
+    postMailEvent: dependencies.postMailEvent ?? defaultDependencies.postMailEvent,
+    postError: dependencies.postError ?? defaultDependencies.postError,
+    runMailPoller: dependencies.runMailPoller ?? defaultDependencies.runMailPoller,
+    runMockFlow: dependencies.runMockFlow ?? defaultDependencies.runMockFlow,
+    logger,
+  }
+
+  const controller = new AbortController()
+  const activeSessions = new Set<Promise<void>>()
+  const activeClaims = new Set<Promise<void>>()
+  let mailPollerStarted = false
+  let mailPollerTask: Promise<void> | undefined
+  let shutdownPromise: Promise<void> | undefined
+
+  return {
+    config,
+    logger,
+    signal: controller.signal,
+    activeSessions,
+    activeClaims,
+    dependencies: mergedDependencies,
+    async shutdown() {
+      if (!shutdownPromise) {
+        controller.abort()
+        if (mailPollerStarted) {
+          logger.info({ activeSessions: activeSessions.size }, 'shutdown requested')
+        }
+        const tasks = [...activeSessions, ...activeClaims]
+        if (mailPollerTask) {
+          tasks.push(mailPollerTask)
+        }
+        shutdownPromise = Promise.allSettled(tasks).then(() => undefined)
+      }
+      await shutdownPromise
+    },
+    async startMailPoller() {
+      if (mailPollerStarted || controller.signal.aborted) {
+        return
+      }
+      mailPollerStarted = true
+      if (config.mockMode) {
+        logger.info({ mockMode: true }, 'mail poller disabled in mock mode')
+        return
+      }
+      if (!hasMailConfig(config)) {
+        logger.warn({ imapConfigured: false }, 'mail poller disabled because IMAP config is incomplete')
+        return
+      }
+      mailPollerTask = superviseMailPoller(config, controller.signal, mergedDependencies.runMailPoller, logger)
+    },
+  }
+}
+
+export async function runClaimLoopOnce(runtime: WorkerRuntime): Promise<number> {
+  let started = 0
+  while (!runtime.signal.aborted && runtime.activeSessions.size < runtime.config.maxConcurrentSessions) {
+    let session: ClaimedSession | null
+    try {
+      session = await claimSessionWithTracking(runtime)
+    } catch (error) {
+      if (runtime.signal.aborted || isAbortError(error)) {
+        break
+      }
+      runtime.logger.warn({ err: sanitizeError(error) }, 'claim session request failed')
+      break
+    }
+    if (runtime.signal.aborted || !session) {
+      break
+    }
+    started += 1
+    trackSession(runtime, processClaimedSession(runtime, session))
+  }
+  return started
+}
+
+async function claimSessionWithTracking(runtime: WorkerRuntime): Promise<ClaimedSession | null> {
+  const claim = runtime.dependencies.claimSession(runtime.config, runtime.signal)
+  const tracked = claim.then(
+    () => undefined,
+    () => undefined,
+  )
+  runtime.activeClaims.add(tracked)
+  try {
+    return await claim
+  } finally {
+    runtime.activeClaims.delete(tracked)
+  }
+}
+
+export async function runClaimLoop(runtime: WorkerRuntime): Promise<void> {
+  await runtime.startMailPoller()
+
+  while (!runtime.signal.aborted) {
+    try {
+      await runClaimLoopOnce(runtime)
+    } catch (error) {
+      runtime.logger.error({ err: sanitizeError(error) }, 'claim loop iteration failed')
+    }
+
+    try {
+      await sleep(runtime.config.pollIntervalMs, undefined, { signal: runtime.signal })
+    } catch (error) {
+      if (runtime.signal.aborted || isAbortError(error)) {
+        break
+      }
+      throw error
+    }
+  }
+
+  await runtime.shutdown()
+}
+
+export async function processClaimedSession(runtime: WorkerRuntime, session: ClaimedSession): Promise<void> {
+  const sessionLogger = runtime.logger.child({
+    sessionId: redactValue(session.session_id),
+    amount: session.amount,
+    money: session.money,
+    productUrl: redactValue(session.product_url),
+  })
+
+  sessionLogger.info({ sessionId: redactValue(session.session_id) }, 'processing claimed session')
+  const diagnostics: BrowserFlowDiagnostics = { timings: [] }
+
+  try {
+    if (runtime.config.mockMode) {
+      await processMockClaimedSession(runtime, session, sessionLogger)
+      return
+    }
+
+    const result = await runtime.dependencies.runBrowserFlow(
+      {
+        sessionId: session.session_id,
+        productUrl: session.product_url,
+        contactEmail: session.contact_email,
+        expectedAmount: session.money,
+        expectedProductName: session.product_name,
+      },
+      {
+        onQr: async (qr) => {
+          await runtime.dependencies.postQr(runtime.config, session.session_id, qr)
+          sessionLogger.info({ workerOrderNo: redactValue(qr.worker_order_no) }, 'qr posted')
+        },
+      },
+      runtime.config,
+      runtime.signal,
+      diagnostics,
+    )
+
+    if (isQrPostedResult(result)) {
+      sessionLogger.info({ workerOrderNo: redactValue(result.worker_order_no), timings: diagnostics.timings }, 'qr posted; session slot released')
+      return
+    }
+
+    await runtime.dependencies.postResult(runtime.config, session.session_id, result)
+    sessionLogger.info({ workerOrderNo: redactValue(result.worker_order_no), timings: diagnostics.timings }, 'result posted')
+  } catch (error) {
+    if (runtime.signal.aborted || isAbortError(error)) {
+      sessionLogger.warn({ err: sanitizeError(error) }, 'session processing aborted during shutdown')
+      return
+    }
+
+    const payload = buildErrorPayload(error, runtime.config)
+    try {
+      await runtime.dependencies.postError(runtime.config, session.session_id, payload)
+    } catch (postErrorFailure) {
+      sessionLogger.error(
+        { err: sanitizeError(postErrorFailure), originalErrorCode: payload.error_code },
+        'failed to post session error',
+      )
+      return
+    }
+    sessionLogger.error({ err: sanitizeError(error), errorCode: payload.error_code, timings: diagnostics.timings }, 'session processing failed')
+  }
+}
+
+function isQrPostedResult(result: BrowserFlowResult): result is Extract<BrowserFlowResult, { kind: 'qr_posted' }> {
+  return 'kind' in result && result.kind === 'qr_posted'
+}
+
+async function processMockClaimedSession(
+  runtime: WorkerRuntime,
+  session: ClaimedSession,
+  sessionLogger: LoggerLike,
+): Promise<void> {
+  const artifacts = runtime.dependencies.runMockFlow(session, runtime.config)
+  await runtime.dependencies.postQr(runtime.config, session.session_id, artifacts.qr)
+  sessionLogger.info({ workerOrderNo: redactValue(artifacts.qr.worker_order_no), mockMode: true }, 'mock qr posted')
+
+  await runtime.dependencies.postResult(runtime.config, session.session_id, artifacts.result)
+  sessionLogger.info({ workerOrderNo: redactValue(artifacts.result.worker_order_no), mockMode: true }, 'mock result posted')
+
+  await runtime.dependencies.postMailEvent(runtime.config, artifacts.mailEvent)
+  sessionLogger.info({ workerOrderNo: redactValue(artifacts.mailEvent.order_no ?? ''), mockMode: true }, 'mock mail event posted')
+}
+
+export function buildErrorPayload(error: unknown, config: WorkerConfig): WorkerErrorPayload {
+  const message = sanitizeError(error)
+  const snapshotPath = extractSnapshotPath(message, config.debugSnapshotDir)
+  return {
+    error_code: 'worker_flow_failed',
+    error_message: truncateMessage(message, 500),
+    ...(snapshotPath ? { snapshot_path: snapshotPath } : {}),
+  }
+}
+
+
+async function superviseMailPoller(
+  config: WorkerConfig,
+  signal: AbortSignal,
+  poller: typeof runMailPoller,
+  logger: LoggerLike,
+): Promise<void> {
+  while (!signal.aborted) {
+    try {
+      await poller(config, signal)
+      if (!signal.aborted) {
+        logger.error({ err: 'mail poller returned without shutdown signal' }, 'mail poller exited unexpectedly')
+      }
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        return
+      }
+      logger.error({ err: sanitizeError(error) }, 'mail poller exited unexpectedly')
+    }
+
+    try {
+      await sleep(mailPollerRestartDelayMs(config), undefined, { signal })
+    } catch (error) {
+      if (signal.aborted || isAbortError(error)) {
+        return
+      }
+      throw error
+    }
+  }
+}
+
+function mailPollerRestartDelayMs(config: WorkerConfig): number {
+  return Math.max(1000, Math.min(config.pollIntervalMs, 5000))
+}
+
+function createLogger(config: WorkerConfig): LoggerLike {
+  return pino({
+    level: process.env.LOG_LEVEL ?? 'info',
+    redact: {
+      paths: [
+        'workerToken',
+        'worker_token',
+        'imapPassword',
+        'imap_password',
+        'mockCardKey',
+        'mock_card_key',
+        'qr_code',
+        'card_key',
+        'worker_card_key',
+      ],
+      remove: true,
+    },
+  }).child({
+    backendBaseUrl: config.backendBaseUrl,
+    workerId: redactValue(config.workerId),
+  })
+}
+
+function trackSession(runtime: WorkerRuntime, promise: Promise<void>): void {
+  runtime.activeSessions.add(promise)
+  promise
+    .catch((error) => {
+      runtime.logger.error({ err: sanitizeError(error) }, 'unhandled session error')
+    })
+    .finally(() => {
+      runtime.activeSessions.delete(promise)
+    })
+}
+
+function sanitizeError(error: unknown): string {
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+  const normalized = raw.replace(/\\+(["'])/g, '$1')
+  return normalized
+    .replace(/data:image\/[A-Za-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g, '[redacted]')
+    .replace(/\balipay:\/\/[^"',\s}]+/gi, '[redacted]')
+    .replace(/(["']?\bAuthorization\b["']?\s*[:=]\s*\[\s*["']?Bearer\s+)[^"',\]\s}]+/gi, '$1[redacted]')
+    .replace(/(["']?\b(?:X-LDXP-Worker-Token|x-api-key)\b["']?\s*[:=]\s*\[\s*["']?)[^"',\]\s}]+/gi, '$1[redacted]')
+    .replace(
+      /(["']?\b(?:workerToken|worker_token|worker-token|imapPassword|imap_password|imap-password|access_token|refresh_token|api_key|apikey|password|secret|token|authorization|card_key|card-key|worker_card_key|worker-card-key|qr_code|qr-code)\b["']?\s*[:=]\s*\[\s*["']?)[^"',\]\s}&]+/gi,
+      '$1[redacted]',
+    )
+    .replace(/(["']?\bAuthorization\b["']?\s*[:=]\s*["']?Bearer\s+)[^"',\s}]+/gi, '$1[redacted]')
+    .replace(/(["']?\b(?:X-LDXP-Worker-Token|x-api-key)\b["']?\s*[:=]\s*["']?)[^"',\s}]+/gi, '$1[redacted]')
+    .replace(/([?&](?:access_token|refresh_token|api_key|apikey|token|password|secret|authorization)=)[^&"',\s}]+/gi, '$1[redacted]')
+    .replace(
+      /(["']?\b(?:workerToken|worker_token|worker-token|imapPassword|imap_password|imap-password|access_token|refresh_token|api_key|apikey|password|secret|token|authorization|card_key|card-key|worker_card_key|worker-card-key|qr_code|qr-code)\b["']?\s*[:=]\s*["']?)[^"',\s}&]+/gi,
+      '$1[redacted]',
+    )
+    .replace(/((?:卡密|授权码)\s*[:：]\s*)[^\s"',，。}]+/g, '$1[redacted]')
+    .replace(/\b(?:worker[-_ ]?token|token|password|secret|authorization|card[-_ ]?key|qr[-_ ]?code)\s+[^"',\s}]+/gi, '[redacted]')
+}
+
+function truncateMessage(message: string, maxLength: number): string {
+  if (message.length <= maxLength) {
+    return message
+  }
+  return `${message.slice(0, maxLength - 1)}…`
+}
+
+function extractSnapshotPath(message: string, snapshotDir: string): string | undefined {
+  const match = message.match(/snapshot=([^:]+?)(?::\s*|$)/i)
+  if (!match?.[1]) {
+    return undefined
+  }
+
+  const normalizedDir = snapshotDir.replaceAll('\\', '/').replace(/\/+$/, '')
+  const parts = match[1]
+    .split(',')
+    .map((part) => part.trim().replaceAll('\\', '/'))
+    .filter(Boolean)
+    .map((part) => {
+      if (normalizedDir && part.startsWith(`${normalizedDir}/`)) {
+        return part.slice(normalizedDir.length + 1)
+      }
+      return basename(part)
+    })
+    .filter(Boolean)
+
+  return parts.length > 0 ? parts.join(',') : undefined
+}
+
+function hasMailConfig(config: WorkerConfig): boolean {
+  return Boolean(config.imapHost && config.imapUser && config.imapPassword)
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+async function main(): Promise<void> {
+  const runtime = createWorkerRuntime()
+  runtime.logger.info({ pollIntervalMs: runtime.config.pollIntervalMs, concurrency: runtime.config.maxConcurrentSessions }, 'worker starting')
+
+  const handleSignal = (signal: NodeJS.Signals) => {
+    runtime.logger.warn({ signal }, 'shutdown signal received')
+    void runtime.shutdown()
+  }
+
+  process.once('SIGINT', handleSignal)
+  process.once('SIGTERM', handleSignal)
+
+  try {
+    await runClaimLoop(runtime)
+  } finally {
+    process.off('SIGINT', handleSignal)
+    process.off('SIGTERM', handleSignal)
+  }
+}
+
+const isMainModule = fileURLToPath(import.meta.url) === process.argv[1]
+if (isMainModule) {
+  void main().catch((error) => {
+    const logger = pino()
+    logger.error({ err: sanitizeError(error) }, 'worker exited with fatal error')
+    process.exitCode = 1
+  })
+}

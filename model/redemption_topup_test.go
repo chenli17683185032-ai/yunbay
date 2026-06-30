@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -49,18 +50,18 @@ func userQuotaForRedemptionTest(t *testing.T, userID int) int {
 	return user.Quota
 }
 
-func userGroupForRedemptionTest(t *testing.T, userID int) string {
-	t.Helper()
-	var user User
-	require.NoError(t, DB.Select("group").Where("id = ?", userID).First(&user).Error)
-	return user.Group
-}
-
 func topUpsForRedemptionTest(t *testing.T, userID int) []TopUp {
 	t.Helper()
 	var topUps []TopUp
 	require.NoError(t, DB.Where("user_id = ?", userID).Order("id asc").Find(&topUps).Error)
 	return topUps
+}
+
+func userGroupForRedemptionTest(t *testing.T, userID int) string {
+	t.Helper()
+	var user User
+	require.NoError(t, DB.Select(commonGroupCol).Where("id = ?", userID).First(&user).Error)
+	return user.Group
 }
 
 func TestRedeemPaidTopupCreatesSuccessfulTopUp(t *testing.T) {
@@ -191,6 +192,18 @@ func TestRedeemReturnsSpecificErrors(t *testing.T) {
 			assert.True(t, errors.Is(err, tc.want), "got %v, want %v", err, tc.want)
 		})
 	}
+}
+
+func TestGenerateRedemptionBatchIdAddsUniqueSuffixForSameSecond(t *testing.T) {
+	const now int64 = 1735689600
+	first := GenerateRedemptionBatchId(RedemptionSourceLDXP, 1000, now)
+	second := GenerateRedemptionBatchId(RedemptionSourceLDXP, 1000, now)
+
+	require.NotEqual(t, first, second)
+	require.LessOrEqual(t, len(first), 64)
+	require.LessOrEqual(t, len(second), 64)
+	assert.Regexp(t, regexp.MustCompile(`^RDMLDXP10001735689600-[A-Za-z0-9]+$`), first)
+	assert.Regexp(t, regexp.MustCompile(`^RDMLDXP10001735689600-[A-Za-z0-9]+$`), second)
 }
 
 func TestNormalizeRedemptionForCreateDefaultsAndValidates(t *testing.T) {

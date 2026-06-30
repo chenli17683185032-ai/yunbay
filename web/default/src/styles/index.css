@@ -623,3 +623,118 @@ For commercial licensing, please contact support@quantumnous.com
     animation: none !important;
   }
 }
+
+@keyframes ldxp-qr-creation-amount-fill {
+  from {
+    width: 0%;
+  }
+
+  to {
+    width: 100%;
+  }
+}
+
+@keyframes ldxp-qr-creation-amount-shine {
+  from {
+    transform: translateX(0%);
+    opacity: 0;
+  }
+
+  12% {
+    opacity: 1;
+  }
+
+  88% {
+    opacity: 1;
+  }
+
+  to {
+    transform: translateX(300%);
+    opacity: 0;
+  }
+}
+
+@keyframes ldxp-qr-creation-pop {
+  0% {
+    transform: translateY(10px) scale(0.78);
+    opacity: 0;
+  }
+
+  55% {
+    transform: translateY(-2px) scale(1.06);
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes ldxp-qr-creation-pulse {
+  0% {
+    transform: scale(0.82);
+    opacity: 0.72;
+  }
+
+  70% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(1.28);
+    opacity: 0;
+  }
+}
+
+@keyframes ldxp-qr-creation-spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ldxp-qr-creation-amount-fill {
+  animation: ldxp-qr-creation-amount-fill var(--ldxp-qr-creation-duration, 30s)
+    linear forwards;
+}
+
+.ldxp-qr-creation-amount-shine {
+  animation: ldxp-qr-creation-amount-shine var(--ldxp-qr-creation-duration, 30s)
+    ease-in-out infinite;
+}
+
+.ldxp-qr-creation-pop {
+  animation: ldxp-qr-creation-pop 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.ldxp-qr-creation-pulse {
+  animation: ldxp-qr-creation-pulse 1.35s ease-out infinite;
+}
+
+.ldxp-qr-creation-progress-ring {
+  background: conic-gradient(
+    from 0deg,
+    color-mix(in oklch, var(--primary) 70%, transparent) 0deg,
+    color-mix(in oklch, var(--primary) 40%, transparent) 92deg,
+    transparent 112deg,
+    transparent 360deg
+  );
+  box-shadow: 0 14px 36px color-mix(in oklch, var(--primary) 18%, transparent);
+  animation: ldxp-qr-creation-spinner 0.9s linear infinite;
+}
+
+.ldxp-qr-creation-spinner {
+  animation: ldxp-qr-creation-spinner 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ldxp-qr-creation-amount-fill,
+  .ldxp-qr-creation-amount-shine,
+  .ldxp-qr-creation-pop,
+  .ldxp-qr-creation-pulse,
+  .ldxp-qr-creation-progress-ring,
+  .ldxp-qr-creation-spinner {
+    animation: none !important;
+  }
+}

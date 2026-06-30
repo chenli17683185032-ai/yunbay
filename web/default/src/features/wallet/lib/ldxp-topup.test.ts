@@ -1,0 +1,101 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import {
+  LDXP_QR_CREATION_ANIMATION_SECONDS,
+  LDXP_TOPUP_AMOUNTS,
+  getSafeLdxpQrCodeSrc,
+  shouldShowLdxpQrCreationHint,
+  getLdxpStatusMessageKey,
+  isLdxpTerminalStatus,
+} from './ldxp-topup'
+
+test('ldxp topup uses fixed allowed amounts', () => {
+  assert.deepEqual(LDXP_TOPUP_AMOUNTS, [10, 20, 30, 50, 100, 500])
+})
+
+test('ldxp topup exposes a 30 second QR creation animation duration', () => {
+  assert.equal(LDXP_QR_CREATION_ANIMATION_SECONDS, 30)
+})
+
+test('ldxp topup shows QR creation hint only while the payment QR is being prepared', () => {
+  assert.equal(shouldShowLdxpQrCreationHint('created'), true)
+  assert.equal(shouldShowLdxpQrCreationHint('worker_claimed'), true)
+  assert.equal(shouldShowLdxpQrCreationHint('qr_ready'), false)
+  assert.equal(shouldShowLdxpQrCreationHint('success'), false)
+  assert.equal(shouldShowLdxpQrCreationHint('worker_failed'), false)
+})
+
+test('ldxp topup detects terminal status', () => {
+  assert.equal(isLdxpTerminalStatus('success'), true)
+  assert.equal(isLdxpTerminalStatus('qr_ready'), false)
+  assert.equal(isLdxpTerminalStatus('verify_failed'), true)
+})
+
+test('ldxp topup maps status to message keys', () => {
+  assert.equal(getLdxpStatusMessageKey('qr_ready'), 'Scan with Alipay to pay')
+  assert.equal(getLdxpStatusMessageKey('success'), 'Recharge successful')
+})
+
+test('ldxp topup groups creation status message keys', () => {
+  assert.equal(getLdxpStatusMessageKey('created'), 'Creating payment QR code')
+  assert.equal(
+    getLdxpStatusMessageKey('worker_claimed'),
+    'Creating payment QR code'
+  )
+})
+
+test('ldxp topup groups verified status message keys', () => {
+  assert.equal(getLdxpStatusMessageKey('verified'), 'Verifying order')
+  assert.equal(getLdxpStatusMessageKey('redeemed'), 'Verifying order')
+})
+
+test('ldxp topup groups failure status message keys', () => {
+  assert.equal(getLdxpStatusMessageKey('worker_failed'), 'Recharge failed')
+  assert.equal(getLdxpStatusMessageKey('mail_timeout'), 'Recharge failed')
+  assert.equal(getLdxpStatusMessageKey('verify_failed'), 'Recharge failed')
+  assert.equal(getLdxpStatusMessageKey('redeem_failed'), 'Recharge failed')
+})
+
+test('ldxp topup only allows safe QR code image sources', () => {
+  const allowed = [
+    'data:image/png;base64,QR',
+    'data:image/jpeg;base64,QR',
+    'data:image/jpg;base64,QR',
+    'data:image/webp;base64,QR',
+    'data:image/gif;base64,QR',
+    'https://example.test/qr.png',
+  ]
+
+  for (const qrCode of allowed) {
+    assert.equal(getSafeLdxpQrCodeSrc(qrCode), qrCode)
+  }
+
+  for (const qrCode of [
+    '',
+    '   ',
+    'http://example.test/qr.png',
+    'javascript:alert(1)',
+    'data:text/html;base64,PGgxPkJvb208L2gxPg==',
+    'data:image/svg+xml,<svg onload=alert(1)>',
+  ]) {
+    assert.equal(getSafeLdxpQrCodeSrc(qrCode), undefined)
+  }
+})
