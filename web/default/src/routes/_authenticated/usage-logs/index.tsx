@@ -16,14 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import z from 'zod'
 import { createFileRoute, redirect } from '@tanstack/react-router'
+import { legacyConsoleLogSearchToUsageLogsSearch } from '@/features/usage-logs/lib/legacy-console-log-route'
 import { USAGE_LOGS_DEFAULT_SECTION } from '@/features/usage-logs/section-registry'
 
+const usageLogsIndexSearchSchema = z.record(z.string(), z.unknown()).catch({})
+
 export const Route = createFileRoute('/_authenticated/usage-logs/')({
-  beforeLoad: () => {
+  validateSearch: usageLogsIndexSearchSchema,
+  beforeLoad: ({ search }) => {
     throw redirect({
       to: '/usage-logs/$section',
       params: { section: USAGE_LOGS_DEFAULT_SECTION },
+      search: legacyConsoleLogSearchToUsageLogsSearch(search),
     })
   },
 })

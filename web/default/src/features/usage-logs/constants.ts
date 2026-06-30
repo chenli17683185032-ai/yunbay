@@ -66,6 +66,17 @@ export const LOG_TYPE_ENUM = {
  * Row rendering still displays records with type=0 as "Unknown".
  */
 export const LOG_TYPE_ALL_VALUE = '0' as const
+export const LOG_TYPE_FILTER_VALUES = [
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+] as const
+export type LogTypeFilterValue = (typeof LOG_TYPE_FILTER_VALUES)[number]
 
 // ============================================================================
 // Time Range Presets

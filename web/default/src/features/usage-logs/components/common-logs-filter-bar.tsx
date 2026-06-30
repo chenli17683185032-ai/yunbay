@@ -37,7 +37,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import {
+  LOG_TYPE_ALL_VALUE,
+  LOG_TYPE_FILTERS,
+  LOG_TYPE_FILTER_VALUES,
+  type LogTypeFilterValue,
+} from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
@@ -51,12 +56,8 @@ import {
 import { useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
-const logTypeValues = ['0', '1', '2', '3', '4', '5', '6'] as const
-
-type LogTypeValue = (typeof logTypeValues)[number]
-
-function isLogTypeValue(value: string): value is LogTypeValue {
-  return (logTypeValues as readonly string[]).includes(value)
+function isLogTypeValue(value: string): value is LogTypeFilterValue {
+  return (LOG_TYPE_FILTER_VALUES as readonly string[]).includes(value)
 }
 
 interface CommonLogsFilterBarProps<TData> {
@@ -78,7 +79,7 @@ export function CommonLogsFilterBar<TData>(
     const { start, end } = getDefaultTimeRange()
     return { startTime: start, endTime: end }
   })
-  const [logType, setLogType] = useState<LogTypeValue>(LOG_TYPE_ALL_VALUE)
+  const [logType, setLogType] = useState<LogTypeFilterValue>(LOG_TYPE_ALL_VALUE)
 
   useEffect(() => {
     const { start, end } = getDefaultTimeRange()
