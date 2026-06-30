@@ -78,6 +78,17 @@ const EditUserModal = (props) => {
   const [inputs, setInputs] = useState(null);
 
   const isEdit = Boolean(userId);
+  const currentGroup = inputs?.group?.trim();
+  const groupSelectOptions =
+    currentGroup && !groupOptions.some((option) => option.value === currentGroup)
+      ? [
+          {
+            label: `${currentGroup}（${t('当前值')}）`,
+            value: currentGroup,
+          },
+          ...groupOptions,
+        ]
+      : groupOptions;
 
   const getInitValues = () => ({
     username: '',
@@ -92,14 +103,19 @@ const EditUserModal = (props) => {
     email: '',
     quota: 0,
     quota_amount: 0,
-    group: 'default',
+    group: '体验用户',
     remark: '',
   });
 
   const fetchGroups = async () => {
     try {
-      let res = await API.get(`/api/group/`);
-      setGroupOptions(res.data.data.map((g) => ({ label: g, value: g })));
+      let res = await API.get(`/api/user/group-tags`);
+      setGroupOptions(
+        res.data.data.map((option) => ({
+          label: option.label,
+          value: option.value,
+        })),
+      );
     } catch (e) {
       showError(e.message);
     }
@@ -359,12 +375,11 @@ const EditUserModal = (props) => {
                       <Col span={24}>
                         <Form.Select
                           field='group'
-                          label={t('分组')}
-                          placeholder={t('请选择分组')}
-                          optionList={groupOptions}
-                          allowAdditions
+                          label={t('用户标签')}
+                          placeholder={t('请选择用户标签')}
+                          optionList={groupSelectOptions}
                           search
-                          rules={[{ required: true, message: t('请选择分组') }]}
+                          rules={[{ required: true, message: t('请选择用户标签') }]}
                         />
                       </Col>
 

@@ -1,7 +1,6 @@
 package ratio_setting
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,27 +9,22 @@ import (
 )
 
 var defaultGroupRatio = map[string]float64{
-	"default": 1,
-	"vip":     1,
-	"svip":    1,
+	"gpt-plus": 0.3,
+	"gpt-pro":  0.4,
 }
 
 var groupRatioMap = types.NewRWMap[string, float64]()
 
 var defaultGroupGroupRatio = map[string]map[string]float64{
-	"vip": {
-		"edit_this": 0.9,
+	"体验用户": {
+		"gpt-plus": 0.99,
+		"gpt-pro":  1.32,
 	},
 }
 
 var groupGroupRatioMap = types.NewRWMap[string, map[string]float64]()
 
-var defaultGroupSpecialUsableGroup = map[string]map[string]string{
-	"vip": {
-		"append_1":   "vip_special_group_1",
-		"-:remove_1": "vip_removed_group_1",
-	},
-}
+var defaultGroupSpecialUsableGroup = map[string]map[string]string{}
 
 type GroupRatioSetting struct {
 	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
@@ -112,7 +106,7 @@ func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
 
 func CheckGroupRatio(jsonStr string) error {
 	checkGroupRatio := make(map[string]float64)
-	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
+	err := common.UnmarshalJsonStr(jsonStr, &checkGroupRatio)
 	if err != nil {
 		return err
 	}

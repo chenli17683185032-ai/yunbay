@@ -533,6 +533,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	var logMoney float64
 	var logPaymentMethod string
 	var upgradeGroup string
+	var vipUpgraded bool
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
 		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", tradeNo).First(&order).Error; err != nil {
@@ -562,6 +563,10 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
 		}
+		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, order.UserId)
+		if err != nil {
+			return err
+		}
 		order.Status = common.TopUpStatusSuccess
 		order.CompleteTime = common.GetTimestamp()
 		if providerPayload != "" {
@@ -582,7 +587,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	if err != nil {
 		return err
 	}
-	if upgradeGroup != "" && logUserId > 0 {
+	if vipUpgraded && logUserId > 0 {
+		_ = UpdateUserGroupCache(logUserId, UserGroupVIP)
+	} else if upgradeGroup != "" && logUserId > 0 {
 		_ = UpdateUserGroupCache(logUserId, upgradeGroup)
 	}
 	if logUserId > 0 {

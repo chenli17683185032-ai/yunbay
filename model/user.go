@@ -2,7 +2,6 @@ package model
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -18,6 +17,23 @@ import (
 )
 
 const UserNameMaxLength = 20
+
+const (
+	UserGroupDefault = "default"
+	UserGroupTiyan   = "体验用户"
+	UserGroupVIP     = "vip"
+)
+
+func NormalizeNewUserGroup(role int, group string) string {
+	trimmed := strings.TrimSpace(group)
+	if trimmed != "" {
+		return trimmed
+	}
+	if role == 0 || role == common.RoleCommonUser {
+		return UserGroupTiyan
+	}
+	return trimmed
+}
 
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
@@ -82,7 +98,7 @@ func (user *User) SetAccessToken(token string) {
 func (user *User) GetSetting() dto.UserSetting {
 	setting := dto.UserSetting{}
 	if user.Setting != "" {
-		err := json.Unmarshal([]byte(user.Setting), &setting)
+		err := common.Unmarshal([]byte(user.Setting), &setting)
 		if err != nil {
 			common.SysLog("failed to unmarshal setting: " + err.Error())
 		}
@@ -91,7 +107,7 @@ func (user *User) GetSetting() dto.UserSetting {
 }
 
 func (user *User) SetSetting(setting dto.UserSetting) {
-	settingBytes, err := json.Marshal(setting)
+	settingBytes, err := common.Marshal(setting)
 	if err != nil {
 		common.SysLog("failed to marshal setting: " + err.Error())
 		return
@@ -152,7 +168,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 	// 普通用户不包含admin区域
 
 	// 转换为JSON字符串
-	configBytes, err := json.Marshal(defaultConfig)
+	configBytes, err := common.Marshal(defaultConfig)
 	if err != nil {
 		common.SysLog("生成默认边栏配置失败: " + err.Error())
 		return ""
@@ -316,6 +332,54 @@ func GetUserIdByAffCode(affCode string) (int, error) {
 	return user.Id, err
 }
 
+type inviterCountRow struct {
+	InviterId int   `gorm:"column:inviter_id"`
+	Count     int64 `gorm:"column:count"`
+}
+
+func CountInviteesByInviterID(inviterID int) (int64, error) {
+	if inviterID <= 0 {
+		return 0, nil
+	}
+	var count int64
+	err := DB.Model(&User{}).Where("inviter_id = ?", inviterID).Count(&count).Error
+	return count, err
+}
+
+func CountInviteesByInviterIDs(inviterIDs []int) (map[int]int64, error) {
+	counts := make(map[int]int64, len(inviterIDs))
+	ids := make([]int, 0, len(inviterIDs))
+	seen := make(map[int]struct{}, len(inviterIDs))
+	for _, id := range inviterIDs {
+		if id <= 0 {
+			continue
+		}
+		counts[id] = 0
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return counts, nil
+	}
+
+	var rows []inviterCountRow
+	err := DB.Model(&User{}).
+		Select("inviter_id, COUNT(*) AS count").
+		Where("inviter_id IN ?", ids).
+		Group("inviter_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.InviterId] = row.Count
+	}
+	return counts, nil
+}
+
 func DeleteUserById(id int) (err error) {
 	if id == 0 {
 		return errors.New("id 为空！")
@@ -388,6 +452,7 @@ func (user *User) Insert(inviterId int) error {
 			return err
 		}
 	}
+	user.Group = NormalizeNewUserGroup(user.Role, user.Group)
 	user.Quota = common.QuotaForNewUser
 	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
@@ -447,6 +512,7 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 			return err
 		}
 	}
+	user.Group = NormalizeNewUserGroup(user.Role, user.Group)
 	user.Quota = common.QuotaForNewUser
 	user.AffCode = common.GetRandomString(4)
 

@@ -108,6 +108,11 @@ export interface UserFormData {
   remark?: string // Only used when updating user
 }
 
+export interface UserGroupTagOption {
+  value: string
+  label: string
+}
+
 export type ManageUserAction =
   | 'promote'
   | 'demote'

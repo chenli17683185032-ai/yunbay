@@ -3576,6 +3576,7 @@
     "Select a store": "ストアを選択",
     "Select a timestamp before clearing logs.": "ログをクリアする前にタイムスタンプを選択してください。",
     "Select a usage mode to continue": "続行するには使用モードを選択してください",
+    "Select a user tag": "ユーザータグを選択",
     "Select a verification method first": "まず検証方法を選択してください",
     "Select all": "すべて選択",
     "Select all (filtered)": "フィルタ結果をすべて選択(S)",
@@ -4759,6 +4760,7 @@
     "Copy one-line terminal install": "1 行のターミナルインストールをコピー",
     "Terminal command copied": "ターミナルコマンドをコピーしました",
     "Failed to copy terminal command": "ターミナルコマンドのコピーに失敗しました",
-    "No available group for the new API key": "新しいAPIキーに使用できるグループがありません"
+    "No available group for the new API key": "新しいAPIキーに使用できるグループがありません",
+    "User Tag": "ユーザータグ"
   }
 }

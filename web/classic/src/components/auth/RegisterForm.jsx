@@ -111,13 +111,23 @@ const RegisterForm = () => {
   const githubTimeoutRef = useRef(null);
   const githubButtonText = t(githubButtonTextKeyByState[githubButtonState]);
 
+  const [affCode, setAffCode] = useState('');
+
   const logo = getLogo();
   const systemName = getSystemName();
 
-  let affCode = new URLSearchParams(window.location.search).get('aff');
-  if (affCode) {
-    localStorage.setItem('aff', affCode);
-  }
+  useEffect(() => {
+    const urlAffCode = new URLSearchParams(window.location.search).get('aff');
+    const savedAffCode = localStorage.getItem('aff') || '';
+    const initialAffCode = urlAffCode !== null ? urlAffCode : savedAffCode;
+
+    setAffCode(initialAffCode);
+    if (initialAffCode.trim()) {
+      localStorage.setItem('aff', initialAffCode);
+    } else if (urlAffCode !== null) {
+      localStorage.removeItem('aff');
+    }
+  }, []);
 
   const status = useMemo(() => {
     if (statusState?.status) return statusState.status;
@@ -215,7 +225,17 @@ const RegisterForm = () => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   }
 
+  function handleAffCodeChange(value) {
+    setAffCode(value);
+    if (value.trim()) {
+      localStorage.setItem('aff', value);
+    } else {
+      localStorage.removeItem('aff');
+    }
+  }
+
   async function handleSubmit(e) {
+    e?.preventDefault?.();
     if (password.length < 8) {
       showInfo('密码长度不得小于 8 位！');
       return;
@@ -231,13 +251,14 @@ const RegisterForm = () => {
       }
       setRegisterLoading(true);
       try {
-        if (!affCode) {
-          affCode = localStorage.getItem('aff');
+        const payload = { ...inputs };
+        const trimmedAffCode = affCode.trim();
+        if (trimmedAffCode) {
+          payload.aff_code = trimmedAffCode;
         }
-        inputs.aff_code = affCode;
         const res = await API.post(
           `/api/user/register?turnstile=${turnstileToken}`,
-          inputs,
+          payload,
         );
         const { success, message } = res.data;
         if (success) {
@@ -606,8 +627,8 @@ const RegisterForm = () => {
                   <>
                     <Form.Input
                       field='email'
-                      label={t('邮箱')}
-                      placeholder={t('输入邮箱地址')}
+                      label={t('邮箱（仅支持 QQ 邮箱）')}
+                      placeholder={t('请输入 QQ 邮箱地址')}
                       name='email'
                       type='email'
                       onChange={(value) => handleChange('email', value)}
@@ -636,6 +657,16 @@ const RegisterForm = () => {
                     />
                   </>
                 )}
+
+                <Form.Input
+                  field='aff_code'
+                  label={t('邀请码（可选）')}
+                  placeholder={t('请输入邀请码，可留空')}
+                  name='aff_code'
+                  value={affCode}
+                  onChange={handleAffCodeChange}
+                  prefix={<IconKey />}
+                />
 
                 {(hasUserAgreement || hasPrivacyPolicy) && (
                   <div className='pt-4'>

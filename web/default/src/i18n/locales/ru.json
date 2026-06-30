@@ -3576,6 +3576,7 @@
     "Select a store": "Выберите магазин",
     "Select a timestamp before clearing logs.": "Выберите временную метку перед очисткой журналов.",
     "Select a usage mode to continue": "Выберите режим использования для продолжения",
+    "Select a user tag": "Выберите метку пользователя",
     "Select a verification method first": "Сначала выберите метод верификации",
     "Select all": "Выбрать все",
     "Select all (filtered)": "& Выбрать все отфильтрованные",
@@ -4759,6 +4760,7 @@
     "Copy one-line terminal install": "Скопировать установку одной командой Terminal",
     "Terminal command copied": "Команда Terminal скопирована",
     "Failed to copy terminal command": "Не удалось скопировать команду Terminal",
-    "No available group for the new API key": "Нет доступной группы для нового API ключа"
+    "No available group for the new API key": "Нет доступной группы для нового API ключа",
+    "User Tag": "Метка пользователя"
   }
 }
