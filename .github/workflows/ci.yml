@@ -35,7 +35,7 @@ jobs:
           bun run --cwd classic build
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: infra/sub2api/backend/go.mod
           cache-dependency-path: infra/sub2api/backend/go.sum
