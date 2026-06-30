@@ -676,3 +676,56 @@ https://yunbay.xyz/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.e
 ```
 
 本次生产验证确认：快速启动页与 Windows 下载入口可访问，后端状态接口可访问，`new-api` 与 `caddy` 容器均为 healthy。
+
+## 2026-06-27 邮件投递切换：Resend SMTP + Cloudflare Routing
+
+### 当前邮件架构
+
+```text
+出站系统邮件：yunbay-new-api -> Resend SMTP -> 用户邮箱
+入站/回复邮件：support@yunbay.xyz -> Cloudflare Email Routing -> 10256345@qq.com
+```
+
+当前生产 SMTP 配置：
+
+```text
+SMTPServer=smtp.resend.com
+SMTPPort=465
+SMTPSSLEnabled=true
+SMTPAccount=resend
+SMTPFrom=support@yunbay.xyz
+SystemName=yunbay
+```
+
+`SMTPToken` 为 Resend API Key，只记录为 `SET`，不要写入仓库文档、GitHub issue、PR、聊天记录或公开日志。
+
+### 切换原因
+
+历史上生产使用 `smtp.qq.com` + QQ 个人邮箱作为 SMTP。虽然已修复 587/STARTTLS 配置错误，但 QQ 发信详情仍会暴露 QQ 邮箱昵称，例如 `ninefourteen <...@qq.com>`。为使用正式域名邮箱身份，生产出站邮件已切到 Resend SMTP，发件地址使用 `support@yunbay.xyz`。
+
+Cloudflare Email Routing 已保留为免费入站转发；Cloudflare Email Sending 未使用，因为该能力需要 Workers Paid。
+
+### 已验证
+
+- 线上服务器直连 Resend SMTP 测试通过：`SMTP_TEST_OK from=support@yunbay.xyz to=10256345@qq.com`。
+- 云贝应用层密码重置接口测试返回：`http_status=200`、`success=true`。
+- `yunbay-new-api` 重启后为 healthy。
+- 最近日志未见 SMTP / TLS / AUTH / Resend / 501 / `failed to send` 相关错误。
+
+### 备份与回滚
+
+切换前备份保存在生产服务器：
+
+```text
+/root/yunbay-smtp-backups/smtp-before-resend-20260627-114705.tsv
+```
+
+回滚时不要在终端或文档中打印备份内容。恢复 `SMTP*` 与 `SystemName` 相关 options 后，需要重启：
+
+```bash
+docker restart yunbay-new-api
+```
+
+然后重新走密码重置或邮箱验证码接口验证发信。
+
+详细公开说明见：`docs/email-delivery.md`。
