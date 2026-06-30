@@ -173,10 +173,56 @@ docker run --name new-api -d --restart always \
 |------|------|
 | 🚀 Deployment Guide | [Installation Documentation](https://docs.newapi.pro/en/docs/installation) |
 | ⚙️ Environment Configuration | [Environment Variables](https://docs.newapi.pro/en/docs/installation/config-maintenance/environment-variables) |
-| 🛠️ Yunbay Maintenance | [Repository maintenance notes, production sync notes, and usage logs compatibility](./docs/yunbay-maintenance.md) |
+| 🛠️ Yunbay Maintenance | [README maintenance audit/log](#maintenance-audit-log) · [Repository maintenance notes, production sync notes, and usage logs compatibility](./docs/yunbay-maintenance.md) |
 | 📡 API Documentation | [API Documentation](https://docs.newapi.pro/en/docs/api) |
 | ❓ FAQ | [FAQ](https://docs.newapi.pro/en/docs/support/faq) |
 | 💬 Community Interaction | [Communication Channels](https://docs.newapi.pro/en/docs/support/community-interaction) |
+
+---
+
+<a id="maintenance-audit-log"></a>
+
+## 🛠️ 维护审计与持续维护日志
+
+本节是项目的**最终维护日志入口**。所有维护人员在完成一次维护、修复、上线、回滚、审计或生产同步后，都必须在本节末尾追加记录；**只能追加，不能复写、覆盖、删除或替换前面的历史内容**。如果之前的记录有误，请新增一条“更正记录”说明原因和正确结论，不要直接改写旧记录。
+
+### 维护记录追加规则
+
+每次维护完成后，请追加一条记录，并至少包含：
+
+- 日期与时区：使用 `YYYY-MM-DD`，默认按 `Asia/Shanghai` 记录。
+- 操作人：Git 作者、维护人或负责账号。
+- 分支与提交：记录维护所在分支、关键 commit hash；未提交时写明工作区状态。
+- 维护范围：列出涉及的模块、页面、接口、配置、部署目标或文档。
+- 验证结果：记录实际执行过的测试、构建、冒烟检查或生产验证命令及结果摘要。
+- 生产状态：说明是否已同步生产、是否需要重启服务、是否有回滚点。
+- 后续事项：记录遗留风险、待合并分支、待清理 worktree、待补测试或待复核项。
+
+> 维护完成后的硬性要求：**先验证，再记录；记录时追加到本节末尾；不要为了“整理格式”覆盖旧日志。**
+
+### 历史版本审计基线（2026-06-30）
+
+本次审计覆盖本地仓库当前可达的全部提交历史与本地/远端引用，审计基线如下：
+
+- 仓库状态：`git rev-parse --is-shallow-repository` 返回 `false`，当前不是浅克隆。
+- 审计范围：`git log --all`、`git for-each-ref refs/heads refs/remotes`、`git worktree list`、`git fsck --full --no-reflogs`。
+- 全引用提交数：`6066` 个提交；当前分支提交数：`5937` 个提交。
+- 历史范围：从 `2023-04-22` 的 `4cbef078`（`Initial commit`）到 `2026-06-30` 的 `83479b48`（`fix(router): register user group tags route`）。
+- 年度分布：`2023: 833`、`2024: 1154`、`2025: 2925`、`2026: 1154`。
+- 远端引用：`origin` 当前有 `10` 个 head、`0` 个 tag，本地 `origin/*` 与远端 head 已对齐。
+- 本地 tag：`0` 个。
+- 历史主题分布（按提交主题粗分类）：`feat: 1385`、`fix: 1332`、`docs: 162`、`refactor: 246`、`chore: 261`、其他历史提交 `2580`。
+- 主要变更热点（按历史触达提交粗分类）：后端 Go `2978`、relay/provider 适配 `1237`、model/db `697`、i18n `436`、docs/README `413`、tests `239`、infra/deploy `181`、`web/default` `203`。
+- 结构结论：历史上项目从上游基础能力演进到当前多前端、多 provider relay、数据库模型、生产部署与云贝本地维护并行的状态；当前维护需要同时关注后端兼容性、默认前端、i18n、生产同步文档和多个并行 Codex worktree/分支。
+- 风险结论：本地存在多个尚未合并到当前分支的 `codex/*` 维护分支与 worktree；删除、reset、clean、覆盖同步前必须确认对应分支是否已经合并、推送或另行备份。
+- 悬空提交：`git fsck` 发现 `5` 个 dangling commit（均为 2026-06-25 到 2026-06-29 的本地维护相关提交）。这些提交不可直接视为当前产品基线；如需恢复，必须先新建分支保存，再审查 diff。
+
+### 持续维护日志
+
+| 日期 | 操作人 | 分支 / 提交 | 维护范围 | 验证结果 | 生产状态 | 后续事项 |
+|------|--------|-------------|----------|----------|----------|----------|
+| 2026-06-30 | Codex | `codex/fix-usage-logs-stat-null` / `ff849d72`；全引用最新 `83479b48` | 审计全部可达 Git 历史、本地/远端引用、worktree、悬空提交；在 `README.md` 建立追加式最终维护日志 | 已执行 Git 历史统计、引用核对、worktree 清点、`git fsck --full --no-reflogs`；本次仅文档维护，未运行后端/前端构建 | 未同步生产；无服务重启 | 以后每次维护都必须在本表末尾追加记录；不要复写旧记录；合并或清理 `codex/*` 分支前先确认对应功能和生产状态 |
+| 2026-06-30 | Codex | `codex/fix-usage-logs-stat-null` / `0a420c3c` | 补提交已在生产执行并验证过的邮件链路维护文档：`docs/email-delivery.md`、`docs/yunbay-maintenance.md`、`infra/cloudflare-plan.md` | 已执行目标文档 diff 核对、敏感信息模式检查、`git diff --check`；提交 `docs: record yunbay email delivery setup` | 记录对应生产状态：Resend SMTP 出站、Cloudflare Email Routing 入站、应用发信验证、`yunbay-new-api` healthy；本次提交本身仅补仓库文档 | 后续邮件配置变更继续追加记录；不要写入 Resend API Key、SMTP Token、Cloudflare Token 或备份文件内容 |
 
 ---
 
