@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Markdown } from '@/components/ui/markdown'
+import { SafeHtml } from '@/components/ui/safe-html'
 import { Skeleton } from '@/components/ui/skeleton'
 import { PublicLayout } from '@/components/layout'
 import { YunbayLogo } from '@/components/layout/components/yunbay-logo'
@@ -179,6 +180,8 @@ export function About() {
           src={rawContent}
           className='h-[calc(100vh-3.5rem)] w-full border-0'
           title={t('About')}
+          sandbox='allow-forms allow-popups allow-scripts'
+          referrerPolicy='no-referrer'
         />
       </PublicLayout>
     )
@@ -192,9 +195,9 @@ export function About() {
     >
       <div className='mx-auto max-w-6xl px-4 py-8'>
         {isHtml ? (
-          <div
+          <SafeHtml
+            html={rawContent}
             className='prose prose-neutral dark:prose-invert max-w-none'
-            dangerouslySetInnerHTML={{ __html: rawContent }}
           />
         ) : (
           <Markdown className='prose-neutral dark:prose-invert max-w-none'>

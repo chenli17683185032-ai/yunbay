@@ -27,6 +27,7 @@ import {
 } from '@douyinfe/semi-illustrations';
 import { useTranslation } from 'react-i18next';
 import MarkdownRenderer from '../markdown/MarkdownRenderer';
+import { sanitizeHtml as cleanHtml } from '../../../helpers/sanitize';
 
 // Check whether content is a URL.
 const isUrl = (content) => {
@@ -106,7 +107,7 @@ const DocumentRenderer = ({ apiEndpoint, title, cacheKey, emptyMessage }) => {
     if (!isHtmlContent(content)) {
       return { content: '', styles: '' };
     }
-    return sanitizeHtml(content);
+    return sanitizeDocumentHtml(content);
   }, [content]);
 
   useEffect(() => {

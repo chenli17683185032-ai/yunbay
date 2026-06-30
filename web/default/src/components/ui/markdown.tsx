@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import ReactMarkdown from 'react-markdown'
-import rehypeRaw from 'rehype-raw'
 import remarkGfm from 'remark-gfm'
+import { sanitizeMarkdownHref, sanitizeMarkdownUrl } from '@/lib/sanitize-html'
 import { cn } from '@/lib/utils'
 
 interface MarkdownProps {
@@ -49,11 +49,17 @@ export function Markdown({ children, className }: MarkdownProps) {
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
+        rehypePlugins={[]}
+        skipHtml
+        urlTransform={sanitizeMarkdownUrl}
         components={{
-          // 自定义组件渲染（可选）
-          a: ({ node, ...props }) => (
-            <a {...props} target='_blank' rel='noopener noreferrer' />
+          a: ({ href, ...props }) => (
+            <a
+              {...props}
+              href={sanitizeMarkdownHref(href)}
+              target='_blank'
+              rel='noopener noreferrer'
+            />
           ),
         }}
       >

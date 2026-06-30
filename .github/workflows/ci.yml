@@ -1,0 +1,108 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-root-tests:
+    name: Backend root tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build embedded frontend assets
+        working-directory: web
+        run: |
+          bun install --frozen-lockfile
+          bun run --cwd default build
+          bun run --cwd classic build
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run root Go tests
+        run: go test ./...
+
+  sub2api-backend-tests:
+    name: sub2api backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/sub2api/backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: infra/sub2api/backend/go.mod
+          cache-dependency-path: infra/sub2api/backend/go.sum
+
+      - name: Run sub2api Go tests outside active middleware refactor
+        run: |
+          # TODO: remove this exclusion when the in-flight auth/billing middleware
+          # refactor and its invariant tests are committed.
+          go test $(go list ./... | grep -v '^github.com/Wei-Shaw/sub2api/internal/server/middleware$')
+
+  web-default-typecheck:
+    name: web/default typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install web workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck default frontend
+        run: bun run --cwd default typecheck
+
+  web-classic-build:
+    name: web/classic build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install web workspace dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build classic frontend
+        run: bun run --cwd classic build

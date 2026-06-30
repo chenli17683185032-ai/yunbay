@@ -33,6 +33,7 @@ import { useDebouncedCallback } from 'use-debounce';
 import clsx from 'clsx';
 import { Button, Tooltip, Toast } from '@douyinfe/semi-ui';
 import { copy, rehypeSplitWordsIntoSpans } from '../../../helpers';
+import { sanitizeUrl } from '../../../helpers/sanitize';
 import { IconCopy } from '@douyinfe/semi-icons';
 import { useTranslation } from 'react-i18next';
 
@@ -428,7 +429,7 @@ function _MarkdownContent(props) {
           />
         ),
         a: (aProps) => {
-          const href = aProps.href || '';
+          const href = sanitizeUrl(aProps.href || '') || '';
           if (/\.(aac|mp3|opus|wav)$/.test(href)) {
             return (
               <figure style={{ margin: '12px 0' }}>
@@ -451,6 +452,7 @@ function _MarkdownContent(props) {
           return (
             <a
               {...aProps}
+              href={href}
               target={target}
               style={{
                 color: isUserMessage ? '#87CEEB' : 'var(--semi-color-primary)',
