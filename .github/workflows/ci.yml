@@ -59,11 +59,8 @@ jobs:
           go-version-file: infra/sub2api/backend/go.mod
           cache-dependency-path: infra/sub2api/backend/go.sum
 
-      - name: Run sub2api Go tests outside active middleware refactor
-        run: |
-          # TODO: remove this exclusion when the in-flight auth/billing middleware
-          # refactor and its invariant tests are committed.
-          go test $(go list ./... | grep -v '^github.com/Wei-Shaw/sub2api/internal/server/middleware$')
+      - name: Run sub2api Go tests
+        run: go test ./...
 
   web-default-typecheck:
     name: web/default typecheck

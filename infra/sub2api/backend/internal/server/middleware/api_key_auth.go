@@ -19,13 +19,13 @@ func NewAPIKeyAuthMiddleware(apiKeyService *service.APIKeyService, subscriptionS
 	return APIKeyAuthMiddleware(apiKeyAuthWithSubscription(apiKeyService, subscriptionService, cfg))
 }
 
-// apiKeyAuthWithSubscription API Key认证中间件（支持订阅验证）
+// apiKeyAuthWithSubscription API Key认证中间件（支持订阅验证）。
 //
-// 中间件职责分为两层：
-//   - 鉴权（Authentication）：验证 Key 有效性、用户状态、IP 限制 —— 始终执行
-//   - 计费执行（Billing Enforcement）：过期/配额/订阅/余额检查 —— skipBilling 时整块跳过
-//
-// /v1/usage 端点只需鉴权，不需要计费执行（允许过期/配额耗尽的 Key 查询自身用量）。
+// 标准模式仅负责 validity-only 鉴权：
+//   - API key 提取与查找
+//   - key / user / group / IP 校验
+//   - subscription-type group 的 active + 未过期订阅校验
+//   - 上下文写入与 TouchLastUsed
 func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscriptionService *service.SubscriptionService, cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// ── 1. 提取 API Key ──────────────────────────────────────────
@@ -83,10 +83,8 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
-		// disabled / 未知状态 → 无条件拦截（expired 和 quota_exhausted 留给计费阶段）
-		if !apiKey.IsActive() &&
-			apiKey.Status != service.StatusAPIKeyExpired &&
-			apiKey.Status != service.StatusAPIKeyQuotaExhausted {
+		// disabled / expired / quota exhausted / 未知状态 → 无条件拦截
+		if !apiKey.IsActive() {
 			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled")
 			return
 		}
@@ -142,11 +140,7 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 			return
 		}
 
-		// ── 5. 加载订阅（订阅模式时始终加载） ───────────────────────
-
-		// skipBilling: /v1/usage 只需鉴权，跳过所有计费执行
-		skipBilling := c.Request.URL.Path == "/v1/usage"
-
+		// ── 5. 加载并校验订阅（订阅模式时始终加载） ─────────────────
 		var subscription *service.UserSubscription
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 
@@ -157,70 +151,17 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 				apiKey.Group.ID,
 			)
 			if subErr != nil {
-				if !skipBilling {
-					AbortWithError(c, 403, "SUBSCRIPTION_NOT_FOUND", "No active subscription found for this group")
-					return
-				}
-				// skipBilling: 订阅不存在也放行，handler 会返回可用的数据
-			} else {
-				subscription = sub
+				AbortWithError(c, 403, "SUBSCRIPTION_UNAVAILABLE", "Current subscription is unavailable")
+				return
 			}
+			if sub == nil || !sub.IsActive() || sub.IsExpired() {
+				AbortWithError(c, 403, "SUBSCRIPTION_UNAVAILABLE", "Current subscription is unavailable")
+				return
+			}
+			subscription = sub
 		}
 
-		// ── 6. 计费执行（skipBilling 时整块跳过） ────────────────────
-
-		if !skipBilling {
-			// Key 状态检查
-			switch apiKey.Status {
-			case service.StatusAPIKeyQuotaExhausted:
-				AbortWithError(c, 429, "API_KEY_QUOTA_EXHAUSTED", "API key 额度已用完")
-				return
-			case service.StatusAPIKeyExpired:
-				AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
-				return
-			}
-
-			// 运行时过期/配额检查（即使状态是 active，也要检查时间和用量）
-			if apiKey.IsExpired() {
-				AbortWithError(c, 403, "API_KEY_EXPIRED", "API key 已过期")
-				return
-			}
-			if apiKey.IsQuotaExhausted() {
-				AbortWithError(c, 429, "API_KEY_QUOTA_EXHAUSTED", "API key 额度已用完")
-				return
-			}
-
-			// 订阅模式：验证订阅限额
-			if subscription != nil {
-				needsMaintenance, validateErr := subscriptionService.ValidateAndCheckLimits(subscription, apiKey.Group)
-				if validateErr != nil {
-					code := "SUBSCRIPTION_INVALID"
-					status := 403
-					if errors.Is(validateErr, service.ErrDailyLimitExceeded) ||
-						errors.Is(validateErr, service.ErrWeeklyLimitExceeded) ||
-						errors.Is(validateErr, service.ErrMonthlyLimitExceeded) {
-						code = "USAGE_LIMIT_EXCEEDED"
-						status = 429
-					}
-					AbortWithError(c, status, code, validateErr.Error())
-					return
-				}
-
-				// 窗口维护异步化（不阻塞请求）
-				if needsMaintenance {
-					maintenanceCopy := *subscription
-					subscriptionService.DoWindowMaintenance(&maintenanceCopy)
-				}
-			} else {
-				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
-				if apiKey.User.Balance <= 0 {
-					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
-					return
-				}
-			}
-		}
-
-		// ── 7. 设置上下文 → Next ─────────────────────────────────────
+		// ── 6. 设置上下文 → Next ─────────────────────────────────────
 
 		if subscription != nil {
 			c.Set(string(ContextKeySubscription), subscription)
