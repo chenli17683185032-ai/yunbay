@@ -799,3 +799,131 @@ TOKEN_INVALID_MODEL_GROUP_COUNT|0
 ```text
 user_group_cleanup_20260627_145927.tsv
 ```
+
+## 2026-06-27 邮件投递切换：Resend SMTP + Cloudflare Routing
+
+### 当前邮件架构
+
+```text
+出站系统邮件：yunbay-new-api -> Resend SMTP -> 用户邮箱
+入站/回复邮件：support@yunbay.xyz -> Cloudflare Email Routing -> 10256345@qq.com
+```
+
+当前生产 SMTP 配置：
+
+```text
+SMTPServer=smtp.resend.com
+SMTPPort=465
+SMTPSSLEnabled=true
+SMTPAccount=resend
+SMTPFrom=support@yunbay.xyz
+SystemName=yunbay
+```
+
+`SMTPToken` 为 Resend API Key，只记录为 `SET`，不要写入仓库文档、GitHub issue、PR、聊天记录或公开日志。
+
+### 切换原因
+
+历史上生产使用 `smtp.qq.com` + QQ 个人邮箱作为 SMTP。虽然已修复 587/STARTTLS 配置错误，但 QQ 发信详情仍会暴露 QQ 邮箱昵称，例如 `ninefourteen <...@qq.com>`。为使用正式域名邮箱身份，生产出站邮件已切到 Resend SMTP，发件地址使用 `support@yunbay.xyz`。
+
+Cloudflare Email Routing 已保留为免费入站转发；Cloudflare Email Sending 未使用，因为该能力需要 Workers Paid。
+
+### 已验证
+
+- 线上服务器直连 Resend SMTP 测试通过：`SMTP_TEST_OK from=support@yunbay.xyz to=10256345@qq.com`。
+- 云贝应用层密码重置接口测试返回：`http_status=200`、`success=true`。
+- `yunbay-new-api` 重启后为 healthy。
+- 最近日志未见 SMTP / TLS / AUTH / Resend / 501 / `failed to send` 相关错误。
+
+### 备份与回滚
+
+切换前备份保存在生产服务器：
+
+```text
+/root/yunbay-smtp-backups/smtp-before-resend-20260627-114705.tsv
+```
+
+回滚时不要在终端或文档中打印备份内容。恢复 `SMTP*` 与 `SystemName` 相关 options 后，需要重启：
+
+```bash
+docker restart yunbay-new-api
+```
+
+然后重新走密码重置或邮箱验证码接口验证发信。
+
+详细公开说明见：`docs/email-delivery.md`。
+
+## 2026-06-30 全量上线与必读公告生产完成记录
+
+本节记录 2026-06-30 云贝全量上线与必读公告弹窗的生产完成事实。此处只记录可公开复核的信息，不记录 SSH 私钥、后台密码、cookie、session、access token、worker token、支付密钥、完整卡密、完整二维码或完整 session id。
+
+### 代码基线
+
+全量上线基线分支：
+
+```text
+codex/full-rollout-no-overlap-clean
+```
+
+关键生产基线提交：
+
+```text
+83479b48 fix(router): register user group tags route
+13925967 fix: restore quick start codex launcher support
+59756734 feat: require explicit announcement read confirmation
+434230f3 feat: prepare claude pricing gray rollout presets
+a8a85812 feat: add affiliate rewards and withdrawal rollout
+44b9d0cd feat: roll out ldxp auto topup without worker flow regression
+d8f29dcd feat: add paid redemption rollout baseline
+41360edd feat: separate user tags from model groups
+27d6bd0c fix: preserve rollout baseline fixes
+5eeb1035 docs: add full rollout no-overlap plan
+23cefff9 fix: normalize check-in reward amounts
+8fb008fb fix: preserve legacy usage log filters
+```
+
+### 公开侧生产复核
+
+```text
+https://yunbay.xyz/            HTTP 200
+https://yunbay.xyz/api/status  HTTP 200
+https://yunbay.xyz/api/notice  HTTP 200
+生产入口 JS: /static/js/index.599262f2f0.js
+```
+
+`/api/status` 当前公告形态：
+
+```text
+success=true
+announcements_enabled=true
+announcements_type=list
+announcements_count=6
+announcement_keys=content,extra,id,publishDate,type
+```
+
+生产入口 JS 已包含必读公告相关标记：
+
+```text
+I have read
+我已阅读
+notification-storage
+markNoticeRead
+markAnnouncementsRead
+```
+
+### 完成范围
+
+本次完成口径：
+
+- 全量上线基线已完成生产同步；
+- 必读公告弹窗已进入生产 bundle，保持必须点击“我已阅读”才清除未读的语义；
+- 用户标签与模型分组分离、卡密兑换、LDXP 自动充值、推荐返利/提现、Claude 灰测预设、Quick Start 恢复、usage logs 稳定修复、签到金额归一化等功能线按全量上线基线收敛；
+- `83479b48` 已补上用户标签路由注册；
+- Jeepay / Alipay 充值后台配置与钱包流程、Sub2API usage billing 真源仍不属于本轮上线范围。
+
+### 后续要求
+
+- 后续维护必须继续使用非删除式同步策略，避免旧本地文件覆盖生产已上线 wallet / LDXP / Quick Start /公告能力；
+- 涉及公告弹窗时必须保留显式已读语义，除非有新的产品需求；
+- 涉及 `infra/sub2api/**` 的改动不要混入全量上线回补提交；
+- 后续若有生产更正或回滚，只能追加记录，不要改写本节历史。
