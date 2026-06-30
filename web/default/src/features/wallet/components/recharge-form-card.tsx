@@ -455,7 +455,7 @@ export function RechargeFormCard({
                 htmlFor='redemption-code'
                 className='text-muted-foreground text-xs font-medium tracking-wider uppercase'
               >
-                {t('Have a Code?')}
+                {t('Have a code or card?')}
               </Label>
             </div>
             <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
@@ -463,7 +463,7 @@ export function RechargeFormCard({
                 id='redemption-code'
                 value={redemptionCode}
                 onChange={(e) => onRedemptionCodeChange(e.target.value)}
-                placeholder={t('Enter your redemption code')}
+                placeholder={t('Enter your redemption code or card key')}
                 className='h-9 min-w-0'
               />
               <Button
@@ -480,7 +480,7 @@ export function RechargeFormCard({
             </div>
             {topupLink && (
               <p className='text-muted-foreground text-xs'>
-                {t('Need a redemption code?')}{' '}
+                {t('Need a redemption code or card?')}{' '}
                 <a
                   href={topupLink}
                   target='_blank'

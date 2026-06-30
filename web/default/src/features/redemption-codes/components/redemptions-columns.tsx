@@ -18,7 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { type ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import {
+  formatCurrencyUSD,
+  formatNumber,
+  formatQuota,
+  formatTimestampToDate,
+} from '@/lib/format'
+import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Tooltip,
@@ -28,7 +34,12 @@ import {
 import { MaskedValueDisplay } from '@/components/masked-value-display'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
-import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
+import {
+  REDEMPTION_FILTER_EXPIRED,
+  REDEMPTION_STATUSES,
+  getRedemptionKindLabel,
+  getRedemptionSourceLabel,
+} from '../constants'
 import { isRedemptionExpired, isTimestampExpired } from '../lib'
 import { type Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
@@ -135,6 +146,18 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       size: 120,
     },
     {
+      accessorKey: 'kind',
+      header: t('Type'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => {
+        const kind = row.original.kind
+        return (
+          <Badge variant='secondary'>{getRedemptionKindLabel(t, kind)}</Badge>
+        )
+      },
+      size: 160,
+    },
+    {
       id: 'code',
       accessorKey: 'key',
       header: t('Code'),
@@ -155,6 +178,43 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       },
       enableSorting: false,
       size: 320,
+    },
+    {
+      accessorKey: 'amount',
+      header: t('Face amount'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => formatNumber(row.original.amount),
+      size: 120,
+    },
+    {
+      accessorKey: 'money',
+      header: t('Paid money'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => formatCurrencyUSD(row.original.money),
+      size: 120,
+    },
+    {
+      accessorKey: 'batch_id',
+      header: t('Batch ID'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => {
+        const batchId = row.original.batch_id
+        if (!batchId)
+          return <span className='text-muted-foreground text-sm'>-</span>
+        return (
+          <div className='max-w-[140px] truncate font-mono text-sm'>
+            {batchId}
+          </div>
+        )
+      },
+      size: 160,
+    },
+    {
+      accessorKey: 'source',
+      header: t('Source'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => getRedemptionSourceLabel(t, row.original.source),
+      size: 140,
     },
     {
       accessorKey: 'quota',
@@ -207,6 +267,23 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
             className={`min-w-[160px] font-mono text-sm ${isExpired ? 'text-destructive' : ''}`}
           >
             {formatTimestampToDate(expiredTime)}
+          </div>
+        )
+      },
+      size: 180,
+    },
+    {
+      accessorKey: 'exported_time',
+      header: t('Exported'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => {
+        const exportedTime = row.original.exported_time
+        if (!exportedTime) {
+          return <span className='text-muted-foreground text-sm'>-</span>
+        }
+        return (
+          <div className='min-w-[160px] font-mono text-sm'>
+            {formatTimestampToDate(exportedTime)}
           </div>
         )
       },

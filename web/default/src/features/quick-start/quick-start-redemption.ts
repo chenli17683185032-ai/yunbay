@@ -30,10 +30,15 @@ type QuickStartRedemptionDependencies = {
   refreshSelf: () => Promise<void>
 }
 
+type QuickStartRedemptionResult = {
+  quotaAdded: number
+  refreshed: boolean
+}
+
 export async function redeemQuickStartCode(
   code: string,
   dependencies: QuickStartRedemptionDependencies
-): Promise<{ quotaAdded: number }> {
+): Promise<QuickStartRedemptionResult> {
   const key = code.trim()
   if (!key) {
     throw new Error('Please enter a redemption code')
@@ -44,9 +49,16 @@ export async function redeemQuickStartCode(
     throw new Error(response.message || 'Redemption failed')
   }
 
-  await dependencies.refreshSelf()
+  let refreshed = false
+  try {
+    await dependencies.refreshSelf()
+    refreshed = true
+  } catch {
+    refreshed = false
+  }
 
   return {
     quotaAdded: Number(response.data || 0),
+    refreshed,
   }
 }

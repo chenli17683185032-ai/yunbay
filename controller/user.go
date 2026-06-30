@@ -1213,6 +1213,25 @@ func getTopUpLock(userID int) *topUpTryLock {
 	return l
 }
 
+func redemptionErrorMessageKey(err error) string {
+	switch {
+	case errors.Is(err, model.ErrRedemptionNotProvided):
+		return i18n.MsgRedemptionNotProvided
+	case errors.Is(err, model.ErrRedemptionInvalid):
+		return i18n.MsgRedemptionInvalid
+	case errors.Is(err, model.ErrRedemptionUsed):
+		return i18n.MsgRedemptionUsed
+	case errors.Is(err, model.ErrRedemptionExpired):
+		return i18n.MsgRedemptionExpired
+	case errors.Is(err, model.ErrRedemptionUnsupportedKind):
+		return i18n.MsgRedemptionUnsupportedKind
+	case errors.Is(err, model.ErrRedeemFailed):
+		return i18n.MsgRedeemFailed
+	default:
+		return i18n.MsgRedemptionFailed
+	}
+}
+
 func TopUp(c *gin.Context) {
 	if !operation_setting.IsPaymentComplianceConfirmed() {
 		common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
@@ -1232,19 +1251,16 @@ func TopUp(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	quota, err := model.Redeem(req.Key, id)
+	result, err := model.Redeem(req.Key, id)
 	if err != nil {
-		if errors.Is(err, model.ErrRedeemFailed) {
-			common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
-			return
-		}
-		common.ApiError(c, err)
+		common.ApiErrorI18n(c, redemptionErrorMessageKey(err))
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    quota,
+		"success":    true,
+		"message":    "",
+		"data":       result.Quota,
+		"redemption": result.Redemption,
 	})
 }
 

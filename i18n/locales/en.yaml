@@ -59,6 +59,11 @@ redemption.expired: "This redemption code has expired"
 redemption.failed: "Redemption failed, please try again later"
 redemption.not_provided: "Redemption code not provided"
 redemption.expire_time_invalid: "Expiration time cannot be earlier than current time"
+redemption.unsupported_kind: "Unsupported redemption code kind"
+redemption.paid_topup_invalid: "Paid top-up redemption code must include a positive amount or quota"
+redemption.promo_invalid: "Promotional redemption code must include a positive quota"
+redemption.export_batch_required: "Redemption batch ID is required for export"
+redemption.export_empty: "No redemption codes found for this batch"
 
 # User messages
 user.password_login_disabled: "Password login has been disabled by administrator"
