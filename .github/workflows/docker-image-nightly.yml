@@ -60,7 +60,7 @@ jobs:
             calciumion/new-api
 
       - name: Build & push single-arch
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: ${{ matrix.platform }}
