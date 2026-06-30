@@ -937,3 +937,256 @@ rollback image: yunbay-new-api:pre-ui-popup-spinner-20260629164951
 ```
 
 详细排障命令见：`docs/ldxp-browser-worker-auto-topup-runbook.md`。
+
+## 2026-06-29 LDXP 正式商品与推荐奖励提现维护
+
+本节只记录可公开维护事实，不记录支付后台账号、SSH 私钥、cookie、session、数据库密码或生产环境变量明文。
+
+### LDXP 正式商品档位
+
+当前 LDXP 自动充值默认商品配置为 **6 个正式档位**，不要加入早先临时讨论过的 `200` 档：
+
+| 档位 | 正式商品链接 |
+| ---: | --- |
+| 10 | `https://pay.ldxp.cn/item/nzkyrt` |
+| 20 | `https://pay.ldxp.cn/item/ka4pg7` |
+| 30 | `https://pay.ldxp.cn/item/n8schm` |
+| 50 | `https://pay.ldxp.cn/item/5c4yft` |
+| 100 | `https://pay.ldxp.cn/item/sb48mz` |
+| 500 | `https://pay.ldxp.cn/item/y8t52c` |
+
+维护点：
+
+- 代码默认值：`service/ldxp_config.go`。
+- 前端固定金额：`web/default/src/features/wallet/lib/ldxp-topup.ts`。
+- 若生产 `LDXP_TOPUP_PRODUCTS_JSON` 显式配置，则以生产 env 为准；修改前先备份 `/opt/new-api/secrets/prod.env`，不要在日志或公开文档输出 env 明文。
+- 卡网/链动小铺手续费由用户在支付页承担，不计入云贝业务实付金额。例如 10 档支付宝收银台可显示 `10.30`，但 `ldxp_topup_sessions.money`、`top_ups.money`、VIP 累计和推荐奖励基数仍按 `10.00`。
+
+### 推荐奖励金规则
+
+推荐关系继续复用 new-api 自带邀请体系：
+
+```text
+邀请码/邀请链接：users.aff_code、/api/user/aff
+邀请关系：users.inviter_id
+旧额度奖励：users.aff_quota、/api/user/aff_transfer
+新增现金奖励流水：affiliate_commissions
+新增提现流水：affiliate_withdrawals
+```
+
+现金奖励规则：
+
+- 只在 `top_ups.status='success'` 后创建。
+- 奖励基数为 `top_ups.money`（实际支付金额），不是 `top_ups.amount` 或到账 quota。
+- 邀请人进账比例为 `15%`，金额按分位四舍五入。
+- 每个 `topup_id` 只能创建一条 `affiliate_commissions`，重复回调或重复验证应保持幂等。
+- 无邀请人、自邀、邀请人不存在、订单未成功或实付金额小于等于 0 时不发奖励。
+
+### 用户提现流程
+
+用户钱包页会显示：
+
+- 可提现奖励：`available = total_commission - pending_withdrawals - paid_withdrawals`
+- 冻结奖励：`pending_withdrawals`
+- 已提现奖励：`paid_withdrawals`
+- 返佣比例：当前为 `15%`
+
+用户点击 `Apply for Withdrawal` 后提交：
+
+```text
+amount  提现金额
+contact 支付宝/微信/邮箱等打款联系方式
+remark  给管理员的可选备注
+```
+
+后端创建 `affiliate_withdrawals.status='pending'` 后，该金额立即计入冻结奖励，不再显示为可提现余额。
+
+### 管理员处理提现
+
+当前提现是人工打款流程：
+
+1. 管理员查看待处理提现。
+2. 线下核对用户联系方式并完成实际打款。
+3. 打款成功后调用 paid 操作：冻结金额转为已提现。
+4. 如果拒绝提现，调用 reject 操作：冻结金额释放回可提现余额。
+
+相关接口：
+
+```text
+GET  /api/user/affiliate/summary
+POST /api/user/affiliate/withdrawals
+
+GET  /api/user/affiliate/withdrawals
+POST /api/user/affiliate/withdrawals/:id/paid
+POST /api/user/affiliate/withdrawals/:id/reject
+```
+
+排障 SQL 示例：
+
+```sql
+select id, username, aff_code, inviter_id
+from users
+where username in ('<inviter_username>', '<invitee_username>');
+
+select id, user_id, amount, money, trade_no, payment_method, payment_provider, status
+from top_ups
+where user_id = (select id from users where username = '<invitee_username>')
+order by id desc
+limit 20;
+
+select id, commission_id, inviter_user_id, invitee_user_id, topup_id,
+       base_money, rate, commission_money, status, created_time
+from affiliate_commissions
+where inviter_user_id = (select id from users where username = '<inviter_username>')
+order by id desc
+limit 20;
+
+select id, withdrawal_id, user_id, amount, status, created_time, processed_time
+from affiliate_withdrawals
+where user_id = (select id from users where username = '<inviter_username>')
+order by id desc
+limit 20;
+```
+
+上线验证建议：
+
+```bash
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml ps new-api ldxp-browser-worker
+curl -fsS http://127.0.0.1:3000/api/status >/tmp/yunbay-status.json
+```
+
+本轮涉及后端 migration 和前端构建，灰测前应确认 `affiliate_commissions`、`affiliate_withdrawals` 表已随应用启动完成迁移。
+
+## 2026-06-29 LDXP 正式商品二维码修复与正式链路恢复
+
+本节只记录可公开维护事实，不记录 SSH 私钥、worker token、生产 env 明文、支付后台账号或二维码内容。
+
+### 问题与根因
+
+正式 10 元商品 `https://pay.ldxp.cn/item/nzkyrt` 灰测时曾出现二维码不返回。生产证据显示：
+
+```text
+session 使用正式商品 nzkyrt
+worker 已 claim
+qr=not_called
+wait_cashier_ready 超时
+debug snapshot 仍停留在链动小铺商品/过渡页
+```
+
+根因不是把 `money` 配成 `10`，也不是要改成 `10.3`。实际链路是：
+
+```text
+商品页 -> /shopApi/Pay/order -> /payApi/AlipayPc/pay.html -> excashier.alipay.com
+```
+
+旧 worker 把 `payApi` 过渡 URL 当成“收银台 ready”，过早读取页面文本，导致丢掉后续真正跳到支付宝收银台的 popup/页面。
+
+### 修复内容
+
+- Worker 不再用 `payApi`/URL 命中作为二维码 ready 条件；必须等页面文本出现订单号以及金额/付款/收款方标记。
+- Worker 和后端金额校验允许用户承担的合理卡网手续费：`actual = configured money + fee`。
+- 业务金额不变：10 档仍按 `money=10` 记账，手续费不计入云贝充值金额、VIP 累计或推荐奖励基数。
+- 同步了当前线上 worker 运行基线中的 browser prewarm / paid-watch 源码，并补齐 `/api/ldxp/worker/sessions/claim-paid-watch`。无待监听 QR 会话时该接口返回 `record not found`。
+
+### 2026-06-30 支付成功识别回归与队列稳定性修正
+
+后续灰测先出现“第三次二维码不出”的现象。生产证据显示：
+
+```text
+前两笔 session 已 worker_claimed 并约 21-22 秒进入 qr_ready
+第三笔 session 长时间停留 created，worker_id / worker_order_no / qr_code 均为空
+该时间窗口 worker 没有继续 POST /api/ldxp/worker/sessions/claim
+```
+
+当时的判断是：worker 并发为 `2`，前两笔“已出二维码、等待用户付款”的会话占满槽位，第三笔不会被 claim。于是临时尝试 `LDXP_RELEASE_SLOT_AFTER_QR=true`：出码后释放主浏览器槽位，再由 paid-watch 重新打开 `qr_page_url` 观察付款结果。
+
+该尝试随后被生产证据证明会破坏白天已经跑通的付款成功识别路径：
+
+```text
+已付款订单 LD260630C62RUK：
+session 仍停在 qr_ready，topup_id=0，worker_detected_time=0
+worker 一直 claim paid-watch，但没有 posted paid result
+worker 容器二次打开 qr_page_url 时，从 excashier.alipay.com/standard/auth.htm 跳到 /home/error.htm
+```
+
+结论：当前支付宝 QR URL 不能作为可靠的二次打开状态页。正式支付确认必须沿用白天跑通的链路：
+
+```text
+worker 打开商品页 -> 出二维码 -> 同一个支付宝收银台页面保持打开 -> 用户扫码付款 -> 页面跳支付成功 -> worker 识别成功页 -> 后端入账
+```
+
+当前修正：
+
+- 生产推荐配置和 worker 默认值恢复为 `LDXP_RELEASE_SLOT_AFTER_QR=false`。
+- paid-watch 保留为代码能力，但不是当前支付宝链路的主确认路径；除非重新证明 `qr_page_url` 可二次打开并看到成功页，否则不要作为生产确认条件。
+- QQ IMAP 邮件只用于事后审计，不是直接充值成功确认条件。
+- 队列占槽问题改由“用户取消支付主动断 worker 线”解决，而不是出码后释放收银台页面。
+
+取消支付断线补充：
+
+- 前端取消支付仍调用 `/api/user/ldxp/topup/session/:session_id/cancel`，后端把 `created` / `worker_claimed` / `qr_ready` 改为 `canceled`。
+- 新增 worker 内部状态接口 `/api/ldxp/worker/sessions/:session_id/active`。
+- worker 在浏览器流程运行期间轮询该接口；如果用户已取消或 session 不再属于该 worker，立即 abort 当前浏览器流程、关闭 browser context，不再继续等待支付宝/二维码/付款结果。
+- active-check 临时失败时不误杀订单，只记录 warning 并继续，避免后端瞬时抖动导致真实支付被断。
+
+当前推荐生产设置：
+
+```text
+LDXP_RELEASE_SLOT_AFTER_QR=false
+LDXP_WORKER_CONCURRENCY=2
+LDXP_WORKER_POLL_INTERVAL_MS=2000
+```
+
+### 生产验证结果
+
+正式 10 档独立探测（不创建云贝用户充值单、不打印二维码内容）：
+
+```text
+product: https://pay.ldxp.cn/item/nzkyrt
+cashier host: excashier.alipay.com
+cashier amount: 10.30
+configured Yunbay money: 10.00
+elapsed: about 24.4s
+result: QR extracted
+```
+
+正式 6 档生产 env 已恢复：
+
+```text
+amounts=10,20,30,50,100,500
+money=10,20,30,50,100,500
+slugs=nzkyrt,ka4pg7,n8schm,5c4yft,sb48mz,y8t52c
+```
+
+上线镜像：
+
+```text
+new-api image: sha256:e7427b2921cfcc9ee4ad31a7efdbb05448991931dab66249b6332b3b0abb99ba
+worker image: sha256:86ac7d873aa1ae7afc596e5cde83733e74180aa60cccd4f36d2262623ad51c97
+formal env backup: /opt/new-api/backups/ldxp-formal-products-payapi-fee-fix-20260629234617
+new-api rollback image before paid-watch route: yunbay-new-api:pre-ldxp-paid-watch-route-20260629235912
+queue-slot fix images: new-api sha256:4e4be67e7f44bb01c80ff0e1611911d554bf2daa30100e9c8d20508719b499f7, worker sha256:619a6a1f8cf274b6b0536bfe6865af9c591c7a8aa4c9ff15a49a17ff7fb672d0
+queue-slot backups: /opt/new-api/backups/ldxp-release-slot-rotation-20260630002705, /opt/new-api/backups/ldxp-paidwatch-coalesce-20260630004530
+```
+
+验证命令：
+
+```bash
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml ps new-api ldxp-browser-worker
+curl -fsS http://127.0.0.1:3000/api/status >/tmp/yunbay-status.json
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml logs --since=10m ldxp-browser-worker
+```
+
+如果再次出现二维码不返回，先看 worker 计时字段：
+
+```text
+click_purchase_to_cashier
+wait_cashier_ready
+read_cashier_text
+extract_qr
+qr=called / qr=not_called
+```
+
+不要因为支付宝页显示 `10.30` 就把正式商品配置改成 `money=10.3`；那会污染充值金额、VIP 判断和推荐奖励基数。

@@ -76,6 +76,12 @@ type LdxpWorkerResultPayload struct {
 	WorkerSuccessURL  string  `json:"worker_success_url"`
 }
 
+type LdxpWorkerSessionState struct {
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+	Active    bool   `json:"active"`
+}
+
 func CreateLdxpTopupSession(userID int, amount int64, cfg *LdxpConfig) (*LdxpSessionPublicView, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("%w: missing config", ErrLdxpInvalidSessionRequest)
@@ -168,6 +174,22 @@ func CancelLdxpTopupSession(sessionID string, userID int) error {
 	return nil
 }
 
+func GetLdxpWorkerSessionState(sessionID string, workerID string) (*LdxpWorkerSessionState, error) {
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return nil, fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
+	}
+	session, err := model.GetLdxpTopupSessionBySessionId(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return &LdxpWorkerSessionState{
+		SessionID: session.SessionId,
+		Status:    session.Status,
+		Active:    isLdxpWorkerSessionActiveForWorker(session, workerID, common.GetTimestamp()),
+	}, nil
+}
+
 func ClaimLdxpTopupSession(workerID string, cfg *LdxpConfig) (*model.LdxpTopupSession, error) {
 	workerID = strings.TrimSpace(workerID)
 	if workerID == "" {
@@ -184,6 +206,24 @@ func ClaimLdxpTopupSession(workerID string, cfg *LdxpConfig) (*model.LdxpTopupSe
 		return nil, err
 	}
 	return model.ClaimNextLdxpTopupSession(workerID, now)
+}
+
+func ClaimLdxpPaidWatchSession(workerID string, cfg *LdxpConfig) (*model.LdxpTopupSession, error) {
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return nil, fmt.Errorf("%w: missing worker", ErrLdxpInvalidSessionRequest)
+	}
+	if cfg == nil {
+		return nil, fmt.Errorf("%w: missing config", ErrLdxpInvalidSessionRequest)
+	}
+	if !cfg.Enabled {
+		return nil, ErrLdxpTopupDisabled
+	}
+	now := common.GetTimestamp()
+	if _, err := model.MarkExpiredLdxpTopupSessions(now); err != nil {
+		return nil, err
+	}
+	return model.ClaimNextLdxpPaidWatchSession(workerID, now)
 }
 
 func RecordLdxpQr(sessionID string, payload LdxpWorkerQrPayload) error {
@@ -395,6 +435,24 @@ func publicLdxpSessionView(session *model.LdxpTopupSession) *LdxpSessionPublicVi
 		view.QRCode = session.QrCode
 	}
 	return view
+}
+
+func isLdxpWorkerSessionActiveForWorker(session *model.LdxpTopupSession, workerID string, now int64) bool {
+	if session == nil || strings.TrimSpace(workerID) == "" {
+		return false
+	}
+	if session.WorkerId != strings.TrimSpace(workerID) {
+		return false
+	}
+	if session.ExpiredTime <= now {
+		return false
+	}
+	switch session.Status {
+	case model.LdxpStatusWorkerClaimed, model.LdxpStatusQrReady:
+		return true
+	default:
+		return false
+	}
 }
 
 func isLdxpCancelableStatus(status string) bool {

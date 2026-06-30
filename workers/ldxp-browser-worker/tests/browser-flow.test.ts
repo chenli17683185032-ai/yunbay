@@ -11,11 +11,27 @@ import {
   buildBrowserLaunchOptions,
   buildBrowserContextOptions,
   isCashierReadyText,
+  isExpectedAmountAcceptable,
   shouldClickManualJump,
+  raceDefined,
+  fillContactInput,
+  clickPurchaseAndResolveCashierPage,
+  waitForCashierOrQr,
 } from '../src/browser-flow.js'
 
 async function readFixture(name: string): Promise<string> {
-  return readFile(new URL(`../../tests/fixtures/${name}`, import.meta.url), 'utf8')
+  const candidates = [
+    new URL(`./fixtures/${name}`, import.meta.url),
+    new URL(`../../tests/fixtures/${name}`, import.meta.url),
+  ]
+  for (const candidate of candidates) {
+    try {
+      return await readFile(candidate, 'utf8')
+    } catch {
+      // Try the next path so both direct Bun tests and compiled Node tests work.
+    }
+  }
+  return readFile(candidates[0], 'utf8')
 }
 
 test('extracts order no from cashier text', () => {
@@ -67,6 +83,33 @@ test('allows paid result without card key for direct website topup mode', () => 
   assert.equal(extractOptionalCardKey(text), '')
 })
 
+test('buildPaidResultFromText uses expected amount when paid result page omits amount', () => {
+  const result = buildPaidResultFromText({
+    resultText: '订单详情 - 链动小铺\n已付款\n卡密信息 ABCD1234EFGH',
+    fallbackOrderNo: 'LD260629PROD001',
+    expectedAmount: 0.1,
+    workerProductName: '0.1 元测试',
+    successUrl: 'https://pay.ldxp.cn/order/result/redacted',
+  })
+
+  assert.equal(result.worker_order_no, 'LD260629PROD001')
+  assert.equal(result.worker_amount, 0.1)
+  assert.equal(result.worker_status_text, '已付款')
+})
+
+test('buildPaidResultFromText allows missing card key for instant topup flow', () => {
+  const result = buildPaidResultFromText({
+    resultText: '订单详情 - 链动小铺\n已付款\n订单号：LD260629PROD002',
+    fallbackOrderNo: 'LD260629PROD002',
+    expectedAmount: 0.1,
+    workerProductName: '0.1 元测试',
+    successUrl: 'https://pay.ldxp.cn/order/result/redacted',
+  })
+
+  assert.equal(result.worker_card_key, '')
+  assert.equal(result.worker_amount, 0.1)
+  assert.equal(result.worker_status_text, '已付款')
+})
 
 test('builds paid result by reusing cashier order number when result page omits it', () => {
   const result = buildPaidResultFromText({
@@ -97,7 +140,6 @@ test('does not build paid result from blank result page text', () => {
   }), /paid result/i)
 })
 
-
 test('browser flow uses a real Chrome fingerprint for ldxp item pages', () => {
   assert.deepEqual(buildBrowserLaunchOptions(), { headless: true })
   assert.deepEqual(buildBrowserLaunchOptions({ LDXP_BROWSER_HEADLESS: 'false' }), { headless: false })
@@ -117,9 +159,73 @@ test('cashier readiness requires an order number and does not match the item pag
     false,
   )
   assert.equal(
+    isCashierReadyText('正在为你跳转支付宝支付页面，请稍候'),
+    false,
+  )
+  assert.equal(
     isCashierReadyText('订单号：LD260629PQ1G7D 收款方：链动小铺 0.10 元 扫一扫付款'),
     true,
   )
+})
+
+test('accepts card-network service fee on top of the configured ldxp amount', () => {
+  assert.equal(isExpectedAmountAcceptable(10.3, 10), true)
+  assert.equal(isExpectedAmountAcceptable(20.6, 20), true)
+  assert.equal(isExpectedAmountAcceptable(10, 10), true)
+  assert.equal(isExpectedAmountAcceptable(9.98, 10), false)
+  assert.equal(isExpectedAmountAcceptable(12, 10), false)
+})
+
+test('cashier wait does not resolve just because the payApi transition URL is reached', async () => {
+  let waitForFunctionCalled = false
+  const page = {
+    waitForFunction: async (
+      predicate: () => boolean,
+      _arg: undefined,
+      _options: { timeout: number },
+    ) => {
+      waitForFunctionCalled = true
+      assert.equal(predicate(), true)
+    },
+    waitForURL: async () => {
+      throw new Error('waitForCashierOrQr should not use transition URLs as readiness')
+    },
+  }
+
+  const originalDocument = globalThis.document
+  try {
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { body: { innerText: '订单号：LD260629PQ1G7D 收款方：链动小铺 10.30 元 扫一扫付款' } },
+    })
+    await waitForCashierOrQr(page as never, 100)
+  } finally {
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: originalDocument,
+    })
+  }
+
+  assert.equal(waitForFunctionCalled, true)
+})
+
+
+test('raceDefined returns as soon as a promise resolves with a defined value', async () => {
+  const slowTimer = setTimeout(() => undefined, 30000)
+  slowTimer.unref?.()
+  const slowUndefined = new Promise<undefined>((resolve) => {
+    slowTimer.refresh?.()
+    setTimeout(() => resolve(undefined), 30000).unref?.()
+  })
+  const start = Date.now()
+
+  const value = await raceDefined([
+    slowUndefined,
+    new Promise<string>((resolve) => setTimeout(() => resolve('ready'), 50)),
+  ])
+
+  assert.equal(value, 'ready')
+  assert.ok(Date.now() - start < 500)
 })
 
 test('detects ldxp manual jump prompt before cashier readiness', () => {
@@ -131,4 +237,339 @@ test('detects ldxp manual jump prompt before cashier readiness', () => {
     shouldClickManualJump('订单号：LD260629PQ1G7D 金额 0.10 元 立即跳转'),
     false,
   )
+})
+
+test('clickPurchaseAndResolveCashierPage clicks manual jump as soon as it appears', async () => {
+  let purchaseClickedAt = 0
+  let jumpClickedAt = 0
+  let jumped = false
+  const startedAt = Date.now()
+  const slowNoCashierDelayMs = 120
+
+  const purchaseButton = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      purchaseClickedAt = Date.now()
+    },
+  }
+  const jumpButton = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      jumpClickedAt = Date.now()
+      jumped = true
+    },
+  }
+  const fakePage = {
+    getByText(text: string) {
+      if (text.includes('立即购买')) {
+        return purchaseButton
+      }
+      if (text.includes('立即跳转')) {
+        return jumpButton
+      }
+      throw new Error(`unexpected text locator ${text}`)
+    },
+    context() {
+      return {
+        waitForEvent() {
+          return new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error('no popup yet')), slowNoCashierDelayMs)
+          })
+        },
+      }
+    },
+    async waitForURL() {
+      if (jumped) {
+        return undefined
+      }
+      return new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('cashier url not ready yet')), slowNoCashierDelayMs)
+      })
+    },
+    async waitForFunction(fn: () => unknown) {
+      const source = fn.toString()
+      if (source.includes('立即跳转')) {
+        return undefined
+      }
+      if (jumped) {
+        return undefined
+      }
+      return new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('cashier text not ready yet')), slowNoCashierDelayMs)
+      })
+    },
+    locator(selector: string) {
+      assert.equal(selector, 'body')
+      return {
+        async innerText() {
+          if (jumped) {
+            return '订单号：LD260629FAST01 金额 0.10 元 使用支付宝扫码付款'
+          }
+          return '提示 如页面未自动跳转支付页，请点击下方按钮跳转！ 立即跳转'
+        },
+      }
+    },
+  }
+
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 90000)
+
+  assert.equal(result, fakePage)
+  assert.ok(purchaseClickedAt >= startedAt)
+  assert.ok(jumpClickedAt > 0)
+  assert.ok(
+    jumpClickedAt - purchaseClickedAt < 80,
+    `manual jump was clicked after ${jumpClickedAt - purchaseClickedAt}ms instead of immediately`,
+  )
+})
+
+test('clickPurchaseAndResolveCashierPage prefers the real manual jump button over dialog text', async () => {
+  let clickedDialogText = false
+  let clickedButton = false
+  const noCashierDelayMs = 10
+
+  const purchaseButton = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      return undefined
+    },
+  }
+  const dialogText = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      clickedDialogText = true
+    },
+  }
+  const realJumpButton = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      clickedButton = true
+    },
+  }
+  const fakePage = {
+    getByRole(role: string) {
+      assert.equal(role, 'button')
+      return realJumpButton
+    },
+    getByText(text: string) {
+      if (text.includes('立即购买')) {
+        return purchaseButton
+      }
+      if (text.includes('立即跳转')) {
+        return dialogText
+      }
+      throw new Error(`unexpected text locator ${text}`)
+    },
+    context() {
+      return {
+        waitForEvent() {
+          return new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error('no popup')), noCashierDelayMs)
+          })
+        },
+      }
+    },
+    async waitForURL() {
+      if (clickedButton) {
+        return undefined
+      }
+      return new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('cashier url not ready')), noCashierDelayMs)
+      })
+    },
+    async waitForFunction(fn: () => unknown) {
+      const source = fn.toString()
+      if (source.includes('立即跳转')) {
+        return undefined
+      }
+      if (clickedButton) {
+        return undefined
+      }
+      return new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('cashier text not ready')), noCashierDelayMs)
+      })
+    },
+    locator(selector: string) {
+      assert.equal(selector, 'body')
+      return {
+        async innerText() {
+          return clickedButton
+            ? '订单号：LD260629FAST03 金额 0.10 元 使用支付宝扫码付款'
+            : '提示 如页面未自动跳转支付页，请点击下方按钮跳转！ 立即跳转'
+        },
+      }
+    },
+  }
+
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 20)
+
+  assert.equal(result, fakePage)
+  assert.equal(clickedButton, true)
+  assert.equal(clickedDialogText, false)
+})
+
+test('clickPurchaseAndResolveCashierPage keeps watching manual jump after the initial cashier probe', async () => {
+  let manualJumpProbeCount = 0
+  let jumped = false
+  const noCashierDelayMs = 10
+
+  const purchaseButton = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      return undefined
+    },
+  }
+  const jumpButton = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      jumped = true
+    },
+  }
+  const fakePage = {
+    getByText(text: string) {
+      if (text.includes('立即购买')) {
+        return purchaseButton
+      }
+      if (text.includes('立即跳转')) {
+        return jumpButton
+      }
+      throw new Error(`unexpected text locator ${text}`)
+    },
+    context() {
+      return {
+        waitForEvent() {
+          return new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error('no popup')), noCashierDelayMs)
+          })
+        },
+      }
+    },
+    async waitForURL() {
+      if (jumped) {
+        return undefined
+      }
+      return new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('cashier url not ready')), noCashierDelayMs)
+      })
+    },
+    async waitForFunction(fn: () => unknown) {
+      const source = fn.toString()
+      if (source.includes('立即跳转')) {
+        manualJumpProbeCount += 1
+        if (manualJumpProbeCount >= 2) {
+          return undefined
+        }
+        return new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error('manual jump appears after first probe')), noCashierDelayMs)
+        })
+      }
+      if (jumped) {
+        return undefined
+      }
+      return new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('cashier text not ready')), noCashierDelayMs)
+      })
+    },
+    locator(selector: string) {
+      assert.equal(selector, 'body')
+      return {
+        async innerText() {
+          return jumped
+            ? '订单号：LD260629FAST02 金额 0.10 元 使用支付宝扫码付款'
+            : '提示 如页面未自动跳转支付页，请点击下方按钮跳转！ 立即跳转'
+        },
+      }
+    },
+  }
+
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 20)
+
+  assert.equal(result, fakePage)
+  assert.equal(jumped, true)
+  assert.ok(manualJumpProbeCount >= 2)
+})
+
+test('fillContactInput waits for delayed LDXP contact input before failing loading page', async () => {
+  let inputProbeCount = 0
+  const filledValues: string[] = []
+  const hiddenPlaceholder = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      throw new Error('placeholder is still hidden')
+    },
+  }
+  const visibleInput = {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async fill(value: string) {
+      filledValues.push(value)
+    },
+  }
+  const delayedInputs = {
+    async count() {
+      inputProbeCount += 1
+      return inputProbeCount >= 3 ? 1 : 0
+    },
+    nth(index: number) {
+      assert.equal(index, 0)
+      return visibleInput
+    },
+  }
+  const fakePage = {
+    getByPlaceholder() {
+      return hiddenPlaceholder
+    },
+    locator(selector: string) {
+      assert.match(selector, /input/)
+      return delayedInputs
+    },
+    async waitForTimeout() {
+      return undefined
+    },
+  }
+
+  await fillContactInput(fakePage as never, 'support@yunbay.xyz', 120)
+
+  assert.deepEqual(filledValues, ['support@yunbay.xyz'])
+  assert.ok(inputProbeCount >= 3)
 })

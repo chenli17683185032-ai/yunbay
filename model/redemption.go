@@ -382,6 +382,9 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) (
 		if err := tx.Create(topUp).Error; err != nil {
 			return false, err
 		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
+			return false, err
+		}
 		upgraded, err := MaybeUpgradeUserToVIPTx(tx, userId)
 		if err != nil {
 			return false, err

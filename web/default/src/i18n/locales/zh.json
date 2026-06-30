@@ -4834,6 +4834,26 @@
     "Redemption code creation is not enabled": "兑换码创建未启用",
     "Waffo": "Waffo",
     "Copy created codes": "复制已创建卡密",
-    "Face amount must be a whole number.": "面额必须是整数。"
+    "Face amount must be a whole number.": "面额必须是整数。",
+    "After submitting, this amount will be frozen": "提交后，该金额将被冻结",
+    "Alipay, WeChat, email, or other payout contact": "支付宝、微信、邮箱或其他提现联系方式",
+    "Apply for Withdrawal": "申请提现",
+    "Commission Rate": "返佣比例",
+    "Contact information": "联系方式",
+    "Earn 15% monetary rewards when invited users complete paid top-ups.": "邀请用户完成付费充值后，可获得 15% 的现金奖励。",
+    "Failed to submit withdrawal request": "提现申请提交失败",
+    "Frozen Rewards": "冻结奖励",
+    "Maximum available": "最多可提现",
+    "Optional note for the administrator": "给管理员的可选备注",
+    "Submit Request": "提交申请",
+    "Submit a withdrawal request for your referral rewards. The administrator will contact you for manual payout.": "提交推荐奖励提现申请后，管理员会联系你进行人工打款。",
+    "The administrator will use this contact to process the payout.": "管理员将通过该联系方式处理打款。",
+    "Total Rewards": "累计奖励",
+    "Withdrawal Amount": "提现金额",
+    "Withdrawal amount exceeds available rewards": "提现金额超过可用奖励",
+    "Withdrawal amount must be greater than 0": "提现金额必须大于 0",
+    "Withdrawal contact is required": "请填写提现联系方式",
+    "Withdrawal request submitted": "提现申请已提交",
+    "Withdrawn Rewards": "已提现奖励"
   }
 }

@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
-import { chromium, type BrowserContextOptions, type ElementHandle, type Locator, type Page } from 'playwright'
+import { chromium, type BrowserContext, type BrowserContextOptions, type ElementHandle, type Locator, type Page } from 'playwright'
 import type { WorkerConfig } from './config.js'
+import type { BrowserManager } from './browser-manager.js'
 import { redactValue } from './redact.js'
 
 export interface BrowserFlowInput {
@@ -47,6 +48,7 @@ export type BrowserFlowResult = BrowserPaidResult | BrowserQrPostedResult
 export interface BrowserFlowStageTiming {
   stage: string
   ms: number
+  detail?: string
 }
 
 export interface BrowserFlowDiagnostics {
@@ -130,6 +132,17 @@ export function extractAmount(text: string): number {
   throw new Error('Unable to extract amount from page text')
 }
 
+function extractAmountOrFallback(text: string, fallbackAmount: number): number {
+  try {
+    return extractAmount(text)
+  } catch {
+    if (Number.isFinite(fallbackAmount) && fallbackAmount > 0) {
+      return fallbackAmount
+    }
+    throw new Error('Unable to extract amount from paid result text and fallback amount is invalid')
+  }
+}
+
 export function extractCardKey(text: string): string {
   const normalized = normalizeText(text)
   const directPatterns = [
@@ -183,7 +196,7 @@ export function buildPaidResultFromText(input: BuildPaidResultInput): BrowserPai
   }
 
   const resultOrderNo = extractOrderNoOrFallback(input.resultText, input.fallbackOrderNo)
-  const resultAmount = extractAmount(input.resultText)
+  const resultAmount = extractAmountOrFallback(input.resultText, input.expectedAmount)
   assertExpectedAmount(resultAmount, input.expectedAmount)
 
   return {
@@ -212,18 +225,19 @@ export async function runBrowserFlow(
   config: WorkerConfig,
   signal?: AbortSignal,
   diagnostics?: BrowserFlowDiagnostics,
+  browserManager?: BrowserManager,
 ): Promise<BrowserFlowResult> {
   const timing = createFlowTiming(diagnostics)
-  const browser = await timing.record('browser_launch', chromium.launch(buildBrowserLaunchOptions()))
-  const context = await timing.record('browser_context', browser.newContext(buildBrowserContextOptions()))
+  const browserResources = await timing.record('browser_launch', openBrowserResources(browserManager))
+  const context = await timing.record('browser_context', browserResources.contextPromise)
   const page = await timing.record('new_page', context.newPage())
   const abortBrowser = () => {
-    void browser.close().catch(() => undefined)
+    void closeBrowserResources(browserResources).catch(() => undefined)
   }
   let qrCallbackCalled = false
 
   if (signal?.aborted) {
-    await browser.close()
+    await closeBrowserResources(browserResources)
     throw abortError()
   }
   signal?.addEventListener('abort', abortBrowser, { once: true })
@@ -287,32 +301,63 @@ export async function runBrowserFlow(
     )
   } finally {
     signal?.removeEventListener('abort', abortBrowser)
-    await browser.close().catch(() => undefined)
+    await closeBrowserResources(browserResources).catch(() => undefined)
   }
 }
 
+interface BrowserFlowResources {
+  contextPromise: Promise<BrowserContext>
+  close(): Promise<void>
+}
 
+async function openBrowserResources(browserManager?: BrowserManager): Promise<BrowserFlowResources> {
+  if (browserManager) {
+    const contextPromise = browserManager.getContext()
+    return {
+      contextPromise,
+      async close() {
+        const context = await contextPromise.catch(() => undefined)
+        await context?.close().catch(() => undefined)
+      },
+    }
+  }
 
-async function clickPurchaseAndResolveCashierPage(
+  const browser = await chromium.launch(buildBrowserLaunchOptions())
+  return {
+    contextPromise: browser.newContext(buildBrowserContextOptions()),
+    async close() {
+      await browser.close().catch(() => undefined)
+    },
+  }
+}
+
+async function closeBrowserResources(resources: BrowserFlowResources): Promise<void> {
+  await resources.close()
+}
+
+export async function clickPurchaseAndResolveCashierPage(
   page: Page,
   clickTimeoutMs: number,
   cashierTimeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Page> {
-  const popupTimeoutMs = Math.min(cashierTimeoutMs, 30000)
-  const firstPopupPromise = waitForNextPage(page, popupTimeoutMs, signal)
+  const firstPopupPromise = waitForNextPage(page, 5000, signal)
   await withAbort(clickFirstVisible(page.getByText('立即购买', { exact: false }), clickTimeoutMs), signal)
 
-  const firstReady = await raceDefined([
-    firstPopupPromise.then((popup) => tryWaitForCashierPage(popup, popupTimeoutMs, signal)),
-    tryWaitForCashierPage(page, popupTimeoutMs, signal),
-    clickManualJumpAndResolveCashierPage(page, clickTimeoutMs, popupTimeoutMs, signal),
+  const ready = await raceDefined([
+    tryWaitForCashierPage(page, 5000, signal),
+    firstPopupPromise.then((popup) => tryWaitForCashierPage(popup, 5000, signal)),
+    clickManualJumpAndResolveCashierPage(page, clickTimeoutMs, 5000, signal),
   ])
-  if (firstReady) {
-    return firstReady
+  if (ready) {
+    return ready
   }
 
-  return page
+  const fallbackTimeoutMs = Math.min(cashierTimeoutMs, 10000)
+  return (await raceDefined([
+    clickManualJumpAndResolveCashierPage(page, clickTimeoutMs, fallbackTimeoutMs, signal),
+    tryWaitForCashierPage(page, fallbackTimeoutMs, signal),
+  ])) ?? page
 }
 
 async function clickManualJumpAndResolveCashierPage(
@@ -321,22 +366,53 @@ async function clickManualJumpAndResolveCashierPage(
   cashierTimeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Page | undefined> {
-  const jumpButton = page.getByText('立即跳转', { exact: false })
   const jumpAvailable = await waitForManualJumpAvailable(page, Math.min(clickTimeoutMs, 5000), signal)
   if (!jumpAvailable) {
     return undefined
   }
 
   const jumpPopupPromise = waitForNextPage(page, cashierTimeoutMs, signal)
-  const clickedJump = await withAbort(clickIfPresent(jumpButton, Math.min(clickTimeoutMs, 1000)), signal)
-  if (!clickedJump) {
+  const clickedJump = await withAbort(clickManualJumpButton(page, Math.min(clickTimeoutMs, 1000)), signal)
+  if (!clickedJump.clicked) {
     return undefined
   }
 
-  return raceDefined([
+  const cashierPage = await raceDefined([
     jumpPopupPromise.then((popup) => tryWaitForCashierPage(popup, cashierTimeoutMs, signal)),
     tryWaitForCashierPage(page, cashierTimeoutMs, signal),
   ])
+  if (cashierPage) {
+    return withDetail(cashierPage, `manual_jump:${clickedJump.method}`)
+  }
+  return undefined
+}
+
+async function clickManualJumpButton(page: Page, timeout: number): Promise<{ clicked: boolean; method?: string }> {
+  const candidateFactories: Array<[string, () => Locator]> = [
+    ['role_button', () => page.getByRole('button', { name: /立即跳转/ })],
+    ['button_or_link_text', () => page.locator('button, [role="button"], a').filter({ hasText: '立即跳转' })],
+    ['exact_text', () => page.getByText('立即跳转', { exact: true })],
+    ['text', () => page.getByText('立即跳转', { exact: false })],
+  ]
+
+  for (const [method, makeCandidate] of candidateFactories) {
+    const candidate = tryMakeLocator(makeCandidate)
+    if (!candidate) {
+      continue
+    }
+    if (await clickIfPresent(candidate, timeout)) {
+      return { clicked: true, method }
+    }
+  }
+  return { clicked: false }
+}
+
+function tryMakeLocator(makeLocator: () => Locator): Locator | undefined {
+  try {
+    return makeLocator()
+  } catch {
+    return undefined
+  }
 }
 
 async function waitForManualJumpAvailable(page: Page, timeout: number, signal?: AbortSignal): Promise<boolean> {
@@ -358,7 +434,7 @@ async function waitForManualJumpAvailable(page: Page, timeout: number, signal?: 
   return true
 }
 
-async function raceDefined<T>(promises: Array<Promise<T | undefined>>): Promise<T | undefined> {
+export async function raceDefined<T>(promises: Array<Promise<T | undefined>>): Promise<T | undefined> {
   const pending = new Set(promises)
   while (pending.size > 0) {
     const settled = await Promise.race(
@@ -403,7 +479,6 @@ async function tryWaitForCashierPage(page: Page | undefined, timeout: number, si
   return undefined
 }
 
-
 function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) {
     return promise
@@ -423,13 +498,31 @@ function createFlowTiming(diagnostics?: BrowserFlowDiagnostics): { record<T>(sta
   return {
     async record<T>(stage: string, promise: Promise<T>): Promise<T> {
       const start = Date.now()
+      let value: T | undefined
+      let hasValue = false
       try {
-        return await promise
+        value = await promise
+        hasValue = true
+        return value
       } finally {
-        diagnostics?.timings.push({ stage, ms: Date.now() - start })
+        const detail = hasValue && typeof value === 'object' && value !== null && flowTimingDetailSymbol in value
+          ? String((value as Record<PropertyKey, unknown>)[flowTimingDetailSymbol] ?? '')
+          : ''
+        diagnostics?.timings.push({ stage, ms: Date.now() - start, ...(detail ? { detail } : {}) })
       }
     },
   }
+}
+
+const flowTimingDetailSymbol = Symbol('ldxpFlowTimingDetail')
+
+function withDetail<T extends object>(value: T, detail: string): T {
+  Object.defineProperty(value, flowTimingDetailSymbol, {
+    value: detail,
+    enumerable: false,
+    configurable: true,
+  })
+  return value
 }
 
 function abortError(): Error {
@@ -458,24 +551,34 @@ function shouldRunHeadless(env: Record<string, string | undefined> = process.env
   return raw !== 'false' && raw !== '0' && raw !== 'no'
 }
 
-async function fillContactInput(page: Page, contactEmail: string, timeout: number): Promise<void> {
-  const byPlaceholder = page.getByPlaceholder('请输入联系方式方便查询订单')
-  if (await isLocatorVisible(byPlaceholder, timeout)) {
-    await byPlaceholder.first().fill(contactEmail, { timeout })
-    return
-  }
+export async function fillContactInput(page: Page, contactEmail: string, timeout: number): Promise<void> {
+  const deadline = Date.now() + timeout
+  let lastCandidateCount = 0
 
-  const inputs = page.locator('input[type="email"], input[type="text"], input:not([type])')
-  const count = await inputs.count()
-  for (let index = 0; index < count; index += 1) {
-    const input = inputs.nth(index)
-    if (await isLocatorVisible(input, timeout)) {
-      await input.fill(contactEmail, { timeout })
+  while (Date.now() < deadline) {
+    const remaining = Math.max(1, deadline - Date.now())
+    const probeTimeout = Math.min(remaining, 1000)
+    const byPlaceholder = page.getByPlaceholder('请输入联系方式方便查询订单')
+    if (await isLocatorVisible(byPlaceholder, probeTimeout)) {
+      await byPlaceholder.first().fill(contactEmail, { timeout: remaining })
       return
     }
+
+    const inputs = page.locator('input[type="email"], input[type="text"], input:not([type])')
+    const count = await inputs.count()
+    lastCandidateCount = count
+    for (let index = 0; index < count; index += 1) {
+      const input = inputs.nth(index)
+      if (await isLocatorVisible(input, probeTimeout)) {
+        await input.fill(contactEmail, { timeout: Math.max(1, deadline - Date.now()) })
+        return
+      }
+    }
+
+    await page.waitForTimeout(Math.min(250, Math.max(1, deadline - Date.now()))).catch(() => undefined)
   }
 
-  throw new Error('Unable to find contact input')
+  throw new Error(`Unable to find contact input after waiting for product page (candidate inputs: ${lastCandidateCount})`)
 }
 
 async function clickIfPresent(locator: Locator, timeout: number): Promise<boolean> {
@@ -502,18 +605,15 @@ async function isLocatorVisible(locator: Locator, timeout: number): Promise<bool
   }
 }
 
-async function waitForCashierOrQr(page: Page, timeout: number): Promise<void> {
-  await Promise.race([
-    page.waitForURL(/cashier|checkout|order|trade|alipay|payment|payApi/i, { timeout }),
-    page.waitForFunction(
-      () => {
-        const text = document.body?.innerText ?? ''
-        return /订单号\s*[:：]?\s*[A-Z0-9]{6,64}/i.test(text) && /(?:金额|元|￥|付款|收款方)/.test(text)
-      },
-      undefined,
-      { timeout },
-    ),
-  ])
+export async function waitForCashierOrQr(page: Page, timeout: number): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const text = document.body?.innerText ?? ''
+      return /订单号\s*[:：]?\s*[A-Z0-9]{6,64}/i.test(text) && /(?:金额|元|￥|付款|收款方)/.test(text)
+    },
+    undefined,
+    { timeout },
+  )
 }
 
 function qrLocator(page: Page): Locator {
@@ -541,9 +641,22 @@ async function extractProductName(page: Page): Promise<string> {
   return heading || 'LDXP product'
 }
 
+export function isExpectedAmountAcceptable(actual: number, expected: number): boolean {
+  if (!Number.isFinite(actual) || !Number.isFinite(expected) || actual <= 0 || expected <= 0) {
+    return false
+  }
+  const epsilon = 0.01
+  if (Math.abs(actual - expected) <= epsilon) {
+    return true
+  }
+  const cardNetworkFee = actual - expected
+  const maxCardNetworkFee = expected * 0.05
+  return cardNetworkFee >= -epsilon && cardNetworkFee <= maxCardNetworkFee + epsilon
+}
+
 function assertExpectedAmount(actual: number, expected: number): void {
-  if (Math.abs(actual - expected) > 0.001) {
-    throw new Error(`Amount mismatch: expected ${expected}, got ${actual}`)
+  if (!isExpectedAmountAcceptable(actual, expected)) {
+    throw new Error(`Amount mismatch: expected ${expected} plus card-network fee, got ${actual}`)
   }
 }
 

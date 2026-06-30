@@ -16,6 +16,8 @@ import (
 
 const (
 	ldxpRedeemSavePointName          = "ldxp_redeem"
+	ldxpAmountEpsilon                = 0.01
+	ldxpMaxCardNetworkFeeRatio       = 0.05
 	ldxpVerifyCodePending            = "pending"
 	ldxpVerifyCodeMissingWorkerOrder = "missing_worker_order"
 	ldxpVerifyCodeMailEventNotFound  = "mail_event_not_found"
@@ -267,7 +269,7 @@ func VerifyLdxpWorkerPaidFields(session *model.LdxpTopupSession) error {
 	if session.WorkerAmount <= 0 {
 		return newLdxpVerifyFieldError(ldxpVerifyCodeAmountMismatch, "ldxp worker amount is missing")
 	}
-	if session.Money > 0 && math.Abs(session.Money-session.WorkerAmount) > 0.01 {
+	if session.Money > 0 && !isLdxpPaidAmountAcceptable(session.WorkerAmount, session.Money) {
 		return newLdxpVerifyFieldError(ldxpVerifyCodeAmountMismatch, fmt.Sprintf("session money %.2f does not match worker amount %.2f", session.Money, session.WorkerAmount))
 	}
 	workerStatusText := strings.TrimSpace(session.WorkerStatusText)
@@ -313,10 +315,10 @@ func VerifyLdxpSessionFields(session *model.LdxpTopupSession, event *model.LdxpM
 		return newLdxpVerifyFieldError(ldxpVerifyCodeCardMismatch, "attached mail card key does not match worker card key")
 	}
 
-	if session.Money > 0 && event.Amount > 0 && math.Abs(session.Money-event.Amount) > 0.01 {
+	if session.Money > 0 && event.Amount > 0 && !isLdxpPaidAmountAcceptable(event.Amount, session.Money) {
 		return newLdxpVerifyFieldError(ldxpVerifyCodeAmountMismatch, fmt.Sprintf("session money %.2f does not match mail event amount %.2f", session.Money, event.Amount))
 	}
-	if session.Money > 0 && session.MailAmount > 0 && math.Abs(session.Money-session.MailAmount) > 0.01 {
+	if session.Money > 0 && session.MailAmount > 0 && !isLdxpPaidAmountAcceptable(session.MailAmount, session.Money) {
 		return newLdxpVerifyFieldError(ldxpVerifyCodeAmountMismatch, fmt.Sprintf("session money %.2f does not match attached mail amount %.2f", session.Money, session.MailAmount))
 	}
 
@@ -325,6 +327,18 @@ func VerifyLdxpSessionFields(session *model.LdxpTopupSession, event *model.LdxpM
 		return newLdxpVerifyFieldError(ldxpVerifyCodeStatusNotPaid, "ldxp worker status is not paid or successful")
 	}
 	return nil
+}
+
+func isLdxpPaidAmountAcceptable(actual float64, expected float64) bool {
+	if actual <= 0 || expected <= 0 {
+		return false
+	}
+	if math.Abs(actual-expected) <= ldxpAmountEpsilon {
+		return true
+	}
+	cardNetworkFee := actual - expected
+	maxCardNetworkFee := expected * ldxpMaxCardNetworkFeeRatio
+	return cardNetworkFee >= -ldxpAmountEpsilon && cardNetworkFee <= maxCardNetworkFee+ldxpAmountEpsilon
 }
 
 func isLdxpMailMatchRequired() bool {
@@ -396,6 +410,9 @@ func directTopUpLdxpSessionTx(tx *gorm.DB, session *model.LdxpTopupSession) (boo
 			return false, newLdxpVerifyFieldError(ldxpVerifyCodeDuplicateOrder, "ldxp order number is already used by another topup")
 		}
 		session.TopupId = existing.Id
+		if err := model.MaybeCreateAffiliateCommissionForTopUpTx(tx, &existing); err != nil {
+			return false, err
+		}
 		upgraded, err := model.MaybeUpgradeUserToVIPTx(tx, session.UserId)
 		return upgraded, err
 	}
@@ -418,6 +435,9 @@ func directTopUpLdxpSessionTx(tx *gorm.DB, session *model.LdxpTopupSession) (boo
 		return false, err
 	}
 	if err := tx.Model(&model.User{}).Where("id = ?", session.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+		return false, err
+	}
+	if err := model.MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 		return false, err
 	}
 	session.TopupId = topUp.Id

@@ -17,6 +17,8 @@ function config(overrides: Partial<WorkerConfig> = {}): WorkerConfig {
     paymentTimeoutMs: 900000,
     resultTimeoutMs: 120000,
     releaseSessionSlotAfterQr: false,
+    browserPrewarm: false,
+    paidWatchPollIntervalMs: 1000,
     debugSnapshotDir: '/app/snapshots',
     mockMode: true,
     mockCardKey: 'mock-card-key-1234',

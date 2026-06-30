@@ -27,3 +27,66 @@ export function generateAffiliateLink(affCode: string): string {
   if (typeof window === 'undefined') return ''
   return `${window.location.origin}/sign-up?aff=${affCode}`
 }
+
+/**
+ * Round affiliate money values to cents.
+ */
+export function roundAffiliateMoney(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
+/**
+ * Normalize withdrawal amount input before validation/submission.
+ */
+export function normalizeAffiliateWithdrawalAmount(value: number): number {
+  return roundAffiliateMoney(value)
+}
+
+/**
+ * Validate withdrawal amount against currently available rewards.
+ */
+export function validateAffiliateWithdrawalAmount(
+  amount: number,
+  available: number
+): string | null {
+  const normalizedAmount = normalizeAffiliateWithdrawalAmount(amount)
+  const normalizedAvailable = roundAffiliateMoney(available)
+
+  if (normalizedAmount <= 0) {
+    return 'Withdrawal amount must be greater than 0'
+  }
+
+  if (normalizedAmount > normalizedAvailable) {
+    return 'Withdrawal amount exceeds available rewards'
+  }
+
+  return null
+}
+
+/**
+ * Validate payout contact details.
+ */
+export function validateAffiliateWithdrawalContact(
+  contact: string
+): string | null {
+  if (!contact.trim()) {
+    return 'Withdrawal contact is required'
+  }
+
+  return null
+}
+
+/**
+ * Validate a complete withdrawal request and return the first error key.
+ */
+export function validateAffiliateWithdrawalInput(
+  amount: number,
+  available: number,
+  contact: string
+): string | null {
+  return (
+    validateAffiliateWithdrawalAmount(amount, available) ||
+    validateAffiliateWithdrawalContact(contact)
+  )
+}
