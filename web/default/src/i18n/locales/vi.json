@@ -3576,6 +3576,7 @@
     "Select a store": "Chọn cửa hàng",
     "Select a timestamp before clearing logs.": "Chọn một dấu thời gian trước khi xóa nhật ký.",
     "Select a usage mode to continue": "Chọn chế độ sử dụng để tiếp tục",
+    "Select a user tag": "Chọn nhãn người dùng",
     "Select a verification method first": "Vui lòng chọn phương thức xác thực trước",
     "Select all": "Chọn tất cả",
     "Select all (filtered)": "Chọn tất cả (đã lọc)",
@@ -4759,6 +4760,7 @@
     "Copy one-line terminal install": "Sao chép lệnh cài đặt Terminal một dòng",
     "Terminal command copied": "Đã sao chép lệnh Terminal",
     "Failed to copy terminal command": "Không thể sao chép lệnh Terminal",
-    "No available group for the new API key": "Không có nhóm khả dụng cho API key mới"
+    "No available group for the new API key": "Không có nhóm khả dụng cho API key mới",
+    "User Tag": "Nhãn người dùng"
   }
 }

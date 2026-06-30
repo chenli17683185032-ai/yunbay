@@ -3576,6 +3576,7 @@
     "Select a store": "Select a store",
     "Select a timestamp before clearing logs.": "Select a timestamp before clearing logs.",
     "Select a usage mode to continue": "Select a usage mode to continue",
+    "Select a user tag": "Select a user tag",
     "Select a verification method first": "Select a verification method first",
     "Select all": "Select all",
     "Select all (filtered)": "Select all (filtered)",
@@ -4759,6 +4760,7 @@
     "Copy one-line terminal install": "Copy one-line terminal install",
     "Terminal command copied": "Terminal command copied",
     "Failed to copy terminal command": "Failed to copy terminal command",
-    "No available group for the new API key": "No available group for the new API key"
+    "No available group for the new API key": "No available group for the new API key",
+    "User Tag": "User Tag"
   }
 }

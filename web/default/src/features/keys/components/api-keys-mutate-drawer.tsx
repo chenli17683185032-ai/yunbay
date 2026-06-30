@@ -117,12 +117,15 @@ export function ApiKeysMutateDrawer({
   const models = modelsData?.data || []
   const groupsRaw = groupsData?.data || {}
   const groups: ApiKeyGroupOption[] = Object.entries(groupsRaw).map(
-    ([key, info]) => ({
-      value: key,
-      label: key,
-      desc: info.desc || key,
-      ratio: info.ratio,
-    })
+    ([key, info]) => {
+      const displayName = info.desc || key
+      return {
+        value: key,
+        label: displayName,
+        desc: key,
+        ratio: info.ratio,
+      }
+    }
   )
   const backendHasAuto = groups.some((g) => g.value === 'auto')
   const schema = getApiKeyFormSchema(t)
@@ -152,10 +155,7 @@ export function ApiKeysMutateDrawer({
     if (groups.length === 0) return
     const currentGroup = form.getValues('group')
     if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
-      const fallback =
-        groups.find((g) => g.value === 'default')?.value ??
-        groups[0]?.value ??
-        ''
+      const fallback = groups[0]?.value ?? ''
       form.setValue('group', fallback)
       if (currentGroup === 'auto') {
         form.setValue('cross_group_retry', false)

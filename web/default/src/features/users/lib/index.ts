@@ -31,3 +31,8 @@ export {
   transformFormDataToPayload,
   transformUserToFormDefaults,
 } from './user-form'
+
+export {
+  buildUserGroupTagOptions,
+  type UserGroupTagOption,
+} from './user-group-tags'

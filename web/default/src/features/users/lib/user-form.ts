@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 import { quotaUnitsToDollars } from '@/lib/format'
-import { DEFAULT_GROUP } from '../constants'
+import { DEFAULT_USER_TAG } from '../constants'
 import { type UserFormData, type User } from '../types'
 
 // ============================================================================
@@ -47,7 +47,7 @@ export const USER_FORM_DEFAULT_VALUES: UserFormValues = {
   password: '',
   role: 1, // Default to common user
   quota_dollars: 0,
-  group: DEFAULT_GROUP,
+  group: DEFAULT_USER_TAG,
   remark: '',
 }
 
@@ -91,7 +91,7 @@ export function transformUserToFormDefaults(user: User): UserFormValues {
     password: '',
     role: user.role,
     quota_dollars: quotaUnitsToDollars(user.quota),
-    group: user.group || DEFAULT_GROUP,
+    group: user.group || DEFAULT_USER_TAG,
     remark: user.remark || '',
   }
 }

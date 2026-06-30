@@ -3576,6 +3576,7 @@
     "Select a store": "选择店铺",
     "Select a timestamp before clearing logs.": "清除日志前请选择一个时间戳。",
     "Select a usage mode to continue": "选择使用模式以继续",
+    "Select a user tag": "选择用户标签",
     "Select a verification method first": "请先选择验证方式",
     "Select all": "全选",
     "Select all (filtered)": "全选（筛选结果）",
@@ -4759,6 +4760,7 @@
     "Copy one-line terminal install": "复制一行终端安装命令",
     "Terminal command copied": "终端命令已复制",
     "Failed to copy terminal command": "复制终端命令失败",
-    "No available group for the new API key": "当前账号没有可用于新 API key 的分组"
+    "No available group for the new API key": "当前账号没有可用于新 API key 的分组",
+    "User Tag": "用户标签"
   }
 }

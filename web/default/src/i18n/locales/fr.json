@@ -3576,6 +3576,7 @@
     "Select a store": "Sélectionner une boutique",
     "Select a timestamp before clearing logs.": "Sélectionnez un horodatage avant de vider les journaux.",
     "Select a usage mode to continue": "Sélectionnez un mode d'utilisation pour continuer",
+    "Select a user tag": "Sélectionner une étiquette utilisateur",
     "Select a verification method first": "Sélectionnez d'abord une méthode de vérification",
     "Select all": "Tout sélectionner",
     "Select all (filtered)": "Tout sélectionner (filtré)",
@@ -4759,6 +4760,7 @@
     "Copy one-line terminal install": "Copier l’installation Terminal en une ligne",
     "Terminal command copied": "Commande Terminal copiée",
     "Failed to copy terminal command": "Impossible de copier la commande Terminal",
-    "No available group for the new API key": "Aucun groupe disponible pour la nouvelle clé API"
+    "No available group for the new API key": "Aucun groupe disponible pour la nouvelle clé API",
+    "User Tag": "Étiquette utilisateur"
   }
 }

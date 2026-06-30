@@ -11,6 +11,16 @@ import (
 	"gorm.io/gorm"
 )
 
+const DefaultModelGroup = "gpt-plus"
+
+func NormalizeTokenModelGroup(group string) string {
+	trimmed := strings.TrimSpace(group)
+	if trimmed == "" {
+		return DefaultModelGroup
+	}
+	return trimmed
+}
+
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
@@ -277,6 +287,7 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 }
 
 func (token *Token) Insert() error {
+	token.Group = NormalizeTokenModelGroup(token.Group)
 	var err error
 	err = DB.Create(token).Error
 	return err
@@ -284,6 +295,7 @@ func (token *Token) Insert() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
+	token.Group = NormalizeTokenModelGroup(token.Group)
 	defer func() {
 		if shouldUpdateRedis(true, err) {
 			gopool.Go(func() {
