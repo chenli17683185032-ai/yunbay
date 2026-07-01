@@ -251,6 +251,8 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			ratioSyncRoute.GET("/channels", controller.GetSyncableChannels)
 			ratioSyncRoute.POST("/fetch", controller.FetchUpstreamRatios)
+			ratioSyncRoute.POST("/model_price/preview", controller.PreviewModelPriceSync)
+			ratioSyncRoute.POST("/model_price/apply", controller.ApplyModelPriceSync)
 		}
 		channelRoute := apiRouter.Group("/channel")
 		channelRoute.Use(middleware.AdminAuth())

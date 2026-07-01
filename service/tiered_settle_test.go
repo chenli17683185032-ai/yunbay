@@ -828,3 +828,30 @@ func BenchmarkRatioBilling_Parallel(b *testing.B) {
 		}
 	})
 }
+
+func TestBuildTieredTokenParams_ClaudeCacheCreationUsesSemanticFlag(t *testing.T) {
+	usage := &dto.Usage{
+		PromptTokens:     5000,
+		CompletionTokens: 2000,
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens:         3000,
+			CachedCreationTokens: 9999,
+		},
+		ClaudeCacheCreation5mTokens: 1000,
+		ClaudeCacheCreation1hTokens: 500,
+	}
+	expr := `tier("base", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6)`
+	usedVars := billingexpr.UsedVars(expr)
+	params := BuildTieredTokenParams(usage, true, usedVars)
+
+	if params.CC != 1000 {
+		t.Fatalf("CC = %f, want 1000 from Claude 5m split", params.CC)
+	}
+	if params.CC1h != 500 {
+		t.Fatalf("CC1h = %f, want 500 from Claude 1h split", params.CC1h)
+	}
+	wantLen := float64(5000 + 3000 + 1000 + 500)
+	if params.Len != wantLen {
+		t.Fatalf("Len = %f, want %f", params.Len, wantLen)
+	}
+}

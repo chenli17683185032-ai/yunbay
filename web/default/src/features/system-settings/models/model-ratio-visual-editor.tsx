@@ -35,7 +35,7 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { useMediaQuery } from '@/hooks'
-import { Copy, Plus } from 'lucide-react'
+import { Copy, Plus, RefreshCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -49,6 +49,7 @@ import {
 } from '@/components/data-table'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
 import { safeJsonParse } from '../utils/json-parser'
+import { ModelPriceSyncDialog } from './model-price-sync-dialog'
 import {
   ModelPricingEditorPanel,
   type ModelPricingEditorPanelHandle,
@@ -129,6 +130,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
   const isMobile = useMediaQuery('(max-width: 767px)')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [priceSyncOpen, setPriceSyncOpen] = useState(false)
   const [editData, setEditData] = useState<ModelRatioData | null>(null)
   const [sorting, setSorting] = useState<SortingState>([])
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
@@ -615,6 +617,16 @@ const ModelRatioVisualEditorComponent = forwardRef<
     [editorOpen, persistPricingData]
   )
 
+  const selectedModelNames = useMemo(
+    () =>
+      table.getFilteredSelectedRowModel().rows.map((row) => row.original.name),
+    [table, rowSelection]
+  )
+
+  const handlePriceSyncApplied = useCallback(() => {
+    table.resetRowSelection()
+  }, [table])
+
   const hasRows = table.getRowModel().rows.length > 0
 
   return (
@@ -744,6 +756,14 @@ const ModelRatioVisualEditorComponent = forwardRef<
       </div>
 
       <DataTableBulkActions table={table} entityName={t('model')}>
+        <Button
+          size='sm'
+          variant='outline'
+          onClick={() => setPriceSyncOpen(true)}
+        >
+          <RefreshCcw data-icon='inline-start' />
+          {t('Sync selected model prices')}
+        </Button>
         <Button size='sm' disabled={!editData} onClick={handleBatchCopy}>
           <Copy data-icon='inline-start' />
           {editData
@@ -751,6 +771,13 @@ const ModelRatioVisualEditorComponent = forwardRef<
             : t('Open a source model first')}
         </Button>
       </DataTableBulkActions>
+
+      <ModelPriceSyncDialog
+        open={priceSyncOpen}
+        onOpenChange={setPriceSyncOpen}
+        selectedModels={selectedModelNames}
+        onApplied={handlePriceSyncApplied}
+      />
 
       {isMobile && (
         <ModelPricingSheet

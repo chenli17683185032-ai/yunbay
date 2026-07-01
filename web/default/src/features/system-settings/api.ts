@@ -21,6 +21,8 @@ import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  ModelPriceSyncRequest,
+  ModelPriceSyncResponse,
   SystemOptionsResponse,
   UpdateOptionRequest,
   UpdateOptionResponse,
@@ -70,6 +72,22 @@ export async function getUpstreamChannels() {
 export async function fetchUpstreamRatios(request: FetchUpstreamRatiosRequest) {
   const res = await api.post<UpstreamRatiosResponse>(
     '/api/ratio_sync/fetch',
+    request
+  )
+  return res.data
+}
+
+export async function previewModelPriceSync(request: ModelPriceSyncRequest) {
+  const res = await api.post<ModelPriceSyncResponse>(
+    '/api/ratio_sync/model_price/preview',
+    request
+  )
+  return res.data
+}
+
+export async function applyModelPriceSync(request: ModelPriceSyncRequest) {
+  const res = await api.post<ModelPriceSyncResponse>(
+    '/api/ratio_sync/model_price/apply',
     request
   )
   return res.data

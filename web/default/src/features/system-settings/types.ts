@@ -390,3 +390,57 @@ export type UpstreamRatiosResponse = {
     test_results: TestResult[]
   }
 }
+
+export type CanonicalModelPrice = {
+  input?: number
+  output?: number
+  cache_read?: number
+  cache_write?: number
+  cache_write_1h?: number
+  image_input?: number
+  audio_input?: number
+  audio_output?: number
+  reasoning?: number
+  web_search?: number
+}
+
+export type ModelPriceSourceChoice = {
+  dimension: string
+  source: 'official' | 'openrouter' | 'same' | string
+  value?: number
+}
+
+export type ModelPriceSyncItem = {
+  model_name: string
+  openrouter_id?: string
+  current: CanonicalModelPrice
+  official: CanonicalModelPrice
+  openrouter: CanonicalModelPrice
+  final: CanonicalModelPrice
+  billing_expr?: string
+  status: 'ready' | 'skipped' | string
+  reason?: string
+  source_choices?: ModelPriceSourceChoice[]
+  would_apply: boolean
+  applied?: boolean
+  changed: boolean
+}
+
+export type ModelPriceSyncRequest = {
+  openrouter_channel_id: number
+  models: string[]
+}
+
+export type ModelPriceSyncResult = {
+  items: ModelPriceSyncItem[]
+  requested: number
+  syncable: number
+  applied_count?: number
+  skipped_count: number
+}
+
+export type ModelPriceSyncResponse = {
+  success: boolean
+  message: string
+  data: ModelPriceSyncResult
+}
