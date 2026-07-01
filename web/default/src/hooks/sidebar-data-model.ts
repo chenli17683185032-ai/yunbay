@@ -219,6 +219,11 @@ export function buildSidebarData(
             icon: icons.users,
           },
           {
+            title: t('Order Management'),
+            url: '/order-management',
+            icon: icons.creditCard,
+          },
+          {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: icons.ticket,

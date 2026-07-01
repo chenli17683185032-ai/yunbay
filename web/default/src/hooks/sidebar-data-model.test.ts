@@ -75,6 +75,10 @@ test('ordinary users see quick-start and required user functions only', () => {
     items.some((item) => 'url' in item && item.url === '/wallet?section=redeem'),
     true
   )
+  assert.equal(
+    items.some((item) => 'url' in item && item.url === '/order-management'),
+    false
+  )
 })
 
 test('admin users keep admin functions but lose the chat preset widget', () => {
@@ -90,6 +94,10 @@ test('admin users keep admin functions but lose the chat preset widget', () => {
   )
   assert.equal(
     items.some((item) => 'url' in item && item.url === '/channels'),
+    true
+  )
+  assert.equal(
+    items.some((item) => 'url' in item && item.url === '/order-management'),
     true
   )
 })
