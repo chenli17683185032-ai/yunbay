@@ -12,9 +12,10 @@ func TestOrderManagementAnalyticsAggregatesProductionLdxpFields(t *testing.T) {
 	truncateTables(t)
 
 	records := []*LdxpTopupSession{
-		{SessionId: "s1", UserId: 1, Money: 10.00, WorkerAmount: 10.30, WorkerOrderNo: "LD_OK", MailOrderNo: "LD_OK", MailAmount: 10.30, Status: LdxpStatusVerified, CreatedTime: 1782518400},
+		{SessionId: "s1", UserId: 1, TopupId: 7001, Money: 10.00, WorkerAmount: 10.30, WorkerOrderNo: "LD_OK", MailOrderNo: "LD_OK", MailAmount: 10.30, Status: LdxpStatusSuccess, CreatedTime: 1782518400},
 		{SessionId: "s2", UserId: 2, Money: 500.00, WorkerAmount: 425.00, WorkerOrderNo: "LD_BAD", MailOrderNo: "LD_BAD", MailAmount: 400.00, Status: LdxpStatusVerifyFailed, ErrorCode: "amount_mismatch", CreatedTime: 1782518500},
 		{SessionId: "s3", UserId: 3, Money: 20.00, WorkerAmount: 20.60, WorkerOrderNo: "LD_WAIT", Status: LdxpStatusWorkerPaid, ErrorCode: "waiting_mail", CreatedTime: 1782604800},
+		{SessionId: "s4", UserId: 4, Money: 1000.00, WorkerAmount: 1030.00, WorkerOrderNo: "LD_CANCEL", Status: LdxpStatusCanceled, CreatedTime: 1782604900},
 	}
 	for _, record := range records {
 		require.NoError(t, DB.Create(record).Error)
@@ -22,17 +23,47 @@ func TestOrderManagementAnalyticsAggregatesProductionLdxpFields(t *testing.T) {
 
 	result, err := GetOrderManagementAnalytics(1782518400, 1782691199)
 	require.NoError(t, err)
-	assert.Equal(t, int64(53000), result.Summary.SiteAmountCents)
-	assert.Equal(t, int64(45590), result.Summary.ExternalPaidCents)
-	assert.Equal(t, 3, result.Summary.OrderCount)
+	assert.Equal(t, int64(1000), result.Summary.SiteAmountCents)
+	assert.Equal(t, int64(1030), result.Summary.ExternalPaidCents)
+	assert.Equal(t, 1, result.Summary.OrderCount)
 	assert.Equal(t, 1, result.Summary.MailVerifiedCount)
-	assert.Equal(t, 1, result.Summary.MailPendingCount)
-	assert.Equal(t, 1, result.Summary.MailErrorCount)
-	assert.Equal(t, float64(1)/float64(3), result.Summary.MailVerifiedRate)
-	require.Len(t, result.Daily, 2)
+	assert.Equal(t, 0, result.Summary.MailPendingCount)
+	assert.Equal(t, 0, result.Summary.MailErrorCount)
+	assert.Equal(t, 1.0, result.Summary.MailVerifiedRate)
+	require.Len(t, result.Daily, 1)
 	assert.Equal(t, "2026-06-27", result.Daily[0].Date)
-	assert.Equal(t, int64(51000), result.Daily[0].SiteAmountCents)
-	assert.Equal(t, 2, result.Daily[0].OrderCount)
+	assert.Equal(t, int64(1000), result.Daily[0].SiteAmountCents)
+	assert.Equal(t, 1, result.Daily[0].OrderCount)
+}
+
+func TestOrderManagementOrdersExcludeUnsettledLdxpSessions(t *testing.T) {
+	truncateTables(t)
+
+	records := []*LdxpTopupSession{
+		{SessionId: "settled_topup", UserId: 1, TopupId: 8001, Money: 10.00, WorkerAmount: 10.30, WorkerOrderNo: "LD_SETTLED_TOPUP", Status: LdxpStatusSuccess, CreatedTime: 1782518400},
+		{SessionId: "settled_redemption", UserId: 2, RedemptionId: 9001, Money: 10.00, WorkerAmount: 10.00, WorkerOrderNo: "LD_SETTLED_REDEEM", Status: LdxpStatusSuccess, CreatedTime: 1782518500},
+		{SessionId: "created", UserId: 3, Money: 1000.00, WorkerAmount: 0.00, WorkerOrderNo: "LD_CREATED", Status: LdxpStatusCreated, CreatedTime: 1782518600},
+		{SessionId: "paid_waiting_mail", UserId: 4, Money: 50.00, WorkerAmount: 51.50, WorkerOrderNo: "LD_WAIT", Status: LdxpStatusWorkerPaid, ErrorCode: "waiting_mail", CreatedTime: 1782518700},
+		{SessionId: "canceled", UserId: 5, Money: 500.00, WorkerAmount: 515.00, WorkerOrderNo: "LD_CANCELED", Status: LdxpStatusCanceled, CreatedTime: 1782518800},
+		{SessionId: "expired", UserId: 6, Money: 30.00, WorkerAmount: 30.90, WorkerOrderNo: "LD_EXPIRED", Status: LdxpStatusExpired, CreatedTime: 1782518900},
+		{SessionId: "worker_failed", UserId: 7, Money: 20.00, WorkerAmount: 0.00, WorkerOrderNo: "LD_FAILED", Status: LdxpStatusWorkerFailed, CreatedTime: 1782519000},
+		{SessionId: "success_without_accounting", UserId: 8, Money: 999.00, WorkerAmount: 999.00, WorkerOrderNo: "LD_SUCCESS_NO_TOPUP", Status: LdxpStatusSuccess, CreatedTime: 1782519100},
+	}
+	for _, record := range records {
+		require.NoError(t, DB.Create(record).Error)
+	}
+
+	result, err := GetOrderManagementAnalytics(1782518400, 1782691199)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2000), result.Summary.SiteAmountCents)
+	assert.Equal(t, int64(2030), result.Summary.ExternalPaidCents)
+	assert.Equal(t, 2, result.Summary.OrderCount)
+
+	rows, total, err := ListOrderManagementOrders(1782518400, 1782691199, "", "", 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, rows, 2)
+	assert.ElementsMatch(t, []string{"settled_topup", "settled_redemption"}, []string{rows[0].SessionId, rows[1].SessionId})
 }
 
 func TestOrderManagementAffiliateStatsIncludesWithdrawalInfo(t *testing.T) {

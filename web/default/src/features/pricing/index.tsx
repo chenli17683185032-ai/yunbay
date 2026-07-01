@@ -17,9 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useMemo, useState } from 'react'
+import { RefreshCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '@/stores/auth-store'
+import { ROLE } from '@/lib/roles'
+import { Button } from '@/components/ui/button'
 import { PublicLayout } from '@/components/layout'
 import { PageTransition } from '@/components/page-transition'
+import { ModelPriceSyncDialog } from '@/features/system-settings/models/model-price-sync-dialog'
 import {
   LoadingSkeleton,
   EmptyState,
@@ -36,9 +41,11 @@ import { usePricingData } from './hooks/use-pricing-data'
 
 export function Pricing() {
   const { t } = useTranslation()
+  const userRole = useAuthStore((state) => state.auth.user?.role)
   const [selectedModelName, setSelectedModelName] = useState<string | null>(
     null
   )
+  const [priceSyncOpen, setPriceSyncOpen] = useState(false)
 
   const {
     models,
@@ -50,6 +57,7 @@ export function Pricing() {
     isLoading,
     priceRate,
     usdExchangeRate,
+    refetch,
   } = usePricingData()
 
   const {
@@ -107,6 +115,18 @@ export function Pricing() {
     clearFilters()
     clearSearch()
   }, [clearFilters, clearSearch])
+
+  const syncableModelNames = useMemo(
+    () => filteredModels.map((model) => model.model_name),
+    [filteredModels]
+  )
+
+  const canSyncModelPrices =
+    userRole === ROLE.SUPER_ADMIN && syncableModelNames.length > 0
+
+  const handlePriceSyncApplied = useCallback(() => {
+    void refetch()
+  }, [refetch])
 
   const renderPricingContent = () => {
     if (filteredModels.length === 0) {
@@ -196,6 +216,18 @@ export function Pricing() {
               )}
               className='mx-auto mt-4 max-w-2xl sm:mt-6'
             />
+            {canSyncModelPrices && (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                className='mt-4'
+                onClick={() => setPriceSyncOpen(true)}
+              >
+                <RefreshCcw data-icon='inline-start' />
+                {t('Refresh prices')}
+              </Button>
+            )}
           </header>
 
           <div className='grid gap-4 xl:grid-cols-[330px_minmax(0,1fr)]'>
@@ -278,6 +310,13 @@ export function Pricing() {
               showRechargePrice={showRechargePrice}
             />
           )}
+
+          <ModelPriceSyncDialog
+            open={priceSyncOpen}
+            onOpenChange={setPriceSyncOpen}
+            selectedModels={syncableModelNames}
+            onApplied={handlePriceSyncApplied}
+          />
         </PageTransition>
       </div>
     </PublicLayout>

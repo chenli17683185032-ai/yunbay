@@ -126,6 +126,7 @@ type OrderManagementOrderRow struct {
 func GetOrderManagementAnalytics(startTime, endTime int64) (*OrderAnalyticsResult, error) {
 	var sessions []LdxpTopupSession
 	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).
+		Where("status IN ? AND (topup_id > ? OR redemption_id > ?)", orderManagementSettledLdxpStatuses(), 0, 0).
 		Order("created_time ASC, id ASC").Find(&sessions).Error; err != nil {
 		return nil, err
 	}
@@ -330,7 +331,9 @@ func GetAffiliateStats(startTime, endTime int64, withdrawalStatus string, offset
 
 func ListOrderManagementOrders(startTime, endTime int64, mailStatus string, keyword string, offset int, limit int) ([]OrderManagementOrderRow, int64, error) {
 	offset, limit = normalizeOffsetLimit(offset, limit, 20, 100)
-	query := DB.Model(&LdxpTopupSession{}).Where("created_time >= ? AND created_time <= ?", startTime, endTime)
+	query := DB.Model(&LdxpTopupSession{}).
+		Where("created_time >= ? AND created_time <= ?", startTime, endTime).
+		Where("status IN ? AND (topup_id > ? OR redemption_id > ?)", orderManagementSettledLdxpStatuses(), 0, 0)
 	keyword = strings.TrimSpace(keyword)
 	if keyword != "" {
 		like := "%" + keyword + "%"
@@ -510,6 +513,10 @@ func isOrderManagementMailErrorStatus(status string) bool {
 
 func shouldCountAffiliateCommissionAmount(status string) bool {
 	return status != AffiliateCommissionStatusCanceled
+}
+
+func orderManagementSettledLdxpStatuses() []string {
+	return []string{LdxpStatusVerified, LdxpStatusRedeemed, LdxpStatusSuccess}
 }
 
 func orderManagementMoneyCents(amount float64) int64 {
