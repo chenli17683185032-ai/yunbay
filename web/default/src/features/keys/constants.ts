@@ -70,7 +70,8 @@ export const API_KEY_STATUS_OPTIONS = Object.values(API_KEY_STATUSES).map(
 // Default Values
 // ============================================================================
 
-export const DEFAULT_GROUP = '' as const
+export const DEFAULT_API_KEY_GROUP = 'gpt-plus' as const
+export const DEFAULT_GROUP = DEFAULT_API_KEY_GROUP
 
 // ============================================================================
 // Error Messages (i18n keys: use t(ERROR_MESSAGES.xxx) when displaying)

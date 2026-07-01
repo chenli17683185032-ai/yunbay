@@ -147,6 +147,10 @@ func taskModelName(task *model.Task) string {
 	return task.Properties.OriginModelName
 }
 
+func resolveTaskBillingGroup(group string) string {
+	return constant.NormalizeTokenGroup(group)
+}
+
 // RefundTaskQuota 统一的任务失败退款逻辑。
 // 当异步任务失败时，将预扣的 quota 退还给用户（支持钱包和订阅），并退还令牌额度。
 func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
@@ -176,7 +180,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		ModelName: taskModelName(task),
 		Quota:     quota,
 		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
+		Group:     resolveTaskBillingGroup(task.Group),
 		Other:     other,
 	})
 }
@@ -239,7 +243,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		ModelName: taskModelName(task),
 		Quota:     logQuota,
 		TokenId:   task.PrivateData.TokenId,
-		Group:     task.Group,
+		Group:     resolveTaskBillingGroup(task.Group),
 		Other:     other,
 	})
 }
@@ -261,14 +265,8 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	// 获取用户和组的倍率信息
-	group := task.Group
-	if group == "" {
-		user, err := model.GetUserById(task.UserId, false)
-		if err == nil {
-			group = user.Group
-		}
-	}
+	// 获取模型/令牌组倍率信息；历史空任务组按默认令牌组兼容，不能回退到网站用户组。
+	group := resolveTaskBillingGroup(task.Group)
 	if group == "" {
 		return
 	}

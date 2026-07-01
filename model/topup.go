@@ -68,6 +68,13 @@ func isVIPUpgradeableUser(user User) bool {
 	}
 }
 
+func topUpVIPQualifiedAmount(topUp TopUp) float64 {
+	if topUp.Amount > 0 {
+		return float64(topUp.Amount)
+	}
+	return topUp.Money
+}
+
 func MaybeUpgradeUserToVIPTx(tx *gorm.DB, userID int) (bool, error) {
 	if tx == nil {
 		return false, errors.New("nil transaction")
@@ -87,14 +94,18 @@ func MaybeUpgradeUserToVIPTx(tx *gorm.DB, userID int) (bool, error) {
 		return false, nil
 	}
 
-	var totalMoney float64
+	var topUps []TopUp
 	if err := tx.Model(&TopUp{}).
 		Where("user_id = ? AND status = ?", userID, common.TopUpStatusSuccess).
-		Select("COALESCE(SUM(money), 0)").
-		Scan(&totalMoney).Error; err != nil {
+		Find(&topUps).Error; err != nil {
 		return false, err
 	}
-	if totalMoney < VIPUpgradeThresholdMoney {
+
+	var totalVIPAmount float64
+	for _, topUp := range topUps {
+		totalVIPAmount += topUpVIPQualifiedAmount(topUp)
+	}
+	if totalVIPAmount < VIPUpgradeThresholdMoney {
 		return false, nil
 	}
 
@@ -190,7 +201,6 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 	}
 
 	var quota float64
-	var vipUpgraded bool
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -227,10 +237,6 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
-		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
-		if err != nil {
-			return err
-		}
 
 		return nil
 	})
@@ -238,10 +244,6 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 	if err != nil {
 		common.SysError("topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
-	}
-
-	if vipUpgraded {
-		_ = UpdateUserGroupCache(topUp.UserId, UserGroupVIP)
 	}
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(int(quota)), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
@@ -418,7 +420,6 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	}
 
 	var userId int
-	var vipUpgraded bool
 	var quotaToAdd int
 	var payMoney float64
 	var paymentMethod string
@@ -468,11 +469,6 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
-		var upgradeErr error
-		vipUpgraded, upgradeErr = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
-		if upgradeErr != nil {
-			return upgradeErr
-		}
 
 		userId = topUp.UserId
 		payMoney = topUp.Money
@@ -482,10 +478,6 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 	if err != nil {
 		return err
-	}
-
-	if vipUpgraded {
-		_ = UpdateUserGroupCache(userId, UserGroupVIP)
 	}
 
 	// 事务外记录日志，避免阻塞
@@ -499,7 +491,6 @@ func RechargeEpay(referenceId string, actualPaymentMethod string, callerIp strin
 	}
 
 	var quotaToAdd int
-	var vipUpgraded bool
 	topUp := &TopUp{}
 	completed := false
 
@@ -536,20 +527,12 @@ func RechargeEpay(referenceId string, actualPaymentMethod string, callerIp strin
 		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
-		var upgradeErr error
-		vipUpgraded, upgradeErr = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
-		if upgradeErr != nil {
-			return upgradeErr
-		}
 		completed = true
 		return nil
 	})
 	if err != nil {
 		common.SysError("epay topup failed: " + err.Error())
 		return err
-	}
-	if vipUpgraded {
-		_ = UpdateUserGroupCache(topUp.UserId, UserGroupVIP)
 	}
 	if completed {
 		if err := rechargeEpayCacheIncrUserQuota(topUp.UserId, int64(quotaToAdd)); err != nil {
@@ -574,7 +557,6 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	var quota int64
-	var vipUpgraded bool
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -633,10 +615,6 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
-		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
-		if err != nil {
-			return err
-		}
 
 		return nil
 	})
@@ -644,10 +622,6 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	if err != nil {
 		common.SysError("creem topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
-	}
-
-	if vipUpgraded {
-		_ = UpdateUserGroupCache(topUp.UserId, UserGroupVIP)
 	}
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
@@ -661,7 +635,6 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	}
 
 	var quotaToAdd int
-	var vipUpgraded bool
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -706,11 +679,6 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
-		var upgradeErr error
-		vipUpgraded, upgradeErr = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
-		if upgradeErr != nil {
-			return upgradeErr
-		}
 
 		return nil
 	})
@@ -718,10 +686,6 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	if err != nil {
 		common.SysError("waffo topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
-	}
-
-	if vipUpgraded {
-		_ = UpdateUserGroupCache(topUp.UserId, UserGroupVIP)
 	}
 
 	if quotaToAdd > 0 {
@@ -737,7 +701,6 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	}
 
 	var quotaToAdd int
-	var vipUpgraded bool
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -780,11 +743,6 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
-		var upgradeErr error
-		vipUpgraded, upgradeErr = MaybeUpgradeUserToVIPTx(tx, topUp.UserId)
-		if upgradeErr != nil {
-			return upgradeErr
-		}
 
 		return nil
 	})
@@ -792,10 +750,6 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	if err != nil {
 		common.SysError("waffo pancake topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
-	}
-
-	if vipUpgraded {
-		_ = UpdateUserGroupCache(topUp.UserId, UserGroupVIP)
 	}
 
 	if quotaToAdd > 0 {

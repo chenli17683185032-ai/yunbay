@@ -150,15 +150,9 @@ export function SignUpForm({
     }
 
     // Validate email verification if required
-    if (emailVerificationRequired) {
-      if (!data.email) {
-        toast.error(t('Please enter your email'))
-        return
-      }
-      if (!verificationCode) {
-        toast.error(t('Please enter the verification code'))
-        return
-      }
+    if (emailVerificationRequired && !verificationCode) {
+      toast.error(t('Please enter the verification code'))
+      return
     }
 
     if (!validateTurnstile()) return
@@ -175,7 +169,7 @@ export function SignUpForm({
       const res = await register({
         username: data.username,
         password: data.password,
-        email: data.email || undefined,
+        email: data.email,
         verification_code: verificationCode || undefined,
         aff_code: affCode || undefined,
         turnstile: turnstileToken,
@@ -215,6 +209,8 @@ export function SignUpForm({
   }
 
   async function handleSendVerificationCode() {
+    const isEmailValid = await form.trigger('email')
+    if (!isEmailValid) return
     await sendCode(emailValue || '')
   }
 
@@ -313,7 +309,7 @@ export function SignUpForm({
           )}
         />
 
-        {/* Email Field */}
+        {/* QQ Email Field */}
         <FormField
           control={form.control}
           name='email'
@@ -323,6 +319,9 @@ export function SignUpForm({
               <FormControl>
                 <Input placeholder={t('name@qq.com')} type='email' {...field} />
               </FormControl>
+              <p className='text-muted-foreground text-xs'>
+                {t('Only QQ email addresses are supported')}
+              </p>
               <FormMessage />
             </FormItem>
           )}

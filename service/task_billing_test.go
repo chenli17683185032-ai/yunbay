@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -182,6 +184,21 @@ func countLogs(t *testing.T) int64 {
 	var count int64
 	model.LOG_DB.Model(&model.Log{}).Count(&count)
 	return count
+}
+
+func withTaskBillingRatios(t *testing.T, modelRatios string, groupRatios string, groupGroupRatios string) {
+	t.Helper()
+	originalModelRatios := ratio_setting.ModelRatio2JSONString()
+	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
+	originalGroupGroupRatios := ratio_setting.GroupGroupRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(modelRatios))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(groupRatios))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(groupGroupRatios))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(originalModelRatios))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios))
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(originalGroupGroupRatios))
+	})
 }
 
 // ===========================================================================
@@ -427,6 +444,50 @@ func TestRecalculate_Subscription_NegativeDelta(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRecalculateTaskQuotaByTokensDefaultsEmptyTaskGroupToGptPlus(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+	withTaskBillingRatios(
+		t,
+		`{"test-model":2}`,
+		`{"gpt-plus":3,"体验用户":11}`,
+		`{"体验用户":{"体验用户":13}}`,
+	)
+
+	const userID, tokenID, channelID = 15, 15, 15
+	const initQuota, preConsumed = 10000, 1000
+	const tokenRemain = 5000
+
+	user := &model.User{
+		Id:       userID,
+		Username: "task-empty-group-user",
+		Group:    model.UserGroupTiyan,
+		Quota:    initQuota,
+		Status:   common.UserStatusEnabled,
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+	seedToken(t, tokenID, userID, "sk-task-empty-group", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceWallet, 0)
+	task.Group = ""
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		OriginModelName: "test-model",
+	}
+
+	RecalculateTaskQuotaByTokens(ctx, task, 100)
+
+	require.Equal(t, constant.TokenGroupGPTPlus, resolveTaskBillingGroup(""))
+	require.Equal(t, 600, task.Quota)
+	assert.Equal(t, initQuota+(preConsumed-600), getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain+(preConsumed-600), getTokenRemainQuota(t, tokenID))
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeRefund, log.Type)
+	assert.Equal(t, constant.TokenGroupGPTPlus, log.Group)
 }
 
 // ===========================================================================

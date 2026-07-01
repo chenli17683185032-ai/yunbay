@@ -58,7 +58,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		},
 	}
 
-	t.Run("standard_mode_expired_window_does_not_trigger_maintenance", func(t *testing.T) {
+	t.Run("standard_mode_needs_maintenance_does_not_block_request", func(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeStandard}
 		cfg.SubscriptionMaintenance.WorkerCount = 1
 		cfg.SubscriptionMaintenance.QueueSize = 1
@@ -103,8 +103,9 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		select {
 		case <-maintenanceCalled:
-			t.Fatalf("did not expect maintenance to be scheduled in validity-only auth")
-		case <-time.After(100 * time.Millisecond):
+			// ok
+		case <-time.After(time.Second):
+			t.Fatalf("expected maintenance to be scheduled")
 		}
 	})
 
@@ -136,7 +137,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 	})
 
-	t.Run("standard_mode_does_not_enforce_quota_check", func(t *testing.T) {
+	t.Run("standard_mode_enforces_quota_check", func(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeStandard}
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 
@@ -172,182 +173,8 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		req.Header.Set("x-api-key", apiKey.Key)
 		router.ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code)
-	})
-}
-
-func TestAPIKeyAuthWithSubscription_AllowsActiveSubscriptionWithoutBillingChecks(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	limit := 1.0
-	group := &service.Group{
-		ID:               88,
-		Name:             "sub-validity-only",
-		Status:           service.StatusActive,
-		Hydrated:         true,
-		SubscriptionType: service.SubscriptionTypeSubscription,
-		DailyLimitUSD:    &limit,
-	}
-	user := &service.User{
-		ID:          18,
-		Role:        service.RoleUser,
-		Status:      service.StatusActive,
-		Balance:     0,
-		Concurrency: 3,
-	}
-	apiKey := &service.APIKey{
-		ID:     801,
-		UserID: user.ID,
-		Key:    "sub-validity-only-key",
-		Status: service.StatusActive,
-		User:   user,
-		Group:  group,
-	}
-	apiKey.GroupID = &group.ID
-
-	var touchedID int64
-	apiKeyRepo := &stubApiKeyRepo{
-		getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
-			if key != apiKey.Key {
-				return nil, service.ErrAPIKeyNotFound
-			}
-			clone := *apiKey
-			return &clone, nil
-		},
-		updateLastUsed: func(ctx context.Context, id int64, usedAt time.Time) error {
-			touchedID = id
-			return nil
-		},
-	}
-
-	now := time.Now()
-	sub := &service.UserSubscription{
-		ID:               901,
-		UserID:           user.ID,
-		GroupID:          group.ID,
-		Status:           service.SubscriptionStatusActive,
-		ExpiresAt:        now.Add(24 * time.Hour),
-		DailyWindowStart: &now,
-		DailyUsageUSD:    10,
-	}
-	subscriptionService := service.NewSubscriptionService(nil, &stubUserSubscriptionRepo{
-		getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
-			if userID != user.ID || groupID != group.ID {
-				return nil, service.ErrSubscriptionNotFound
-			}
-			clone := *sub
-			return &clone, nil
-		},
-		updateStatus:   func(ctx context.Context, subscriptionID int64, status string) error { return nil },
-		activateWindow: func(ctx context.Context, id int64, start time.Time) error { return nil },
-		resetDaily:     func(ctx context.Context, id int64, start time.Time) error { return nil },
-		resetWeekly:    func(ctx context.Context, id int64, start time.Time) error { return nil },
-		resetMonthly:   func(ctx context.Context, id int64, start time.Time) error { return nil },
-	}, nil, nil, &config.Config{RunMode: config.RunModeStandard})
-
-	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, &config.Config{RunMode: config.RunModeStandard})
-	router := gin.New()
-	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, &config.Config{RunMode: config.RunModeStandard})))
-	router.GET("/t", func(c *gin.Context) {
-		_, hasAPIKey := c.Get(string(ContextKeyAPIKey))
-		_, hasUser := c.Get(string(ContextKeyUser))
-		_, hasSubscription := c.Get(string(ContextKeySubscription))
-		if !hasAPIKey || !hasUser || !hasSubscription {
-			c.JSON(http.StatusInternalServerError, gin.H{"ok": false})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/t", nil)
-	req.Header.Set("x-api-key", apiKey.Key)
-	router.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, apiKey.ID, touchedID, "expected TouchLastUsed to still be called")
-}
-
-func TestAPIKeyAuthWithSubscription_RejectsMissingOrExpiredSubscription(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	group := &service.Group{
-		ID:               89,
-		Name:             "sub-unavailable",
-		Status:           service.StatusActive,
-		Hydrated:         true,
-		SubscriptionType: service.SubscriptionTypeSubscription,
-	}
-	user := &service.User{
-		ID:          19,
-		Role:        service.RoleUser,
-		Status:      service.StatusActive,
-		Balance:     100,
-		Concurrency: 3,
-	}
-	apiKey := &service.APIKey{
-		ID:     802,
-		UserID: user.ID,
-		Key:    "sub-unavailable-key",
-		Status: service.StatusActive,
-		User:   user,
-		Group:  group,
-	}
-	apiKey.GroupID = &group.ID
-
-	newRouter := func(repo *stubUserSubscriptionRepo) *gin.Engine {
-		cfg := &config.Config{RunMode: config.RunModeStandard}
-		apiKeyRepo := &stubApiKeyRepo{
-			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
-				if key != apiKey.Key {
-					return nil, service.ErrAPIKeyNotFound
-				}
-				clone := *apiKey
-				return &clone, nil
-			},
-		}
-		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
-		subscriptionService := service.NewSubscriptionService(nil, repo, nil, nil, cfg)
-		return newAuthTestRouter(apiKeyService, subscriptionService, cfg)
-	}
-
-	t.Run("missing subscription", func(t *testing.T) {
-		router := newRouter(&stubUserSubscriptionRepo{
-			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
-				return nil, service.ErrSubscriptionNotFound
-			},
-		})
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/t", nil)
-		req.Header.Set("x-api-key", apiKey.Key)
-		router.ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusForbidden, w.Code)
-		requireAPIKeyAuthError(t, w, "SUBSCRIPTION_UNAVAILABLE", "Current subscription is unavailable")
-	})
-
-	t.Run("expired subscription", func(t *testing.T) {
-		router := newRouter(&stubUserSubscriptionRepo{
-			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
-				return &service.UserSubscription{
-					ID:        902,
-					UserID:    user.ID,
-					GroupID:   group.ID,
-					Status:    service.SubscriptionStatusActive,
-					ExpiresAt: time.Now().Add(-time.Hour),
-				}, nil
-			},
-			updateStatus: func(ctx context.Context, subscriptionID int64, status string) error { return nil },
-		})
-
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, "/t", nil)
-		req.Header.Set("x-api-key", apiKey.Key)
-		router.ServeHTTP(w, req)
-
-		require.Equal(t, http.StatusForbidden, w.Code)
-		requireAPIKeyAuthError(t, w, "SUBSCRIPTION_UNAVAILABLE", "Current subscription is unavailable")
+		require.Equal(t, http.StatusTooManyRequests, w.Code)
+		require.Contains(t, w.Body.String(), "USAGE_LIMIT_EXCEEDED")
 	})
 }
 

@@ -24,27 +24,27 @@ import {
   getQuickStartApiKeyGroup,
 } from './quick-start-api-key'
 
-test('quick start API key group falls back to the first user-available group', () => {
+test('quick start API key group requires gpt-plus instead of falling back to another user-available group', () => {
   assert.deepEqual(
     getQuickStartApiKeyGroup({
       defaultUseAutoGroup: false,
       availableGroups: ['plus'],
     }),
     {
-      group: 'plus',
+      group: '',
       crossGroupRetry: false,
     }
   )
 })
 
-test('quick start API key group uses auto only when the user can select auto', () => {
+test('quick start API key group does not let auto override gpt-plus', () => {
   assert.deepEqual(
     getQuickStartApiKeyGroup({
       defaultUseAutoGroup: true,
       availableGroups: ['plus'],
     }),
     {
-      group: 'plus',
+      group: '',
       crossGroupRetry: false,
     }
   )
@@ -52,51 +52,64 @@ test('quick start API key group uses auto only when the user can select auto', (
   assert.deepEqual(
     getQuickStartApiKeyGroup({
       defaultUseAutoGroup: true,
-      availableGroups: ['plus', 'auto'],
+      availableGroups: ['plus', 'auto', 'gpt-plus'],
     }),
     {
-      group: 'auto',
-      crossGroupRetry: true,
+      group: 'gpt-plus',
+      crossGroupRetry: false,
     }
   )
 })
 
-test('quick start API key group keeps the current user group ahead of auto', () => {
+test('quick start API key group does not use the website user group as token group', () => {
   assert.deepEqual(
     getQuickStartApiKeyGroup({
       defaultUseAutoGroup: true,
-      preferredGroup: 'plus',
-      availableGroups: ['auto', 'plus'],
+      preferredGroup: '体验用户',
+      availableGroups: ['auto', 'gpt-plus', '体验用户'],
     }),
     {
-      group: 'plus',
+      group: 'gpt-plus',
       crossGroupRetry: false,
     }
   )
 })
 
-test('quick start API key group prefers a non-default available group over default fallback', () => {
+test('quick start API key group prefers gpt-plus over a non-default fallback', () => {
   assert.deepEqual(
     getQuickStartApiKeyGroup({
       defaultUseAutoGroup: false,
-      availableGroups: ['default', 'plus'],
+      availableGroups: ['default', 'plus', 'gpt-plus'],
     }),
     {
-      group: 'plus',
+      group: 'gpt-plus',
       crossGroupRetry: false,
     }
   )
 })
 
-test('quick start API key group prefers the current user group when it is selectable', () => {
+test('quick start API key group prefers gpt-plus over the current user group when selectable', () => {
   assert.deepEqual(
     getQuickStartApiKeyGroup({
       defaultUseAutoGroup: false,
-      preferredGroup: 'plus',
-      availableGroups: ['default', 'plus'],
+      preferredGroup: '体验用户',
+      availableGroups: ['default', 'gpt-plus', '体验用户'],
     }),
     {
-      group: 'plus',
+      group: 'gpt-plus',
+      crossGroupRetry: false,
+    }
+  )
+})
+
+test('quick start API key group prefers gpt-plus even when auto is enabled', () => {
+  assert.deepEqual(
+    getQuickStartApiKeyGroup({
+      defaultUseAutoGroup: true,
+      availableGroups: ['auto', 'gpt-plus'],
+    }),
+    {
+      group: 'gpt-plus',
       crossGroupRetry: false,
     }
   )
@@ -127,7 +140,7 @@ test('one-click API key creation reveals and copies the new key', async () => {
 
   const result = await generateAndCopyQuickStartApiKey({
     now: () => 1_700_000_000_000,
-    defaultGroup: 'plus',
+    defaultGroup: 'gpt-plus',
     createApiKey: async (payload) => {
       createdPayload = payload
       return { success: true }
@@ -155,13 +168,13 @@ test('one-click API key creation reveals and copies the new key', async () => {
 
   assert.equal(createdPayload?.name, 'yunbay-quick-start-1700000000000')
   assert.equal(createdPayload?.unlimited_quota, true)
-  assert.equal(createdPayload?.group, 'plus')
+  assert.equal(createdPayload?.group, 'gpt-plus')
   assert.equal(createdPayload?.cross_group_retry, false)
   assert.equal(result.fullKey, 'sk-generated-key')
   assert.equal(copiedText, 'sk-generated-key')
 })
 
-test('one-click API key creation follows the site auto-group default', async () => {
+test('one-click API key creation allows explicit auto group when already resolved upstream', async () => {
   let createdPayload: ApiKeyFormData | undefined
 
   await generateAndCopyQuickStartApiKey({
@@ -191,7 +204,7 @@ test('one-click API key creation reports clipboard failure', async () => {
   await assert.rejects(
     generateAndCopyQuickStartApiKey({
       now: () => 1,
-      defaultGroup: 'plus',
+      defaultGroup: 'gpt-plus',
       createApiKey: async () => ({ success: true }),
       searchApiKeys: async ({ keyword }) => ({
         success: true,

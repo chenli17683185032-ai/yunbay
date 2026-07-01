@@ -26,6 +26,10 @@ import {
   showSuccess,
   showWarning,
 } from '../../../helpers';
+import {
+  checkinDisplayAmountToQuotaUnits,
+  checkinQuotaUnitsToDisplayAmount,
+} from '../../../helpers/quota';
 import { useTranslation } from 'react-i18next';
 
 export default function SettingsCheckin(props) {
@@ -33,11 +37,23 @@ export default function SettingsCheckin(props) {
   const [loading, setLoading] = useState(false);
   const [inputs, setInputs] = useState({
     'checkin_setting.enabled': false,
-    'checkin_setting.min_quota': 1000,
-    'checkin_setting.max_quota': 10000,
+    'checkin_setting.min_quota': 0,
+    'checkin_setting.max_quota': 1,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
+
+  function toDisplayInputs(rawInputs) {
+    return {
+      ...rawInputs,
+      'checkin_setting.min_quota': checkinQuotaUnitsToDisplayAmount(
+        rawInputs['checkin_setting.min_quota'],
+      ),
+      'checkin_setting.max_quota': checkinQuotaUnitsToDisplayAmount(
+        rawInputs['checkin_setting.max_quota'],
+      ),
+    };
+  }
 
   function handleFieldChange(fieldName) {
     return (value) => {
@@ -52,6 +68,11 @@ export default function SettingsCheckin(props) {
       let value = '';
       if (typeof inputs[item.key] === 'boolean') {
         value = String(inputs[item.key]);
+      } else if (
+        item.key === 'checkin_setting.min_quota' ||
+        item.key === 'checkin_setting.max_quota'
+      ) {
+        value = String(checkinDisplayAmountToQuotaUnits(inputs[item.key]));
       } else {
         value = String(inputs[item.key]);
       }
@@ -70,6 +91,19 @@ export default function SettingsCheckin(props) {
             return showError(t('部分保存失败，请重试'));
         }
         showSuccess(t('保存成功'));
+        setInputsRow({
+          ...inputs,
+          'checkin_setting.min_quota': checkinQuotaUnitsToDisplayAmount(
+            checkinDisplayAmountToQuotaUnits(
+              inputs['checkin_setting.min_quota'],
+            ),
+          ),
+          'checkin_setting.max_quota': checkinQuotaUnitsToDisplayAmount(
+            checkinDisplayAmountToQuotaUnits(
+              inputs['checkin_setting.max_quota'],
+            ),
+          ),
+        });
         props.refresh();
       })
       .catch(() => {
@@ -87,9 +121,10 @@ export default function SettingsCheckin(props) {
         currentInputs[key] = props.options[key];
       }
     }
-    setInputs(currentInputs);
-    setInputsRow(structuredClone(currentInputs));
-    refForm.current.setValues(currentInputs);
+    const displayInputs = toDisplayInputs(currentInputs);
+    setInputs(displayInputs);
+    setInputsRow(structuredClone(displayInputs));
+    refForm.current.setValues(displayInputs);
   }, [props.options]);
 
   return (
@@ -121,20 +156,24 @@ export default function SettingsCheckin(props) {
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   field={'checkin_setting.min_quota'}
-                  label={t('签到最小额度')}
-                  placeholder={t('签到奖励的最小额度')}
+                  label={t('签到最小金额')}
+                  placeholder={'0'}
+                  step={0.01}
                   onChange={handleFieldChange('checkin_setting.min_quota')}
                   min={0}
+                  extraText={t('输入展示金额，保存时会自动换算为内部额度')}
                   disabled={!inputs['checkin_setting.enabled']}
                 />
               </Col>
               <Col xs={24} sm={12} md={8} lg={8} xl={8}>
                 <Form.InputNumber
                   field={'checkin_setting.max_quota'}
-                  label={t('签到最大额度')}
-                  placeholder={t('签到奖励的最大额度')}
+                  label={t('签到最大金额')}
+                  placeholder={'1'}
+                  step={0.01}
                   onChange={handleFieldChange('checkin_setting.max_quota')}
                   min={0}
+                  extraText={t('输入展示金额，保存时会自动换算为内部额度')}
                   disabled={!inputs['checkin_setting.enabled']}
                 />
               </Col>

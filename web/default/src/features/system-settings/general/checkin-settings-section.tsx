@@ -40,11 +40,16 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
+import {
+  checkinDisplayAmountToQuotaUnits,
+  checkinQuotaUnitsToDisplayAmount,
+  normalizeCheckinQuotaUnits,
+} from './lib/checkin-quota'
 
 const schema = z.object({
   enabled: z.boolean(),
-  minQuota: z.coerce.number().int().min(0),
-  maxQuota: z.coerce.number().int().min(0),
+  minQuota: z.coerce.number().min(0),
+  maxQuota: z.coerce.number().min(0),
 })
 
 type Values = z.infer<typeof schema>
@@ -60,13 +65,21 @@ export function CheckinSettingsSection({
 }) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const defaultMinQuota = normalizeCheckinQuotaUnits(defaultValues.minQuota)
+  const defaultMaxQuota = normalizeCheckinQuotaUnits(defaultValues.maxQuota)
+  const defaultMinAmount = checkinQuotaUnitsToDisplayAmount(
+    defaultValues.minQuota
+  )
+  const defaultMaxAmount = checkinQuotaUnitsToDisplayAmount(
+    defaultValues.maxQuota
+  )
 
   const form = useForm<Values>({
     resolver: zodResolver(schema) as unknown as Resolver<Values>,
     defaultValues: {
       enabled: defaultValues.enabled,
-      minQuota: defaultValues.minQuota,
-      maxQuota: defaultValues.maxQuota,
+      minQuota: defaultMinAmount,
+      maxQuota: defaultMaxAmount,
     },
   })
 
@@ -83,17 +96,20 @@ export function CheckinSettingsSection({
       })
     }
 
-    if (values.minQuota !== defaultValues.minQuota) {
+    const minQuota = checkinDisplayAmountToQuotaUnits(values.minQuota)
+    const maxQuota = checkinDisplayAmountToQuotaUnits(values.maxQuota)
+
+    if (minQuota !== defaultMinQuota) {
       updates.push({
         key: 'checkin_setting.min_quota',
-        value: String(values.minQuota),
+        value: String(minQuota),
       })
     }
 
-    if (values.maxQuota !== defaultValues.maxQuota) {
+    if (maxQuota !== defaultMaxQuota) {
       updates.push({
         key: 'checkin_setting.max_quota',
-        value: String(values.maxQuota),
+        value: String(maxQuota),
       })
     }
 
@@ -106,7 +122,11 @@ export function CheckinSettingsSection({
       await updateOption.mutateAsync(update)
     }
 
-    form.reset(values)
+    form.reset({
+      ...values,
+      minQuota: checkinQuotaUnitsToDisplayAmount(minQuota),
+      maxQuota: checkinQuotaUnitsToDisplayAmount(maxQuota),
+    })
   }
 
   return (
@@ -150,17 +170,20 @@ export function CheckinSettingsSection({
                 name='minQuota'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Minimum check-in quota')}</FormLabel>
+                    <FormLabel>{t('Minimum check-in amount')}</FormLabel>
                     <FormControl>
                       <Input
                         type='number'
                         min={0}
-                        placeholder={t('1000')}
+                        step='0.01'
+                        placeholder='0'
                         {...field}
                       />
                     </FormControl>
                     <FormDescription>
-                      {t('Minimum quota amount awarded for check-in')}
+                      {t(
+                        'Enter the display amount; it is saved as quota units automatically.'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -172,17 +195,20 @@ export function CheckinSettingsSection({
                 name='maxQuota'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Maximum check-in quota')}</FormLabel>
+                    <FormLabel>{t('Maximum check-in amount')}</FormLabel>
                     <FormControl>
                       <Input
                         type='number'
                         min={0}
-                        placeholder={t('10000')}
+                        step='0.01'
+                        placeholder='1'
                         {...field}
                       />
                     </FormControl>
                     <FormDescription>
-                      {t('Maximum quota amount awarded for check-in')}
+                      {t(
+                        'Enter the display amount; it is saved as quota units automatically.'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

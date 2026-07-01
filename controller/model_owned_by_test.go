@@ -57,7 +57,7 @@ func TestBuildOpenAIModelFallsBackToCustomForUnknownModels(t *testing.T) {
 	require.Equal(t, "custom", modelItem.OwnedBy)
 }
 
-func TestGetModelListGroupsUsesUserGroupWhenTokenGroupIsEmpty(t *testing.T) {
+func TestGetModelListGroupsDefaultsEmptyTokenGroupToGptPlus(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
@@ -66,8 +66,8 @@ func TestGetModelListGroupsUsesUserGroupWhenTokenGroupIsEmpty(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, "default", groups.userGroup)
-	require.Empty(t, groups.tokenGroup)
-	require.Equal(t, []string{"default"}, groups.ownerGroups)
+	require.Equal(t, constant.TokenGroupGPTPlus, groups.tokenGroup)
+	require.Equal(t, []string{constant.TokenGroupGPTPlus}, groups.ownerGroups)
 }
 
 func TestGetModelListGroupsUsesExplicitTokenGroup(t *testing.T) {

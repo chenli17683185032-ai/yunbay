@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 import type { TFunction } from 'i18next'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
-import { DEFAULT_GROUP } from '../constants'
+import { DEFAULT_API_KEY_GROUP, DEFAULT_GROUP } from '../constants'
 import { type ApiKeyFormData, type ApiKey } from '../types'
 
 // ============================================================================
@@ -71,18 +71,32 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   model_limits: [],
   allow_ips: '',
   group: DEFAULT_GROUP,
-  cross_group_retry: true,
+  cross_group_retry: false,
   tokenCount: 1,
 }
 
 export function getApiKeyFormDefaultValues(
-  defaultUseAutoGroup: boolean
+  _defaultUseAutoGroup: boolean
 ): ApiKeyFormValues {
   return {
     ...API_KEY_FORM_DEFAULT_VALUES,
-    group: defaultUseAutoGroup ? 'auto' : DEFAULT_GROUP,
-    cross_group_retry: defaultUseAutoGroup,
+    group: DEFAULT_API_KEY_GROUP,
+    cross_group_retry: false,
   }
+}
+
+export function resolveApiKeyCreateGroup(options: {
+  availableGroups: string[]
+  currentGroup?: string
+}): string {
+  const availableGroups = options.availableGroups
+    .map((group) => group.trim())
+    .filter(Boolean)
+  if (availableGroups.includes(DEFAULT_API_KEY_GROUP)) {
+    return DEFAULT_API_KEY_GROUP
+  }
+
+  return ''
 }
 
 // ============================================================================

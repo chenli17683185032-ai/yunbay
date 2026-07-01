@@ -3821,6 +3821,9 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "签到最大金额": "Maximum check-in amount",
+    "签到最小金额": "Minimum check-in amount",
+    "输入展示金额，保存时会自动换算为内部额度": "Enter the display amount; it is saved as quota units automatically"
   }
 }

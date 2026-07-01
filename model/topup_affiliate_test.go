@@ -137,3 +137,29 @@ func TestRechargeEpayTopUpQueryUsesRowLockClauseOutsideSQLite(t *testing.T) {
 func decimalQuotaForTopupAffiliateTest(amount int64) int64 {
 	return int64(float64(amount) * common.QuotaPerUnit)
 }
+
+func TestAffiliateCommissionUsesMoneyForDiscountedLDXPTopup(t *testing.T) {
+	setupTopupAffiliateTestDB(t)
+
+	inviter := User{Username: "ldxp-inviter", Role: common.RoleCommonUser, Group: UserGroupVIP, AffCode: "ldxp-inviter-aff"}
+	require.NoError(t, DB.Create(&inviter).Error)
+	invitee := User{Username: "ldxp-invitee", Role: common.RoleCommonUser, Group: UserGroupTiyan, AffCode: "ldxp-invitee-aff", InviterId: inviter.Id}
+	require.NoError(t, DB.Create(&invitee).Error)
+
+	topUp := TopUp{
+		UserId:          invitee.Id,
+		Amount:          500,
+		Money:           425,
+		TradeNo:         "ldxp-discount-affiliate",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		Status:          common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(&topUp).Error)
+	require.NoError(t, MaybeCreateAffiliateCommissionForTopUp(topUp.Id))
+
+	var commission AffiliateCommission
+	require.NoError(t, DB.Where("topup_id = ?", topUp.Id).First(&commission).Error)
+	require.Equal(t, 425.0, commission.BaseMoney)
+	require.Equal(t, 63.75, commission.CommissionMoney)
+}

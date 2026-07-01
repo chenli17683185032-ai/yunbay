@@ -30,7 +30,7 @@ import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { API_ENDPOINTS } from '../../constants/common.constant';
 import { StatusContext } from '../../context/Status';
 import { useActualTheme } from '../../context/Theme';
-import { renderSafeMarkdown, sanitizeHtml } from '../../helpers/sanitize';
+import { marked } from 'marked';
 import { useTranslation } from 'react-i18next';
 import {
   IconGithubLogo,
@@ -88,7 +88,7 @@ const Home = () => {
     if (success) {
       let content = data;
       if (!data.startsWith('https://')) {
-        content = renderSafeMarkdown(data);
+        content = marked.parse(data);
       }
       setHomePageContent(content);
       localStorage.setItem('home_page_content', content);
@@ -340,13 +340,11 @@ const Home = () => {
             <iframe
               src={homePageContent}
               className='w-full h-full border-none'
-              sandbox='allow-forms allow-popups allow-scripts'
-              referrerPolicy='no-referrer'
             />
           ) : (
             <div
               className='mt-[60px]'
-              dangerouslySetInnerHTML={{ __html: sanitizeHtml(homePageContent) }}
+              dangerouslySetInnerHTML={{ __html: homePageContent }}
             />
           )}
         </div>

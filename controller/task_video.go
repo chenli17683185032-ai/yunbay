@@ -159,14 +159,8 @@ func updateVideoSingleTask(ctx context.Context, adaptor channel.TaskAdaptor, cha
 					modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
 					// 只有配置了倍率(非固定价格)时才按 token 重新计费
 					if hasRatioSetting && modelRatio > 0 {
-						// 获取用户和组的倍率信息
-						group := task.Group
-						if group == "" {
-							user, err := model.GetUserById(task.UserId, false)
-							if err == nil {
-								group = user.Group
-							}
-						}
+						// 获取模型/令牌组倍率信息；历史空任务组按默认令牌组兼容，不能回退到网站用户组。
+						group := constant.NormalizeTokenGroup(task.Group)
 						if group != "" {
 							groupRatio := ratio_setting.GetGroupRatio(group)
 							userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)

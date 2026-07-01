@@ -309,7 +309,7 @@ describe('user UsageView tooltip', () => {
     clickSpy.mockRestore()
   })
 
-  it('exports historical image rows with image billing mode derived from image_count', async () => {
+  it('exports historical image rows with explicit token billing mode unchanged', async () => {
     const exportedLogs = [
       {
         request_id: 'req-user-export-legacy-image',
@@ -391,15 +391,15 @@ describe('user UsageView tooltip', () => {
       reader.readAsText(exportedBlob as Blob)
     })
     expect(csv).toContain('Billing Mode')
-    expect(csv).toContain('Image')
-    expect(csv).not.toContain(',Token,0,0,0,0,')
+    expect(csv).toContain('Token')
+    expect(csv).toContain(',Token,0,0,0,0,')
 
     window.URL.createObjectURL = originalCreateObjectURL
     window.URL.revokeObjectURL = originalRevokeObjectURL
     clickSpy.mockRestore()
   })
 
-  it('does not display a 2K fallback for historical image rows with missing size', async () => {
+  it('keeps explicit token billing mode for historical image rows with missing size', async () => {
     query.mockResolvedValue({
       items: [
         {
@@ -462,7 +462,7 @@ describe('user UsageView tooltip', () => {
     await nextTick()
 
     const text = wrapper.text()
-    expect(text).toContain('Image')
+    expect(text).toContain('Token')
     expect(text).toContain('not recorded')
     expect(text).not.toContain('(2K)')
   })
