@@ -137,7 +137,7 @@ const PRESET_GROUPS: PresetGroup[] = [
       { key: 'flat', label: 'Flat', expr: 'tier("base", p * 2 + c * 4)' },
       {
         key: 'claude-opus',
-        label: 'Claude Opus 4.6',
+        label: 'Claude Opus 4.6 / 4.7 / 4.8',
         expr: 'tier("base", p * 5 + c * 25 + cr * 0.5 + cc * 6.25 + cc1h * 10)',
       },
       {
@@ -152,7 +152,7 @@ const PRESET_GROUPS: PresetGroup[] = [
     presets: [
       {
         key: 'claude-sonnet',
-        label: 'Claude Sonnet 4.5',
+        label: 'Claude Sonnet 4.5 / 4.6',
         expr: 'len <= 200000 ? tier("standard", p * 3 + c * 15 + cr * 0.3 + cc * 3.75 + cc1h * 6) : tier("long_context", p * 6 + c * 22.5 + cr * 0.6 + cc * 7.5 + cc1h * 12)',
       },
       {
@@ -202,7 +202,7 @@ const PRESET_GROUPS: PresetGroup[] = [
     presets: [
       {
         key: 'claude-opus-fast',
-        label: 'Claude Opus 4.6 Fast',
+        label: 'Claude Opus Fast',
         expr: 'tier("base", p * 5 + c * 25 + cr * 0.5 + cc * 6.25 + cc1h * 10)',
         requestRules: [
           {

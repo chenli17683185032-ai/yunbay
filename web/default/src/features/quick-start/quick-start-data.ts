@@ -36,11 +36,11 @@ export type CodexDownloadCard = {
   descriptionKey: string
   buttonLabelKey: string
   downloadHref: string
-  quarantineFixCommand?: string
-  terminalInstallCommand?: string
   guideTitleKey?: string
   guideDescriptionKey?: string
   guideStepKeys?: string[]
+  quarantineFixCommand?: string
+  terminalInstallCommand?: string
 }
 
 export type QuickStartFullscreenPage = {
@@ -105,10 +105,10 @@ export const purposeOptions: QuickStartPurpose[] = [
 
 const YUNBAY_CODEX_MACOS_DOWNLOAD_HREF =
   '/downloads/yunbay-codex-macos-20260624-174731-53933cc047c3.zip'
-const YUNBAY_CODEX_WINDOWS_DOWNLOAD_HREF =
-  '/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe'
 const YUNBAY_CODEX_MACOS_DOWNLOAD_URL = `https://yunbay.xyz${YUNBAY_CODEX_MACOS_DOWNLOAD_HREF}`
 const YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH = '$HOME/Downloads/Yunbay Codex.app'
+const YUNBAY_CODEX_WINDOWS_DOWNLOAD_HREF =
+  '/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe'
 
 export const codexDownloadCards: CodexDownloadCard[] = [
   {

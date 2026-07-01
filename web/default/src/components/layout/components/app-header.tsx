@@ -21,6 +21,7 @@ import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 import { ConfigDrawer } from '@/components/config-drawer'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
+import { RequiredAnnouncementDialog } from '@/components/required-announcement-dialog'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
 import { defaultTopNavLinks } from '../config/top-nav.config'
@@ -136,6 +137,7 @@ export function AppHeader({
                 notice={notifications.notice}
                 announcements={notifications.announcements}
                 loading={notifications.loading}
+                onConfirmRead={notifications.confirmRead}
               />
             )}
             <LanguageSwitcher />
@@ -144,6 +146,17 @@ export function AppHeader({
           </div>
         )}
       </Header>
+      {showNotifications && (
+        <RequiredAnnouncementDialog
+          open={notifications.requiredDialogOpen}
+          activeTab={notifications.activeTab}
+          onTabChange={notifications.setActiveTab}
+          notice={notifications.notice}
+          announcements={notifications.announcements}
+          loading={notifications.loading}
+          onConfirmRead={notifications.confirmRead}
+        />
+      )}
     </>
   )
 }

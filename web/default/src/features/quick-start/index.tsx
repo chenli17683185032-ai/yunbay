@@ -119,7 +119,7 @@ function extractQuickStartServerAddress(
     return fromStatus
   }
 
-  return window.location.origin
+  return typeof window === 'undefined' ? '' : window.location.origin
 }
 
 export function QuickStart() {
@@ -836,14 +836,14 @@ function QuickStartControls(props: {
       <button
         type='button'
         onClick={props.onEnterDashboard}
-        className='h-10 rounded-full border border-white/12 bg-[#030409]/58 px-4 text-xs font-semibold text-white/72 backdrop-blur-xl transition-all duration-300 hover:border-white/24 hover:text-white active:scale-[0.98]'
+        className='h-10 rounded-full border border-white/18 bg-white/[0.07] px-4 text-xs font-semibold text-white/82 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl transition-all duration-300 hover:border-white/32 hover:bg-white/[0.11] hover:text-white active:scale-[0.98]'
       >
         {t('Enter dashboard')}
       </button>
       <button
         type='button'
         onClick={handleNext}
-        className='h-10 rounded-full bg-white px-4 text-xs font-semibold text-[#030409] shadow-[0_18px_50px_rgba(255,255,255,0.14)] transition-all duration-300 hover:bg-white/88 active:scale-[0.98]'
+        className='h-11 rounded-full bg-white px-5 text-xs font-black tracking-[0.04em] text-[#030409] shadow-[0_18px_60px_rgba(255,255,255,0.22)] ring-1 ring-white/30 transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_22px_70px_rgba(255,255,255,0.28)] active:scale-[0.98]'
       >
         {nextLabel}
       </button>
