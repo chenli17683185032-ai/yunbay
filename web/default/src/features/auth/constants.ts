@@ -30,10 +30,19 @@ export const loginFormSchema = z.object({
     .min(8, 'Password must be at least 8 characters long'),
 })
 
+const QQ_EMAIL_REGEX = /^[^@\s]+@qq\.com$/i
+
 export const registerFormSchema = z
   .object({
     username: z.string().min(1, 'Please enter your username'),
-    email: z.string().optional(),
+    email: z
+      .string()
+      .trim()
+      .min(1, 'Please enter your QQ email')
+      .email('Please enter a valid QQ email address')
+      .refine((email) => QQ_EMAIL_REGEX.test(email), {
+        message: 'Only QQ email addresses are supported',
+      }),
     password: z
       .string()
       .min(1, 'Please enter your password')

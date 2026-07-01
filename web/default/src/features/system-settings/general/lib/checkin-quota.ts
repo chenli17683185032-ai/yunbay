@@ -16,22 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
-import { sanitizeHtml } from '@/lib/sanitize-html'
-import { cn } from '@/lib/utils'
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
-type SafeHtmlProps = {
-  html: string
-  className?: string
+const LEGACY_CHECKIN_DISPLAY_AMOUNT_MAX = 100
+
+export function normalizeCheckinQuotaUnits(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  if (value > 0 && value <= LEGACY_CHECKIN_DISPLAY_AMOUNT_MAX) {
+    return parseQuotaFromDollars(value)
+  }
+  return Math.round(value)
 }
 
-export function SafeHtml({ html, className }: SafeHtmlProps) {
-  const cleanHtml = useMemo(() => sanitizeHtml(html), [html])
+export function checkinQuotaUnitsToDisplayAmount(value: number): number {
+  return quotaUnitsToDollars(normalizeCheckinQuotaUnits(value))
+}
 
-  return (
-    <div
-      className={cn(className)}
-      dangerouslySetInnerHTML={{ __html: cleanHtml }}
-    />
-  )
+export function checkinDisplayAmountToQuotaUnits(value: number): number {
+  return parseQuotaFromDollars(value)
 }

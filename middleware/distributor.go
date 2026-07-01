@@ -29,6 +29,14 @@ type ModelRequest struct {
 	Group string `json:"group,omitempty"`
 }
 
+func resolvePlaygroundUsingGroup(userGroup string, requestedGroup string) (string, bool) {
+	requestedGroup = strings.TrimSpace(requestedGroup)
+	if requestedGroup == "" {
+		return constant.TokenGroupGPTPlus, service.GroupInUserUsableGroups(userGroup, constant.TokenGroupGPTPlus)
+	}
+	return requestedGroup, service.GroupInUserUsableGroups(userGroup, requestedGroup)
+}
+
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		var channel *model.Channel
@@ -91,15 +99,15 @@ func Distribute() func(c *gin.Context) {
 						abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()}))
 						return
 					}
-					if playgroundRequest.Group != "" {
-						userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-						if !service.GroupInUserUsableGroups(userGroup, playgroundRequest.Group) && playgroundRequest.Group != usingGroup {
-							abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
-							return
-						}
-						usingGroup = playgroundRequest.Group
-						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+					resolvedGroup, ok := resolvePlaygroundUsingGroup(userGroup, playgroundRequest.Group)
+					if !ok {
+						abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+						return
 					}
+					usingGroup = resolvedGroup
+					common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+					common.SetContextKey(c, constant.ContextKeyTokenGroup, usingGroup)
 				}
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {

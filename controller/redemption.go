@@ -196,7 +196,7 @@ func ExportRedemptions(c *gin.Context) {
 	}
 
 	c.Header("Content-Type", contentType)
-	c.Header("Content-Disposition", `attachment; filename="`+safeRedemptionExportFilename(batchId, format)+`"`)
+	c.Header("Content-Disposition", `attachment; filename="redemptions-`+batchId+`.`+format+`"`)
 	c.Status(http.StatusOK)
 	if _, err := c.Writer.Write(payload); err != nil {
 		common.SysError("failed to export redemptions: " + err.Error())
@@ -213,46 +213,6 @@ func ExportRedemptions(c *gin.Context) {
 		"count":    len(redemptions),
 		"format":   format,
 	})
-}
-
-func safeRedemptionExportFilename(batchId string, format string) string {
-	batchSlug := sanitizeRedemptionFilenamePart(batchId)
-	formatSlug := sanitizeRedemptionFilenamePart(format)
-	if formatSlug == "" {
-		formatSlug = "txt"
-	}
-	filename := "redemptions-" + batchSlug + "." + formatSlug
-	if len(filename) > 128 {
-		keepBatchLen := 128 - len("redemptions-") - len(".") - len(formatSlug)
-		if keepBatchLen < 0 {
-			keepBatchLen = 0
-		}
-		filename = "redemptions-" + batchSlug[:keepBatchLen] + "." + formatSlug
-	}
-	return filename
-}
-
-func sanitizeRedemptionFilenamePart(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "export"
-	}
-	var builder strings.Builder
-	for _, r := range value {
-		switch {
-		case r >= 'A' && r <= 'Z':
-			builder.WriteRune(r)
-		case r >= 'a' && r <= 'z':
-			builder.WriteRune(r)
-		case r >= '0' && r <= '9':
-			builder.WriteRune(r)
-		case r == '.', r == '_', r == '-':
-			builder.WriteRune(r)
-		default:
-			builder.WriteByte('_')
-		}
-	}
-	return builder.String()
 }
 
 func buildRedemptionTXT(redemptions []*model.Redemption) string {

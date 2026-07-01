@@ -76,8 +76,8 @@ const OperationSetting = () => {
     'monitor_setting.auto_test_channel_enabled': false,
     'monitor_setting.auto_test_channel_minutes': 10 /* 签到设置 */,
     'checkin_setting.enabled': false,
-    'checkin_setting.min_quota': 1000,
-    'checkin_setting.max_quota': 10000,
+    'checkin_setting.min_quota': 0,
+    'checkin_setting.max_quota': 1,
 
     /* 令牌设置 */
     'token_setting.max_user_tokens': 1000,

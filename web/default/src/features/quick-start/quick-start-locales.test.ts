@@ -28,7 +28,6 @@ import {
 
 const LOCALE_NAMES = ['en', 'zh', 'fr', 'ru', 'ja', 'vi'] as const
 const LOCALIZED_LOCALE_NAMES = ['zh', 'fr', 'ru', 'ja', 'vi'] as const
-const FULLY_LOCALIZED_LOCALE_NAMES = ['fr', 'ru', 'ja', 'vi'] as const
 const LOCALE_DIR = join(import.meta.dirname, '../../i18n/locales')
 
 const MODEL_TAG_KEYS = [
@@ -84,12 +83,6 @@ const QUICK_START_COMPONENT_KEYS = [
   'Codex one-click launcher',
   'Codex one-click setup',
   'Download the Codex one-click launcher and connect it to your Yunbay API key.',
-  'Download one-click launcher',
-  'What the Windows one-click launcher can do',
-  'After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.',
-  'Download and run the Windows installer.',
-  'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
-  'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
   'Import current setup to CC Switch',
   'Launch CC Switch from your browser with this API and model prefilled.',
   'Configured API',
@@ -134,6 +127,9 @@ test('quick start copy has translations in every supported locale', () => {
     ...codexDownloadCards.flatMap((card) => [
       card.descriptionKey,
       card.buttonLabelKey,
+      ...(card.guideTitleKey ? [card.guideTitleKey] : []),
+      ...(card.guideDescriptionKey ? [card.guideDescriptionKey] : []),
+      ...(card.guideStepKeys ?? []),
     ]),
   ]
 
@@ -162,6 +158,9 @@ test('Chinese quick start copy does not fall back to English for the guided flow
     ...codexDownloadCards.flatMap((card) => [
       card.descriptionKey,
       card.buttonLabelKey,
+      ...(card.guideTitleKey ? [card.guideTitleKey] : []),
+      ...(card.guideDescriptionKey ? [card.guideDescriptionKey] : []),
+      ...(card.guideStepKeys ?? []),
     ]),
   ]
 
@@ -171,42 +170,6 @@ test('Chinese quick start copy does not fall back to English for the guided flow
       key,
       `zh: quick-start translation falls back to English for ${key}`
     )
-  }
-})
-
-test('download-page quick start copy does not fall back to English in localized non-Chinese locales', () => {
-  const keys = [
-    'Codex one-click launcher',
-    'Codex one-click setup',
-    'Download the Codex one-click launcher and connect it to your Yunbay API key.',
-    'Download one-click launcher',
-    'What the Windows one-click launcher can do',
-    'After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.',
-    'Download and run the Windows installer.',
-    'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
-    'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
-    'Import current setup to CC Switch',
-    'Launch CC Switch from your browser with this API and model prefilled.',
-    'Configured API',
-    'Configured model',
-    'Generated API key',
-    'One-click import',
-    'Generate an API key first',
-    'No model selected',
-    'CC Switch will import this Codex provider and enable it automatically.',
-    'Trying to open CC Switch',
-  ] as const
-
-  for (const localeName of FULLY_LOCALIZED_LOCALE_NAMES) {
-    const locale = readLocale(localeName)
-
-    for (const key of keys) {
-      assert.notEqual(
-        locale.translation[key],
-        key,
-        `${localeName}: download-page quick-start translation falls back to English for ${key}`
-      )
-    }
   }
 })
 

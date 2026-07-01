@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { DEFAULT_API_KEY_GROUP } from '@/features/keys/constants'
 import type { ApiKeyFormData } from '@/features/keys/types'
 
 type ApiResult = {
@@ -49,29 +50,13 @@ export function getQuickStartApiKeyGroup(options: {
   const availableGroups = options.availableGroups
     .map((group) => group.trim())
     .filter(Boolean)
-  const preferredGroup = options.preferredGroup?.trim()
 
-  if (
-    preferredGroup &&
-    availableGroups.some((group) => group === preferredGroup)
-  ) {
-    return { group: preferredGroup, crossGroupRetry: false }
-  }
-
-  if (
-    options.defaultUseAutoGroup &&
-    availableGroups.some((group) => group === 'auto')
-  ) {
-    return { group: 'auto', crossGroupRetry: true }
-  }
-
-  const nonDefaultGroup = availableGroups.find((group) => group !== 'default')
-  if (nonDefaultGroup) {
-    return { group: nonDefaultGroup, crossGroupRetry: false }
+  if (availableGroups.includes(DEFAULT_API_KEY_GROUP)) {
+    return { group: DEFAULT_API_KEY_GROUP, crossGroupRetry: false }
   }
 
   return {
-    group: availableGroups[0] || '',
+    group: '',
     crossGroupRetry: false,
   }
 }

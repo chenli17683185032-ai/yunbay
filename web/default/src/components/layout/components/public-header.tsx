@@ -30,6 +30,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog } from '@/components/dialog'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
+import { RequiredAnnouncementDialog } from '@/components/required-announcement-dialog'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { defaultTopNavLinks } from '../config/top-nav.config'
@@ -333,6 +334,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                     notice={notifications.notice}
                     announcements={notifications.announcements}
                     loading={notifications.loading}
+                    onConfirmRead={notifications.confirmRead}
                   />
                 )}
 
@@ -519,6 +521,17 @@ export function PublicHeader(props: PublicHeaderProps) {
           })}
         </div>
       </Dialog>
+      {showNotifications && (
+        <RequiredAnnouncementDialog
+          open={notifications.requiredDialogOpen}
+          activeTab={notifications.activeTab}
+          onTabChange={notifications.setActiveTab}
+          notice={notifications.notice}
+          announcements={notifications.announcements}
+          loading={notifications.loading}
+          onConfirmRead={notifications.confirmRead}
+        />
+      )}
     </>
   )
 }

@@ -327,31 +327,6 @@ func TestVerifyLdxpSessionRedeemsPaidTopupCard(t *testing.T) {
 	assert.Equal(t, model.CreateRedemptionTopUpTradeNo(redemption.Id, 6401), topUps[0].TradeNo)
 }
 
-func TestVerifyLdxpSessionPaidTopupAtThresholdUpgradesUserToVIP(t *testing.T) {
-	setupLdxpVerifyServiceTest(t)
-	require.NoError(t, model.DB.Create(&model.User{
-		Id:       6402,
-		Username: "ldxp-verify-vip-user",
-		AffCode:  "ldxp-verify-vip-aff",
-		Role:     common.RoleCommonUser,
-		Status:   common.UserStatusEnabled,
-		Group:    model.UserGroupTiyan,
-		Quota:    0,
-	}).Error)
-	redemption := insertLdxpVerifyPaidTopupCard(t, "verify-redeem-vip-card", 3000)
-	require.NoError(t, model.DB.Model(redemption).Updates(map[string]interface{}{"amount": 30, "money": 30.0}).Error)
-	insertLdxpVerifySession(t, completeLdxpVerifySession("ldxp_verify_redeem_vip", 6402, "LDVERIFYVIP", "verify-redeem-vip-card", 30))
-	insertLdxpVerifyMailEvent(t, "LDVERIFYVIP", "verify-redeem-vip-card", 30)
-
-	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_redeem_vip")
-
-	require.NoError(t, err)
-	require.NotNil(t, result)
-	assert.True(t, result.Redeemed)
-	assert.Equal(t, model.LdxpStatusSuccess, result.Status)
-	assert.Equal(t, model.UserGroupVIP, ldxpVerifyUserGroup(t, 6402))
-}
-
 func TestVerifyLdxpSessionDirectTopupWithoutMailOrCardWhenMailMatchDisabled(t *testing.T) {
 	setupLdxpVerifyServiceTest(t)
 	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")

@@ -43,7 +43,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
-interface AnnouncementItem {
+export interface AnnouncementItem {
   type?: string
   content?: string
   extra?: string
@@ -59,6 +59,7 @@ interface NotificationPopoverProps {
   notice: string
   announcements: AnnouncementItem[]
   loading: boolean
+  onConfirmRead: () => void
   className?: string
 }
 
@@ -157,7 +158,7 @@ function EmptyState({
 /**
  * Notice tab content
  */
-function NoticeContent({
+export function NoticeContent({
   notice,
   loading,
   t,
@@ -192,7 +193,7 @@ function NoticeContent({
 /**
  * Announcements tab content
  */
-function AnnouncementsContent({
+export function AnnouncementsContent({
   announcements,
   loading,
   t,
@@ -277,6 +278,7 @@ export function NotificationPopover({
   notice,
   announcements,
   loading,
+  onConfirmRead,
   className,
 }: NotificationPopoverProps) {
   const { t } = useTranslation()
@@ -344,9 +346,15 @@ export function NotificationPopover({
         </Tabs>
 
         <div className='flex justify-end'>
-          <Button size='sm' onClick={() => onOpenChange(false)}>
-            {t('Close')}
-          </Button>
+          {unreadCount > 0 ? (
+            <Button size='sm' onClick={onConfirmRead}>
+              {t('Mark all as read')}
+            </Button>
+          ) : (
+            <Button size='sm' onClick={() => onOpenChange(false)}>
+              {t('Close')}
+            </Button>
+          )}
         </div>
       </PopoverContent>
     </Popover>

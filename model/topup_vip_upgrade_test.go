@@ -128,3 +128,31 @@ func TestMaybeUpgradeUserToVIPDoesNotOverrideSpecialRolesOrTags(t *testing.T) {
 		})
 	}
 }
+
+func TestMaybeUpgradeUserToVIPUsesAmountForDiscountedLDXPTopup(t *testing.T) {
+	setupTopupVIPUpgradeTestDB(t)
+
+	user := User{Username: "ldxp-vip-user", Role: common.RoleCommonUser, Group: UserGroupTiyan}
+	require.NoError(t, DB.Create(&user).Error)
+
+	// This deliberately uses money just below the VIP threshold while amount reaches it.
+	// It proves VIP qualification uses the book amount, not the discounted real payment price.
+	topUp := TopUp{
+		UserId:          user.Id,
+		Amount:          int64(VIPUpgradeThresholdMoney),
+		Money:           VIPUpgradeThresholdMoney - 0.01,
+		TradeNo:         "ldxp-discount-vip",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		Status:          common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(&topUp).Error)
+
+	upgraded, err := MaybeUpgradeUserToVIP(user.Id)
+	require.NoError(t, err)
+	require.True(t, upgraded)
+
+	var updated User
+	require.NoError(t, DB.First(&updated, user.Id).Error)
+	require.Equal(t, UserGroupVIP, updated.Group)
+}
