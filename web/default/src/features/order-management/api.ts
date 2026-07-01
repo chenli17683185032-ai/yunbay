@@ -53,10 +53,10 @@ export interface GetAffiliateStatsParams extends OrderManagementRangeParams {
   withdrawal_status?: AffiliateWithdrawalStatus
 }
 
-export function withDefinedParams(params: Record<string, unknown>): string {
+export function withDefinedParams(params: object): string {
   const query = new URLSearchParams()
 
-  Object.entries(params).forEach(([key, value]) => {
+  Object.entries(params as Record<string, unknown>).forEach(([key, value]) => {
     if (value === undefined || value === null || value === '') return
     query.set(key, String(value))
   })

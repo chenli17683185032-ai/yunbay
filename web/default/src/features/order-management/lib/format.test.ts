@@ -21,6 +21,7 @@ import test from 'node:test'
 import {
   formatCny,
   formatPercentRate,
+  formatUnixTime,
   getMailStatusLabelKey,
   isMailStatusError,
 } from './format'
@@ -49,4 +50,11 @@ test('unknown mail status labels fall back to raw status', () => {
 
 test('unknown mail status is not treated as an error', () => {
   assert.equal(isMailStatusError('custom_unknown'), false)
+})
+
+
+test('formatUnixTime handles empty and unix seconds', () => {
+  assert.equal(formatUnixTime(), '-')
+  assert.notEqual(formatUnixTime(1782589062), '-')
+  assert.match(formatUnixTime(1782589062), /2026/)
 })

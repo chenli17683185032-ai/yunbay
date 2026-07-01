@@ -45,6 +45,7 @@ import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/
 import { Route as AuthenticatedQuickStartIndexRouteImport } from './routes/_authenticated/quick-start/index'
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_authenticated/playground/index'
+import { Route as AuthenticatedOrderManagementIndexRouteImport } from './routes/_authenticated/order-management/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
@@ -258,6 +259,12 @@ const AuthenticatedPlaygroundIndexRoute =
     path: '/playground/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedOrderManagementIndexRoute =
+  AuthenticatedOrderManagementIndexRouteImport.update({
+    id: '/order-management/',
+    path: '/order-management/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedModelsIndexRoute =
   AuthenticatedModelsIndexRouteImport.update({
     id: '/models/',
@@ -442,6 +449,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
+  '/order-management/': typeof AuthenticatedOrderManagementIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
   '/quick-start/': typeof AuthenticatedQuickStartIndexRoute
@@ -502,6 +510,7 @@ export interface FileRoutesByTo {
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
+  '/order-management': typeof AuthenticatedOrderManagementIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
   '/quick-start': typeof AuthenticatedQuickStartIndexRoute
@@ -566,6 +575,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
+  '/_authenticated/order-management/': typeof AuthenticatedOrderManagementIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
   '/_authenticated/quick-start/': typeof AuthenticatedQuickStartIndexRoute
@@ -629,6 +639,7 @@ export interface FileRouteTypes {
     | '/dashboard/'
     | '/keys/'
     | '/models/'
+    | '/order-management/'
     | '/playground/'
     | '/profile/'
     | '/quick-start/'
@@ -689,6 +700,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/keys'
     | '/models'
+    | '/order-management'
     | '/playground'
     | '/profile'
     | '/quick-start'
@@ -752,6 +764,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/'
     | '/_authenticated/keys/'
     | '/_authenticated/models/'
+    | '/_authenticated/order-management/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
     | '/_authenticated/quick-start/'
@@ -1053,6 +1066,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedPlaygroundIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/order-management/': {
+      id: '/_authenticated/order-management/'
+      path: '/order-management'
+      fullPath: '/order-management/'
+      preLoaderRoute: typeof AuthenticatedOrderManagementIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/models/': {
       id: '/_authenticated/models/'
       path: '/models'
@@ -1327,6 +1347,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
+  AuthenticatedOrderManagementIndexRoute: typeof AuthenticatedOrderManagementIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
   AuthenticatedQuickStartIndexRoute: typeof AuthenticatedQuickStartIndexRoute
@@ -1351,6 +1372,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
+  AuthenticatedOrderManagementIndexRoute:
+    AuthenticatedOrderManagementIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,
   AuthenticatedQuickStartIndexRoute: AuthenticatedQuickStartIndexRoute,
