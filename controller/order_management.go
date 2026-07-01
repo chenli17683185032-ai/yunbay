@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 
@@ -170,29 +171,28 @@ func AdminOrderManagementOrders(c *gin.Context) {
 }
 
 func AdminOrderManagementMailCheck(c *gin.Context) {
-	req := dto.MailCheckRequest{Range: "7d"}
-	if c.Request != nil && c.Request.Body != nil && c.Request.ContentLength != 0 {
-		if err := common.DecodeJson(c.Request.Body, &req); err != nil {
-			common.ApiError(c, err)
-			return
-		}
+	req := dto.MailCheckRequest{}
+	if _, err := decodeOptionalJSONBody(c, &req); err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	startValue := c.Query("start_time")
-	endValue := c.Query("end_time")
-	if strings.TrimSpace(req.Range) == "" && strings.TrimSpace(startValue) == "" && strings.TrimSpace(endValue) == "" {
-		req.Range = "7d"
+	rangeValue, startValue, endValue := mailCheckRequestRangeValues(c, req)
+	if strings.TrimSpace(rangeValue) == "" && strings.TrimSpace(startValue) == "" && strings.TrimSpace(endValue) == "" {
+		rangeValue = "7d"
 	}
 
-	startTime, endTime, err := parseOrderManagementRange(req.Range, startValue, endValue, common.GetTimestamp())
+	startTime, endTime, err := parseOrderManagementRange(rangeValue, startValue, endValue, common.GetTimestamp())
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	job := service.DefaultOrderMailCheckRunner().StartBatch(c.Request.Context(), model.OrderMailCheckBatchFilter{StartTime: startTime, EndTime: endTime, Limit: req.Limit})
+	// Audit records that the asynchronous mail-check job was accepted/started;
+	// final verification outcome is exposed by the job status endpoint.
 	recordManageAudit(c, "order.mail_check_batch", map[string]interface{}{
 		"job_id": job.JobId,
-		"range":  req.Range,
+		"range":  rangeValue,
 		"limit":  req.Limit,
 	})
 	common.ApiSuccess(c, dto.MailCheckResponse{Started: true, JobId: job.JobId, AffectedCount: job.AffectedCount})
@@ -205,6 +205,8 @@ func AdminOrderManagementOrderMailCheck(c *gin.Context) {
 		return
 	}
 	job := service.DefaultOrderMailCheckRunner().StartSingle(c.Request.Context(), id)
+	// Audit records that the asynchronous mail-check job was accepted/started;
+	// final verification outcome is exposed by the job status endpoint.
 	recordManageAudit(c, "order.mail_check_single", map[string]interface{}{
 		"order_id": id,
 		"job_id":   job.JobId,
@@ -277,11 +279,9 @@ func AdminAffiliateWithdrawalPaid(c *gin.Context) {
 		return
 	}
 	var req dto.WithdrawalActionRequest
-	if c.Request != nil && c.Request.Body != nil && c.Request.ContentLength != 0 {
-		if err := common.DecodeJson(c.Request.Body, &req); err != nil {
-			common.ApiError(c, err)
-			return
-		}
+	if _, err := decodeOptionalJSONBody(c, &req); err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	withdrawal, err := model.MarkAffiliateWithdrawalPaid(id, c.GetInt("id"), req.AdminRemark)
 	if err != nil {
@@ -307,11 +307,9 @@ func adminAffiliateWithdrawalReject(c *gin.Context) {
 		return
 	}
 	var req dto.WithdrawalActionRequest
-	if c.Request != nil && c.Request.Body != nil && c.Request.ContentLength != 0 {
-		if err := common.DecodeJson(c.Request.Body, &req); err != nil {
-			common.ApiError(c, err)
-			return
-		}
+	if _, err := decodeOptionalJSONBody(c, &req); err != nil {
+		common.ApiError(c, err)
+		return
 	}
 	req.AdminRemark = strings.TrimSpace(req.AdminRemark)
 	if req.AdminRemark == "" {
@@ -329,6 +327,31 @@ func adminAffiliateWithdrawalReject(c *gin.Context) {
 		"amount":        centsToAmount(withdrawal.AmountCents),
 	})
 	common.ApiSuccess(c, affiliateWithdrawalDTOFromModel(withdrawal))
+}
+
+func decodeOptionalJSONBody(c *gin.Context, v any) (bool, error) {
+	if c == nil || c.Request == nil || c.Request.Body == nil || c.Request.ContentLength == 0 {
+		return false, nil
+	}
+	if err := common.DecodeJson(c.Request.Body, v); err != nil {
+		if errors.Is(err, io.EOF) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func mailCheckRequestRangeValues(c *gin.Context, req dto.MailCheckRequest) (string, string, string) {
+	startValue := strings.TrimSpace(req.StartTime)
+	if startValue == "" {
+		startValue = c.Query("start_time")
+	}
+	endValue := strings.TrimSpace(req.EndTime)
+	if endValue == "" {
+		endValue = c.Query("end_time")
+	}
+	return req.Range, startValue, endValue
 }
 
 func getOrderManagementPageInfo(c *gin.Context) *common.PageInfo {

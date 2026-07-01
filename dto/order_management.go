@@ -55,9 +55,11 @@ type OrderManagementOrderItem struct {
 }
 
 type MailCheckRequest struct {
-	Range string `json:"range"`
-	Scope string `json:"scope"`
-	Limit int    `json:"limit"`
+	Range     string `json:"range"`
+	Scope     string `json:"scope"`
+	Limit     int    `json:"limit"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
 }
 
 type MailCheckResponse struct {
