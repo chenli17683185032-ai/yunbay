@@ -46,6 +46,11 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
 	"redemption.create": "Created ${count} redemption codes named ${name} (${quota} each)",
+
+	"order.mail_check_single":     "Started mail verification for order ${order_id} (${job_id})",
+	"order.mail_check_batch":      "Started batch mail verification (${job_id}, range ${range}, limit ${limit})",
+	"affiliate.withdrawal_paid":   "Marked affiliate withdrawal ${withdrawal_id} as paid for user ${user_id} (${amount})",
+	"affiliate.withdrawal_reject": "Rejected affiliate withdrawal ${withdrawal_id} for user ${user_id} (${amount})",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。
