@@ -24,6 +24,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useNavigate } from '@tanstack/react-router'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowRight,
   ArrowUpRight,
@@ -37,7 +38,6 @@ import {
   MessageSquare,
   MonitorCog,
   Sparkles,
-  Terminal,
   WalletCards,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -80,6 +80,7 @@ import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
   codexDownloadCards,
+  codexSetupOptions,
   getDefaultQuickStartModelName,
   getModelRateLabels,
   getModelTags,
@@ -87,6 +88,7 @@ import {
   purposeOptions,
   quickStartFullscreenPages,
   type CodexDownloadCard,
+  type CodexSetupOptionId,
   type QuickStartEnterDashboardPath,
   type QuickStartModelLike,
   type QuickStartPurposeId,
@@ -134,6 +136,8 @@ export function QuickStart() {
   const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
   const [redemptionCode, setRedemptionCode] = useState('')
   const [isRedeemingCode, setIsRedeemingCode] = useState(false)
+  const [expandedCodexSetupId, setExpandedCodexSetupId] =
+    useState<CodexSetupOptionId | null>(null)
   const [morphSignal, setMorphSignal] = useState(0)
   const { status } = useStatus()
   const pricing = usePricingData()
@@ -158,6 +162,12 @@ export function QuickStart() {
   const selectedModel =
     modelList.find((model) => model.model_name === activeModelName) ||
     modelList[0]
+  const macosDownloadCard = codexDownloadCards.find(
+    (card) => card.platform === 'macOS'
+  )
+  const windowsDownloadCard = codexDownloadCards.find(
+    (card) => card.platform === 'Windows'
+  )
   const quickStartServerAddress = normalizeQuickStartServerAddress(
     extractQuickStartServerAddress(status as Record<string, unknown> | null)
   )
@@ -307,6 +317,12 @@ export function QuickStart() {
 
     window.open(url, '_blank')
     toast.message(t('Trying to open CC Switch'))
+  }
+
+  const handleToggleCodexSetup = (optionId: CodexSetupOptionId) => {
+    setExpandedCodexSetupId((current) =>
+      current === optionId ? null : optionId
+    )
   }
 
   const handleCopyCommand = async (command: string) => {
@@ -614,160 +630,255 @@ export function QuickStart() {
             'Download the Codex one-click launcher and connect it to your Yunbay API key.'
           )}
         >
-          <div className='grid gap-3 md:grid-cols-2'>
-            {codexDownloadCards.map((card) => (
-              <div
-                key={card.platform}
-                className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'
-              >
-                <div className='flex items-start justify-between gap-3'>
-                  <div>
-                    <div className='text-lg font-semibold tracking-tight'>
-                      {card.platform}
-                    </div>
-                    <p className='mt-2 text-sm text-white/54'>
-                      {t(card.descriptionKey)}
-                    </p>
-                  </div>
-                  <Download className='size-5 text-white/44' />
-                </div>
-                <Button
-                  variant='outline'
-                  className='mt-6 w-full gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-                  onClick={() => handleDownload(card)}
-                >
-                  <Download className='size-4' />
-                  {t(card.buttonLabelKey)}
-                </Button>
-                {card.platform === 'macOS' && card.quarantineFixCommand ? (
-                  <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
-                    <div className='font-semibold text-amber-50/90'>
-                      {t('If macOS says the app is damaged')}
-                    </div>
-                    <p className='mt-1'>
-                      {t(
-                        'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.'
-                      )}
-                    </p>
-                    <code className='mt-3 block overflow-x-auto rounded-xl border border-white/10 bg-black/36 px-3 py-2 font-mono text-[11px] leading-5 text-white/78'>
-                      {card.quarantineFixCommand}
-                    </code>
-                    <div className='mt-3 grid gap-2'>
-                      <Button
-                        variant='outline'
-                        size='sm'
-                        className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-                        onClick={() =>
-                          handleCopyCommand(card.quarantineFixCommand || '')
+          <div className='max-h-[62vh] overflow-y-auto pr-1'>
+            <div className='flex flex-col gap-3'>
+              {codexSetupOptions.map((option) => {
+                const expanded = expandedCodexSetupId === option.id
+                return (
+                  <CodexSetupOptionCard
+                    key={option.id}
+                    id={option.id}
+                    title={t(option.titleKey)}
+                    expanded={expanded}
+                    onToggle={handleToggleCodexSetup}
+                  >
+                    {option.id === 'macos-new-user' && macosDownloadCard ? (
+                      <CodexDownloadPanel
+                        card={macosDownloadCard}
+                        onDownload={handleDownload}
+                        onCopyCommand={handleCopyCommand}
+                      />
+                    ) : null}
+                    {option.id === 'windows-new-user' && windowsDownloadCard ? (
+                      <CodexDownloadPanel
+                        card={windowsDownloadCard}
+                        onDownload={handleDownload}
+                        onCopyCommand={handleCopyCommand}
+                      />
+                    ) : null}
+                    {option.id === 'ccswitch-existing-user' ? (
+                      <CCSwitchImportPanel
+                        endpoint={quickStartCodexEndpoint}
+                        modelName={
+                          selectedModel?.model_name || t('No model selected')
                         }
-                      >
-                        <Copy className='size-3.5' />
-                        {t('Copy repair command')}
-                      </Button>
-                      {card.terminalInstallCommand ? (
-                        <Button
-                          variant='outline'
-                          size='sm'
-                          className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-                          onClick={() =>
-                            handleCopyCommand(card.terminalInstallCommand || '')
-                          }
-                        >
-                          <Terminal className='size-3.5' />
-                          {t('Copy one-line terminal install')}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-                {card.platform === 'Windows' && card.guideTitleKey ? (
-                  <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
-                    <div className='font-semibold text-amber-50/90'>
-                      {t(card.guideTitleKey)}
-                    </div>
-                    {card.guideDescriptionKey ? (
-                      <p className='mt-1'>{t(card.guideDescriptionKey)}</p>
+                        apiKey={generatedApiKey}
+                        disabled={!quickStartCCSwitchState.canImport}
+                        disabledReason={quickStartCCSwitchDisabledReason}
+                        onImport={handleImportToCCSwitch}
+                      />
                     ) : null}
-                    {card.guideStepKeys?.length ? (
-                      <ol className='mt-3 list-decimal space-y-1 pl-4'>
-                        {card.guideStepKeys.map((step) => (
-                          <li key={step}>{t(step)}</li>
-                        ))}
-                      </ol>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ))}
-          </div>
-          <div className='mt-4 overflow-hidden rounded-[1.75rem] border border-white/10 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-            <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
-              <div className='flex items-center gap-2'>
-                <span className='size-2.5 rounded-full bg-[#ff5f57]' />
-                <span className='size-2.5 rounded-full bg-[#febc2e]' />
-                <span className='size-2.5 rounded-full bg-[#28c840]' />
-              </div>
-              <div className='font-mono text-[10px] font-semibold tracking-[0.18em] text-white/36 uppercase'>
-                CC Switch
-              </div>
-            </div>
-            <div className='grid gap-4 p-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-center'>
-              <div className='min-w-0'>
-                <div className='flex items-center gap-3'>
-                  <div className='grid size-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.07]'>
-                    <MonitorCog className='size-5 text-white/72' />
-                  </div>
-                  <div className='min-w-0'>
-                    <h2 className='text-lg font-semibold tracking-tight text-white'>
-                      {t('Import current setup to CC Switch')}
-                    </h2>
-                    <p className='mt-1 text-sm leading-6 text-white/52'>
-                      {t(
-                        'Launch CC Switch from your browser with this API and model prefilled.'
-                      )}
-                    </p>
-                  </div>
-                </div>
-
-                <div className='mt-5 grid gap-2 sm:grid-cols-3'>
-                  <QuickStartConfigPill
-                    label={t('Configured API')}
-                    value={quickStartCodexEndpoint}
-                  />
-                  <QuickStartConfigPill
-                    label={t('Configured model')}
-                    value={selectedModel?.model_name || t('No model selected')}
-                  />
-                  <QuickStartConfigPill
-                    label={t('Generated API key')}
-                    value={maskQuickStartApiKey(generatedApiKey)}
-                  />
-                </div>
-              </div>
-
-              <div className='rounded-2xl border border-white/10 bg-black/20 p-4'>
-                <div className='flex items-start gap-3 text-xs leading-6 text-white/52'>
-                  <CheckCircle2 className='mt-0.5 size-4 shrink-0 text-white/58' />
-                  <p>
-                    {t(
-                      'CC Switch will import this Codex provider and enable it automatically.'
-                    )}
-                  </p>
-                </div>
-                <Button
-                  className='mt-4 w-full gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88 disabled:bg-white/22 disabled:text-white/42'
-                  disabled={!quickStartCCSwitchState.canImport}
-                  onClick={handleImportToCCSwitch}
-                >
-                  <ArrowUpRight className='size-4' />
-                  {quickStartCCSwitchDisabledReason || t('One-click import')}
-                </Button>
-              </div>
+                  </CodexSetupOptionCard>
+                )
+              })}
             </div>
           </div>
         </QuickStartPage>
       </LandingSnapFrame>
     </main>
+  )
+}
+
+
+function CodexSetupOptionCard(props: {
+  id: CodexSetupOptionId
+  title: string
+  expanded: boolean
+  onToggle: (id: CodexSetupOptionId) => void
+  children: ReactNode
+}) {
+  return (
+    <div className='overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#030409]/54 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+      <button
+        type='button'
+        aria-expanded={props.expanded}
+        onClick={() => props.onToggle(props.id)}
+        className='flex w-full items-center justify-between gap-3 px-5 py-4 text-left text-white transition-colors duration-300 hover:bg-white/[0.045]'
+      >
+        <span className='text-sm font-semibold tracking-tight sm:text-base'>
+          {props.title}
+        </span>
+        <ArrowRight
+          className={cn(
+            'size-4 shrink-0 text-white/46 transition-transform duration-300',
+            props.expanded && 'rotate-90 text-white/80'
+          )}
+        />
+      </button>
+      <AnimatePresence initial={false}>
+        {props.expanded ? (
+          <motion.div
+            key='content'
+            initial={{ height: 0, opacity: 0, y: -8 }}
+            animate={{ height: 'auto', opacity: 1, y: 0 }}
+            exit={{ height: 0, opacity: 0, y: -8 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            className='overflow-hidden'
+          >
+            <div className='border-t border-white/10 p-5'>{props.children}</div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function CodexDownloadPanel(props: {
+  card: CodexDownloadCard
+  onDownload: (card: CodexDownloadCard) => void
+  onCopyCommand: (command: string) => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className='rounded-[1.25rem] border border-white/10 bg-white/[0.035] p-4'>
+      <div className='flex items-start justify-between gap-3'>
+        <div>
+          <div className='text-lg font-semibold tracking-tight text-white'>
+            {props.card.platform}
+          </div>
+          <p className='mt-2 text-sm text-white/54'>
+            {t(props.card.descriptionKey)}
+          </p>
+        </div>
+        <Download className='size-5 text-white/44' />
+      </div>
+      {props.card.supportNoteKey ? (
+        <div className='mt-4 rounded-2xl border border-white/10 bg-white/[0.045] p-3 text-xs leading-6 text-white/66'>
+          {t(props.card.supportNoteKey)}
+        </div>
+      ) : null}
+      <Button
+        variant='outline'
+        className='mt-5 w-full gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
+        onClick={() => props.onDownload(props.card)}
+      >
+        <Download className='size-4' />
+        {t(props.card.buttonLabelKey)}
+      </Button>
+      {props.card.platform === 'macOS' && props.card.quarantineFixCommand ? (
+        <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
+          <div className='font-semibold text-amber-50/90'>
+            {t('If macOS says the app is damaged')}
+          </div>
+          <p className='mt-1'>
+            {t(
+              'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.'
+            )}
+          </p>
+          <code className='mt-3 block overflow-x-auto rounded-xl border border-white/10 bg-black/36 px-3 py-2 font-mono text-[11px] leading-5 text-white/78'>
+            {props.card.quarantineFixCommand}
+          </code>
+          <Button
+            variant='outline'
+            size='sm'
+            className='mt-3 w-full gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
+            onClick={() =>
+              props.onCopyCommand(props.card.quarantineFixCommand || '')
+            }
+          >
+            <Copy className='size-3.5' />
+            {t('Copy repair command')}
+          </Button>
+        </div>
+      ) : null}
+      {props.card.platform === 'Windows' && props.card.guideTitleKey ? (
+        <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
+          <div className='font-semibold text-amber-50/90'>
+            {t(props.card.guideTitleKey)}
+          </div>
+          {props.card.guideDescriptionKey ? (
+            <p className='mt-1'>{t(props.card.guideDescriptionKey)}</p>
+          ) : null}
+          {props.card.guideStepKeys?.length ? (
+            <ol className='mt-3 flex list-decimal flex-col gap-1 pl-4'>
+              {props.card.guideStepKeys.map((step) => (
+                <li key={step}>{t(step)}</li>
+              ))}
+            </ol>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function CCSwitchImportPanel(props: {
+  endpoint: string
+  modelName: string
+  apiKey: string
+  disabled: boolean
+  disabledReason: string | null
+  onImport: () => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className='overflow-hidden rounded-[1.25rem] border border-white/10 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'>
+      <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
+        <div className='flex items-center gap-2'>
+          <span className='size-2.5 rounded-full bg-[#ff5f57]' />
+          <span className='size-2.5 rounded-full bg-[#febc2e]' />
+          <span className='size-2.5 rounded-full bg-[#28c840]' />
+        </div>
+        <div className='font-mono text-[10px] font-semibold tracking-[0.18em] text-white/36 uppercase'>
+          CC Switch
+        </div>
+      </div>
+      <div className='grid gap-4 p-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-center'>
+        <div className='min-w-0'>
+          <div className='flex items-center gap-3'>
+            <div className='grid size-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.07]'>
+              <MonitorCog className='size-5 text-white/72' />
+            </div>
+            <div className='min-w-0'>
+              <h2 className='text-lg font-semibold tracking-tight text-white'>
+                {t('Import current setup to CC Switch')}
+              </h2>
+              <p className='mt-1 text-sm leading-6 text-white/52'>
+                {t(
+                  'Launch CC Switch from your browser with this API and model prefilled.'
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className='mt-5 grid gap-2 sm:grid-cols-3'>
+            <QuickStartConfigPill
+              label={t('Configured API')}
+              value={props.endpoint}
+            />
+            <QuickStartConfigPill
+              label={t('Configured model')}
+              value={props.modelName}
+            />
+            <QuickStartConfigPill
+              label={t('Generated API key')}
+              value={maskQuickStartApiKey(props.apiKey)}
+            />
+          </div>
+        </div>
+
+        <div className='rounded-2xl border border-white/10 bg-black/20 p-4'>
+          <div className='flex items-start gap-3 text-xs leading-6 text-white/52'>
+            <CheckCircle2 className='mt-0.5 size-4 shrink-0 text-white/58' />
+            <p>
+              {t(
+                'CC Switch will import this Codex provider and enable it automatically.'
+              )}
+            </p>
+          </div>
+          <Button
+            className='mt-4 w-full gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88 disabled:bg-white/22 disabled:text-white/42'
+            disabled={props.disabled}
+            onClick={props.onImport}
+          >
+            <ArrowUpRight className='size-4' />
+            {props.disabledReason || t('One-click import')}
+          </Button>
+        </div>
+      </div>
+    </div>
   )
 }
 

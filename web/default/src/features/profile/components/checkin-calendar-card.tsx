@@ -221,7 +221,13 @@ export function CheckinCalendarCard({
 
   if (isLoading) {
     return (
-      <div className='bg-card overflow-hidden rounded-2xl border'>
+      <div
+        className={cn(
+          'bg-card overflow-hidden rounded-2xl border transition-all duration-300',
+          !checkedToday &&
+            'border-primary/30 bg-[linear-gradient(135deg,hsl(var(--primary)/0.12),hsl(var(--card))_45%,hsl(var(--accent)/0.3))] shadow-[0_18px_60px_hsl(var(--primary)/0.12)]'
+        )}
+      >
         <div className='p-6'>
           <div className='flex items-start justify-between gap-4'>
             <div className='flex items-center gap-3'>
@@ -270,7 +276,13 @@ export function CheckinCalendarCard({
         </div>
       </Dialog>
 
-      <div className='bg-card overflow-hidden rounded-2xl border'>
+      <div
+        className={cn(
+          'bg-card overflow-hidden rounded-2xl border transition-all duration-300',
+          !checkedToday &&
+            'border-primary/30 bg-[linear-gradient(135deg,hsl(var(--primary)/0.12),hsl(var(--card))_45%,hsl(var(--accent)/0.3))] shadow-[0_18px_60px_hsl(var(--primary)/0.12)]'
+        )}
+      >
         {/* Header */}
         <div className='border-b p-4 sm:p-6'>
           <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4'>
@@ -280,7 +292,14 @@ export function CheckinCalendarCard({
               className='flex h-auto min-w-0 flex-1 items-start gap-3 p-0 text-left whitespace-normal hover:bg-transparent'
               onClick={() => setCollapsed((v) => !v)}
             >
-              <div className='bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-11 sm:w-11'>
+              <div
+                className={cn(
+                  'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-11 sm:w-11',
+                  checkedToday
+                    ? 'bg-primary/10 text-primary'
+                    : 'bg-primary text-primary-foreground shadow-[0_10px_28px_hsl(var(--primary)/0.25)]'
+                )}
+              >
                 <CalendarDays
                   className='h-4 w-4 sm:h-5 sm:w-5'
                   strokeWidth={2}
@@ -316,7 +335,10 @@ export function CheckinCalendarCard({
               onClick={() => doCheckin()}
               disabled={checkinLoading || checkedToday}
               size='sm'
-              className='w-full shrink-0 sm:w-auto'
+              className={cn(
+                'w-full shrink-0 sm:w-auto',
+                !checkedToday && 'shadow-[0_12px_30px_hsl(var(--primary)/0.2)]'
+              )}
             >
               {checkinLoading
                 ? t('Loading...')

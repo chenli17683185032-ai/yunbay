@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import {
   codexDownloadCards,
+  codexSetupOptions,
   nextStepGuideKeys,
   purposeOptions,
 } from './quick-start-data'
@@ -97,6 +98,7 @@ const QUICK_START_COMPONENT_KEYS = [
   'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.',
   'Copy repair command',
   'Copy one-line terminal install',
+  'Only Apple Silicon / M-series Macs are supported. Intel Mac users should use CC Switch instead.',
   'Terminal command copied',
   'Failed to copy terminal command',
   'Previous',
@@ -119,6 +121,7 @@ test('quick start copy has translations in every supported locale', () => {
   const keys = [
     ...QUICK_START_COMPONENT_KEYS,
     ...Object.values(nextStepGuideKeys),
+    ...codexSetupOptions.map((option) => option.titleKey),
     ...purposeOptions.flatMap((option) => [
       option.titleKey,
       option.descriptionKey,
@@ -150,6 +153,7 @@ test('Chinese quick start copy does not fall back to English for the guided flow
   const keys = [
     ...QUICK_START_COMPONENT_KEYS,
     ...Object.values(nextStepGuideKeys),
+    ...codexSetupOptions.map((option) => option.titleKey),
     ...purposeOptions.flatMap((option) => [
       option.titleKey,
       option.descriptionKey,

@@ -108,12 +108,6 @@ export function buildSidebarData(
               url: '/wallet',
               icon: icons.wallet,
             },
-            {
-              title: t('Redeem codes'),
-              url: '/wallet?section=redeem',
-              configUrls: ['/wallet'],
-              icon: icons.ticket,
-            },
           ],
         },
         {

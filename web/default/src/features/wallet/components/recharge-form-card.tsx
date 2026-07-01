@@ -354,9 +354,7 @@ export function RechargeFormCard({
                 ) : hasWaffoPaymentMethods ? null : (
                   <Alert>
                     <AlertDescription>
-                      {t(
-                        'No payment methods available. Please contact administrator.'
-                      )}
+                      {t('No payment methods available.')}
                     </AlertDescription>
                   </Alert>
                 )}
@@ -419,15 +417,7 @@ export function RechargeFormCard({
             </>
           )}
         </div>
-      ) : (
-        <Alert>
-          <AlertDescription>
-            {t(
-              'Online topup is not enabled. Please use redemption code or contact administrator.'
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
+      ) : null}
 
       {/* Creem Products Section */}
       {enableCreemTopup &&

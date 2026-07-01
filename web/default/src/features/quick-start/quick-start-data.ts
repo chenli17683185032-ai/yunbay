@@ -24,11 +24,20 @@ export type QuickStartFullscreenPageId =
   | 'api-key'
   | 'codex'
 export type QuickStartEnterDashboardPath = '/dashboard/overview'
+export type CodexSetupOptionId =
+  | 'macos-new-user'
+  | 'windows-new-user'
+  | 'ccswitch-existing-user'
 
 export type QuickStartPurpose = {
   id: QuickStartPurposeId
   titleKey: string
   descriptionKey: string
+}
+
+export type CodexSetupOption = {
+  id: CodexSetupOptionId
+  titleKey: string
 }
 
 export type CodexDownloadCard = {
@@ -39,6 +48,7 @@ export type CodexDownloadCard = {
   guideTitleKey?: string
   guideDescriptionKey?: string
   guideStepKeys?: string[]
+  supportNoteKey?: string
   quarantineFixCommand?: string
   terminalInstallCommand?: string
 }
@@ -105,10 +115,25 @@ export const purposeOptions: QuickStartPurpose[] = [
 
 const YUNBAY_CODEX_MACOS_DOWNLOAD_HREF =
   '/downloads/yunbay-codex-macos-20260624-174731-53933cc047c3.zip'
-const YUNBAY_CODEX_MACOS_DOWNLOAD_URL = `https://yunbay.xyz${YUNBAY_CODEX_MACOS_DOWNLOAD_HREF}`
 const YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH = '$HOME/Downloads/Yunbay Codex.app'
 const YUNBAY_CODEX_WINDOWS_DOWNLOAD_HREF =
   '/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe'
+
+export const codexSetupOptions: CodexSetupOption[] = [
+  {
+    id: 'macos-new-user',
+    titleKey:
+      'I am new to macOS (M-series only; Intel Macs should use CC Switch)',
+  },
+  {
+    id: 'windows-new-user',
+    titleKey: 'I am new to Windows',
+  },
+  {
+    id: 'ccswitch-existing-user',
+    titleKey: 'I already have CC Switch',
+  },
+]
 
 export const codexDownloadCards: CodexDownloadCard[] = [
   {
@@ -116,8 +141,9 @@ export const codexDownloadCards: CodexDownloadCard[] = [
     descriptionKey: 'Download starts now.',
     buttonLabelKey: 'Download one-click launcher',
     downloadHref: YUNBAY_CODEX_MACOS_DOWNLOAD_HREF,
+    supportNoteKey:
+      'Only Apple Silicon / M-series Macs are supported. Intel Mac users should use CC Switch instead.',
     quarantineFixCommand: `xattr -dr com.apple.quarantine "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && open "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}"`,
-    terminalInstallCommand: `curl -L "${YUNBAY_CODEX_MACOS_DOWNLOAD_URL}" -o /tmp/yunbay-codex.zip && rm -rf "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && ditto -x -k /tmp/yunbay-codex.zip "$HOME/Downloads" && xattr -dr com.apple.quarantine "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && open "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}"`,
   },
   {
     platform: 'Windows',

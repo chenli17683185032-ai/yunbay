@@ -57,14 +57,17 @@ test('ordinary users see quick-start and required user functions only', () => {
       'API Keys',
       'Usage Logs',
       'Wallet / Top up',
-      'Redeem codes',
       'Profile',
     ]
   )
   assert.equal(
     items.some((item) => 'url' in item && item.url === '/wallet?section=redeem'),
-    true
+    false
   )
+  assert.equal(items.some((item) => item.title === 'Redeem codes'), false)
+  assert.equal(items.some((item) => item.title === 'Rankings'), false)
+  assert.equal(items.some((item) => item.title === 'Docs'), false)
+  assert.equal(items.some((item) => item.title === 'About'), false)
 })
 
 test('admin users keep the existing admin group', () => {

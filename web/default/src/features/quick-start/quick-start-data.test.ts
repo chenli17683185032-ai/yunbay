@@ -22,6 +22,7 @@ import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
   codexDownloadCards,
+  codexSetupOptions,
   fallbackModels,
   getDefaultQuickStartModelName,
   quickStartFullscreenPages,
@@ -60,6 +61,21 @@ test('quick start exposes exactly the three requested purposes', () => {
   assert.equal(QUICK_START_DEFAULT_PURPOSE, 'web-coding')
 })
 
+test('Codex setup options expose the three requested expandable paths', () => {
+  assert.deepEqual(
+    codexSetupOptions.map((item) => item.id),
+    ['macos-new-user', 'windows-new-user', 'ccswitch-existing-user']
+  )
+  assert.deepEqual(
+    codexSetupOptions.map((item) => item.titleKey),
+    [
+      'I am new to macOS (M-series only; Intel Macs should use CC Switch)',
+      'I am new to Windows',
+      'I already have CC Switch',
+    ]
+  )
+})
+
 test('Codex download cards point to Yunbay-hosted macOS and Windows downloads', () => {
   assert.deepEqual(
     codexDownloadCards.map((item) => item.platform),
@@ -80,15 +96,10 @@ test('Codex download cards point to Yunbay-hosted macOS and Windows downloads', 
     macos?.quarantineFixCommand,
     'xattr -dr com.apple.quarantine "$HOME/Downloads/Yunbay Codex.app" && open "$HOME/Downloads/Yunbay Codex.app"'
   )
-  assert.match(
-    macos?.terminalInstallCommand ?? '',
-    /^curl -L "https:\/\/yunbay\.xyz\/downloads\/yunbay-codex-macos-\d{8}-\d{6}-[a-f0-9]{12}\.zip" -o \/tmp\/yunbay-codex\.zip && rm -rf "\$HOME\/Downloads\/Yunbay Codex\.app" && ditto -x -k \/tmp\/yunbay-codex\.zip "\$HOME\/Downloads" && xattr -dr com\.apple\.quarantine "\$HOME\/Downloads\/Yunbay Codex\.app" && open "\$HOME\/Downloads\/Yunbay Codex\.app"$/
-  )
+  assert.equal(macos?.terminalInstallCommand, undefined)
   assert.equal(
-    macos?.terminalInstallCommand?.includes(
-      `https://yunbay.xyz${macos?.downloadHref}`
-    ),
-    true
+    macos?.supportNoteKey,
+    'Only Apple Silicon / M-series Macs are supported. Intel Mac users should use CC Switch instead.'
   )
   assert.match(
     windows?.downloadHref ?? '',
