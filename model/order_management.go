@@ -2,7 +2,9 @@ package model
 
 import (
 	"errors"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -157,4 +159,668 @@ func transitionAffiliateWithdrawal(id int, adminId int, adminRemark string, stat
 	}
 
 	return &withdrawal, nil
+}
+
+type OrderAnalyticsSummary struct {
+	SiteAmountCents        int64
+	ExternalPaidCents      int64
+	OrderCount             int
+	MailVerifiedCount      int
+	MailPendingCount       int
+	MailErrorCount         int
+	MailVerifiedRate       float64
+	AffiliateUserCount     int
+	AffiliateAmountCents   int64
+	PendingWithdrawalCount int
+	PendingWithdrawalCents int64
+}
+
+type OrderAnalyticsDaily struct {
+	Date              string
+	SiteAmountCents   int64
+	ExternalPaidCents int64
+	OrderCount        int
+	MailVerifiedCount int
+	MailErrorCount    int
+}
+
+type OrderAnalyticsResult struct {
+	Summary OrderAnalyticsSummary
+	Daily   []OrderAnalyticsDaily
+}
+
+type AffiliateStatsSummary struct {
+	AffiliateUserCount                  int
+	PeriodCommissionCents               int64
+	PendingWithdrawalUserCount          int
+	PendingWithdrawalCents              int64
+	AvailableWithoutWithdrawalUserCount int
+}
+
+type AffiliateWithdrawalInfo struct {
+	Id            int
+	WithdrawalId  string
+	AmountCents   int64
+	Contact       string
+	Remark        string
+	Status        string
+	CreatedTime   int64
+	AdminRemark   string
+	ProcessedTime int64
+}
+
+type AffiliateStatsItem struct {
+	UserId                int
+	Username              string
+	PeriodCommissionCents int64
+	TotalCommissionCents  int64
+	AvailableCents        int64
+	WithdrawnCents        int64
+	Withdrawal            *AffiliateWithdrawalInfo
+}
+
+type AffiliateStatsResult struct {
+	Summary AffiliateStatsSummary
+	Items   []AffiliateStatsItem
+	Total   int64
+}
+
+type AffiliateSourceOrderRow struct {
+	OrderTime       int64
+	InviteeUserId   int
+	InviteeUsername string
+	TradeNo         string
+	WorkerOrderNo   string
+	BaseMoneyCents  int64
+	RateBps         int
+	CommissionCents int64
+	MailStatus      string
+}
+
+type OrderManagementOrderRow struct {
+	Id                       int
+	SessionId                string
+	UserId                   int
+	Username                 string
+	SiteAmountCents          int64
+	ExternalPaidCents        int64
+	WorkerOrderNo            string
+	MailOrderNo              string
+	MailAmountCents          int64
+	MailStatus               string
+	ErrorCode                string
+	ErrorMessage             string
+	CreatedTime              int64
+	VerifiedTime             int64
+	AffiliateInviterId       int
+	AffiliateCommissionCents int64
+	AffiliateStatus          string
+}
+
+func GetOrderManagementAnalytics(startTime, endTime int64) (*OrderAnalyticsResult, error) {
+	var sessions []LdxpTopupSession
+	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).
+		Order("created_time ASC").Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+
+	result := &OrderAnalyticsResult{}
+	dailyByDate := make(map[string]*OrderAnalyticsDaily)
+	for _, session := range sessions {
+		result.Summary.SiteAmountCents += session.SiteAmountCents
+		result.Summary.ExternalPaidCents += session.ExternalPaidCents
+		result.Summary.OrderCount++
+
+		date := time.Unix(session.CreatedTime, 0).UTC().Format("2006-01-02")
+		daily := dailyByDate[date]
+		if daily == nil {
+			daily = &OrderAnalyticsDaily{Date: date}
+			dailyByDate[date] = daily
+		}
+		daily.SiteAmountCents += session.SiteAmountCents
+		daily.ExternalPaidCents += session.ExternalPaidCents
+		daily.OrderCount++
+
+		switch {
+		case session.MailStatus == MailCheckStatusVerified:
+			result.Summary.MailVerifiedCount++
+			daily.MailVerifiedCount++
+		case isOrderManagementMailErrorStatus(session.MailStatus):
+			result.Summary.MailErrorCount++
+			daily.MailErrorCount++
+		default:
+			result.Summary.MailPendingCount++
+		}
+	}
+	if result.Summary.OrderCount > 0 {
+		result.Summary.MailVerifiedRate = float64(result.Summary.MailVerifiedCount) / float64(result.Summary.OrderCount)
+	}
+
+	result.Daily = make([]OrderAnalyticsDaily, 0, len(dailyByDate))
+	for _, daily := range dailyByDate {
+		result.Daily = append(result.Daily, *daily)
+	}
+	sort.Slice(result.Daily, func(i, j int) bool { return result.Daily[i].Date < result.Daily[j].Date })
+
+	var commissions []AffiliateCommission
+	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).Find(&commissions).Error; err != nil {
+		return nil, err
+	}
+	inviterSet := make(map[int]struct{})
+	for _, commission := range commissions {
+		if commission.InviterUserId > 0 {
+			inviterSet[commission.InviterUserId] = struct{}{}
+		}
+		result.Summary.AffiliateAmountCents += commission.CommissionCents
+	}
+	result.Summary.AffiliateUserCount = len(inviterSet)
+
+	var withdrawals []AffiliateWithdrawal
+	if err := DB.Where("created_time >= ? AND created_time <= ? AND status = ?", startTime, endTime, AffiliateWithdrawalStatusPending).Find(&withdrawals).Error; err != nil {
+		return nil, err
+	}
+	result.Summary.PendingWithdrawalCount = len(withdrawals)
+	for _, withdrawal := range withdrawals {
+		result.Summary.PendingWithdrawalCents += withdrawal.AmountCents
+	}
+
+	return result, nil
+}
+
+func GetAffiliateStats(startTime, endTime int64, withdrawalStatus string, offset int, limit int) (*AffiliateStatsResult, error) {
+	offset, limit = normalizeOffsetLimit(offset, limit, 20, 100)
+	result := &AffiliateStatsResult{}
+	userSet := make(map[int]struct{})
+	periodByUser := make(map[int]int64)
+	totalByUser := make(map[int]int64)
+	availableByUser := make(map[int]int64)
+	withdrawnByUser := make(map[int]int64)
+
+	var periodCommissions []AffiliateCommission
+	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).Find(&periodCommissions).Error; err != nil {
+		return nil, err
+	}
+	for _, commission := range periodCommissions {
+		if commission.InviterUserId <= 0 {
+			continue
+		}
+		userSet[commission.InviterUserId] = struct{}{}
+		periodByUser[commission.InviterUserId] += commission.CommissionCents
+		result.Summary.PeriodCommissionCents += commission.CommissionCents
+	}
+
+	var allCommissions []AffiliateCommission
+	if err := DB.Find(&allCommissions).Error; err != nil {
+		return nil, err
+	}
+	for _, commission := range allCommissions {
+		if commission.InviterUserId <= 0 {
+			continue
+		}
+		userSet[commission.InviterUserId] = struct{}{}
+		totalByUser[commission.InviterUserId] += commission.CommissionCents
+		switch commission.Status {
+		case AffiliateCommissionStatusAvailable:
+			availableByUser[commission.InviterUserId] += commission.CommissionCents
+		case AffiliateCommissionStatusWithdrawn:
+			withdrawnByUser[commission.InviterUserId] += commission.CommissionCents
+		}
+	}
+
+	withdrawalQuery := DB.Order("created_time DESC")
+	if withdrawalStatus != "" {
+		withdrawalQuery = withdrawalQuery.Where("status = ?", withdrawalStatus)
+	}
+	var withdrawals []AffiliateWithdrawal
+	if err := withdrawalQuery.Find(&withdrawals).Error; err != nil {
+		return nil, err
+	}
+	latestWithdrawalByUser := make(map[int]AffiliateWithdrawal)
+	for _, withdrawal := range withdrawals {
+		if withdrawal.UserId <= 0 {
+			continue
+		}
+		userSet[withdrawal.UserId] = struct{}{}
+		if _, ok := latestWithdrawalByUser[withdrawal.UserId]; !ok {
+			latestWithdrawalByUser[withdrawal.UserId] = withdrawal
+		}
+	}
+
+	var pendingWithdrawals []AffiliateWithdrawal
+	if err := DB.Where("status = ?", AffiliateWithdrawalStatusPending).Find(&pendingWithdrawals).Error; err != nil {
+		return nil, err
+	}
+	pendingWithdrawalUsers := make(map[int]struct{})
+	for _, withdrawal := range pendingWithdrawals {
+		if withdrawal.UserId <= 0 {
+			continue
+		}
+		userSet[withdrawal.UserId] = struct{}{}
+		pendingWithdrawalUsers[withdrawal.UserId] = struct{}{}
+		result.Summary.PendingWithdrawalCents += withdrawal.AmountCents
+	}
+	result.Summary.PendingWithdrawalUserCount = len(pendingWithdrawalUsers)
+
+	ids := sortedIntKeys(userSet)
+	result.Summary.AffiliateUserCount = len(ids)
+	for _, id := range ids {
+		if availableByUser[id] > 0 {
+			if _, hasPendingWithdrawal := pendingWithdrawalUsers[id]; !hasPendingWithdrawal {
+				result.Summary.AvailableWithoutWithdrawalUserCount++
+			}
+		}
+	}
+	result.Total = int64(len(ids))
+
+	pageIDs := paginateIntSlice(ids, offset, limit)
+	usernames, err := getUsernamesByIds(pageIDs)
+	if err != nil {
+		return nil, err
+	}
+	result.Items = make([]AffiliateStatsItem, 0, len(pageIDs))
+	for _, id := range pageIDs {
+		item := AffiliateStatsItem{
+			UserId:                id,
+			Username:              usernames[id],
+			PeriodCommissionCents: periodByUser[id],
+			TotalCommissionCents:  totalByUser[id],
+			AvailableCents:        availableByUser[id],
+			WithdrawnCents:        withdrawnByUser[id],
+		}
+		if withdrawal, ok := latestWithdrawalByUser[id]; ok {
+			item.Withdrawal = affiliateWithdrawalInfoFromModel(withdrawal)
+		}
+		result.Items = append(result.Items, item)
+	}
+
+	return result, nil
+}
+
+func ListOrderManagementOrders(startTime, endTime int64, mailStatus string, keyword string, offset int, limit int) ([]OrderManagementOrderRow, int64, error) {
+	offset, limit = normalizeOffsetLimit(offset, limit, 20, 100)
+	query := DB.Model(&LdxpTopupSession{}).Where("created_time >= ? AND created_time <= ?", startTime, endTime)
+	if mailStatus != "" {
+		query = query.Where("mail_status = ?", mailStatus)
+	}
+	keyword = strings.TrimSpace(keyword)
+	if keyword != "" {
+		like := "%" + keyword + "%"
+		query = query.Where("session_id LIKE ? OR trade_no LIKE ? OR worker_order_no LIKE ? OR mail_order_no LIKE ?", like, like, like, like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var sessions []LdxpTopupSession
+	if err := query.Order("created_time DESC").Offset(offset).Limit(limit).Find(&sessions).Error; err != nil {
+		return nil, 0, err
+	}
+
+	userIDs := make([]int, 0, len(sessions))
+	sessionIDs := make([]string, 0, len(sessions))
+	tradeNos := make([]string, 0, len(sessions))
+	topupIDs := make([]int, 0, len(sessions))
+	for _, session := range sessions {
+		userIDs = append(userIDs, session.UserId)
+		if session.SessionId != "" {
+			sessionIDs = append(sessionIDs, session.SessionId)
+		}
+		if session.TradeNo != "" {
+			tradeNos = append(tradeNos, session.TradeNo)
+		}
+		if session.TopUpId > 0 {
+			topupIDs = append(topupIDs, session.TopUpId)
+		}
+	}
+	usernames, err := getUsernamesByIds(userIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	commissionsByKey, err := getAffiliateCommissionsBySessionKeys(sessionIDs, tradeNos, topupIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	rows := make([]OrderManagementOrderRow, 0, len(sessions))
+	for _, session := range sessions {
+		row := OrderManagementOrderRow{
+			Id:                session.Id,
+			SessionId:         session.SessionId,
+			UserId:            session.UserId,
+			Username:          usernames[session.UserId],
+			SiteAmountCents:   session.SiteAmountCents,
+			ExternalPaidCents: session.ExternalPaidCents,
+			WorkerOrderNo:     session.WorkerOrderNo,
+			MailOrderNo:       session.MailOrderNo,
+			MailAmountCents:   session.MailAmountCents,
+			MailStatus:        session.MailStatus,
+			ErrorCode:         session.ErrorCode,
+			ErrorMessage:      session.ErrorMessage,
+			CreatedTime:       session.CreatedTime,
+			VerifiedTime:      session.VerifiedTime,
+		}
+		if commission, ok := findCommissionForSession(commissionsByKey, session); ok {
+			row.AffiliateInviterId = commission.InviterUserId
+			row.AffiliateCommissionCents = commission.CommissionCents
+			row.AffiliateStatus = commission.Status
+		}
+		rows = append(rows, row)
+	}
+	return rows, total, nil
+}
+
+func GetAffiliateSourceOrders(inviterUserId int, startTime int64, endTime int64, limit int) ([]AffiliateSourceOrderRow, error) {
+	_, limit = normalizeOffsetLimit(0, limit, 50, 200)
+	var commissions []AffiliateCommission
+	if err := DB.Where("inviter_user_id = ? AND created_time >= ? AND created_time <= ?", inviterUserId, startTime, endTime).
+		Order("created_time DESC").Limit(limit).Find(&commissions).Error; err != nil {
+		return nil, err
+	}
+
+	inviteeIDs := make([]int, 0, len(commissions))
+	sessionIDs := make([]string, 0, len(commissions))
+	tradeNos := make([]string, 0, len(commissions))
+	topupIDs := make([]int, 0, len(commissions))
+	for _, commission := range commissions {
+		inviteeIDs = append(inviteeIDs, commission.InviteeUserId)
+		if commission.SessionId != "" {
+			sessionIDs = append(sessionIDs, commission.SessionId)
+		}
+		if commission.TradeNo != "" {
+			tradeNos = append(tradeNos, commission.TradeNo)
+		}
+		if commission.TopUpId > 0 {
+			topupIDs = append(topupIDs, commission.TopUpId)
+		}
+	}
+	usernames, err := getUsernamesByIds(inviteeIDs)
+	if err != nil {
+		return nil, err
+	}
+	sessionsByKey, err := getTopupSessionsByKeys(sessionIDs, tradeNos, topupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]AffiliateSourceOrderRow, 0, len(commissions))
+	for _, commission := range commissions {
+		row := AffiliateSourceOrderRow{
+			OrderTime:       commission.CreatedTime,
+			InviteeUserId:   commission.InviteeUserId,
+			InviteeUsername: usernames[commission.InviteeUserId],
+			TradeNo:         commission.TradeNo,
+			BaseMoneyCents:  commission.BaseMoneyCents,
+			RateBps:         commission.RateBps,
+			CommissionCents: commission.CommissionCents,
+		}
+		if session, ok := findSessionForCommission(sessionsByKey, commission); ok {
+			row.OrderTime = session.CreatedTime
+			row.TradeNo = firstNonEmpty(row.TradeNo, session.TradeNo)
+			row.WorkerOrderNo = session.WorkerOrderNo
+			row.MailStatus = session.MailStatus
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+func isOrderManagementMailErrorStatus(status string) bool {
+	switch status {
+	case MailCheckStatusAmountMismatch, MailCheckStatusOrderMismatch, MailCheckStatusMailParseFailed, MailCheckStatusMailFetchFailed, MailCheckStatusTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeOffsetLimit(offset int, limit int, defaultLimit int, maxLimit int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	return offset, limit
+}
+
+func sortedIntKeys(values map[int]struct{}) []int {
+	ids := make([]int, 0, len(values))
+	for id := range values {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
+}
+
+func paginateIntSlice(ids []int, offset int, limit int) []int {
+	if offset >= len(ids) {
+		return []int{}
+	}
+	end := offset + limit
+	if end > len(ids) {
+		end = len(ids)
+	}
+	return ids[offset:end]
+}
+
+func getUsernamesByIds(ids []int) (map[int]string, error) {
+	usernames := make(map[int]string)
+	ids = uniquePositiveInts(ids)
+	if len(ids) == 0 {
+		return usernames, nil
+	}
+	var users []User
+	if err := DB.Select("id", "username").Where("id IN ?", ids).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	for _, user := range users {
+		usernames[user.Id] = user.Username
+	}
+	return usernames, nil
+}
+
+func uniquePositiveInts(values []int) []int {
+	seen := make(map[int]struct{})
+	result := make([]int, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func affiliateWithdrawalInfoFromModel(withdrawal AffiliateWithdrawal) *AffiliateWithdrawalInfo {
+	return &AffiliateWithdrawalInfo{
+		Id:            withdrawal.Id,
+		WithdrawalId:  withdrawal.WithdrawalId,
+		AmountCents:   withdrawal.AmountCents,
+		Contact:       withdrawal.Contact,
+		Remark:        withdrawal.Remark,
+		Status:        withdrawal.Status,
+		CreatedTime:   withdrawal.CreatedTime,
+		AdminRemark:   withdrawal.AdminRemark,
+		ProcessedTime: withdrawal.ProcessedTime,
+	}
+}
+
+type orderManagementCommissionMaps struct {
+	bySessionId map[string]AffiliateCommission
+	byTradeNo   map[string]AffiliateCommission
+	byTopUpId   map[int]AffiliateCommission
+}
+
+func getAffiliateCommissionsBySessionKeys(sessionIDs []string, tradeNos []string, topupIDs []int) (*orderManagementCommissionMaps, error) {
+	maps := &orderManagementCommissionMaps{
+		bySessionId: make(map[string]AffiliateCommission),
+		byTradeNo:   make(map[string]AffiliateCommission),
+		byTopUpId:   make(map[int]AffiliateCommission),
+	}
+	query := DB.Model(&AffiliateCommission{})
+	conditions := DB.Session(&gorm.Session{NewDB: true})
+	applied := false
+	if len(sessionIDs) > 0 {
+		conditions = conditions.Where("session_id IN ?", sessionIDs)
+		applied = true
+	}
+	if len(tradeNos) > 0 {
+		if applied {
+			conditions = conditions.Or("trade_no IN ?", tradeNos)
+		} else {
+			conditions = conditions.Where("trade_no IN ?", tradeNos)
+			applied = true
+		}
+	}
+	if len(topupIDs) > 0 {
+		if applied {
+			conditions = conditions.Or("top_up_id IN ?", topupIDs)
+		} else {
+			conditions = conditions.Where("top_up_id IN ?", topupIDs)
+			applied = true
+		}
+	}
+	if !applied {
+		return maps, nil
+	}
+	var commissions []AffiliateCommission
+	if err := query.Where(conditions).Order("created_time DESC").Find(&commissions).Error; err != nil {
+		return nil, err
+	}
+	for _, commission := range commissions {
+		if commission.SessionId != "" {
+			if _, ok := maps.bySessionId[commission.SessionId]; !ok {
+				maps.bySessionId[commission.SessionId] = commission
+			}
+		}
+		if commission.TradeNo != "" {
+			if _, ok := maps.byTradeNo[commission.TradeNo]; !ok {
+				maps.byTradeNo[commission.TradeNo] = commission
+			}
+		}
+		if commission.TopUpId > 0 {
+			if _, ok := maps.byTopUpId[commission.TopUpId]; !ok {
+				maps.byTopUpId[commission.TopUpId] = commission
+			}
+		}
+	}
+	return maps, nil
+}
+
+func findCommissionForSession(maps *orderManagementCommissionMaps, session LdxpTopupSession) (AffiliateCommission, bool) {
+	if session.SessionId != "" {
+		if commission, ok := maps.bySessionId[session.SessionId]; ok {
+			return commission, true
+		}
+	}
+	if session.TradeNo != "" {
+		if commission, ok := maps.byTradeNo[session.TradeNo]; ok {
+			return commission, true
+		}
+	}
+	if session.TopUpId > 0 {
+		if commission, ok := maps.byTopUpId[session.TopUpId]; ok {
+			return commission, true
+		}
+	}
+	return AffiliateCommission{}, false
+}
+
+type orderManagementSessionMaps struct {
+	bySessionId map[string]LdxpTopupSession
+	byTradeNo   map[string]LdxpTopupSession
+	byTopUpId   map[int]LdxpTopupSession
+}
+
+func getTopupSessionsByKeys(sessionIDs []string, tradeNos []string, topupIDs []int) (*orderManagementSessionMaps, error) {
+	maps := &orderManagementSessionMaps{
+		bySessionId: make(map[string]LdxpTopupSession),
+		byTradeNo:   make(map[string]LdxpTopupSession),
+		byTopUpId:   make(map[int]LdxpTopupSession),
+	}
+	query := DB.Model(&LdxpTopupSession{})
+	conditions := DB.Session(&gorm.Session{NewDB: true})
+	applied := false
+	if len(sessionIDs) > 0 {
+		conditions = conditions.Where("session_id IN ?", sessionIDs)
+		applied = true
+	}
+	if len(tradeNos) > 0 {
+		if applied {
+			conditions = conditions.Or("trade_no IN ?", tradeNos)
+		} else {
+			conditions = conditions.Where("trade_no IN ?", tradeNos)
+			applied = true
+		}
+	}
+	if len(topupIDs) > 0 {
+		if applied {
+			conditions = conditions.Or("top_up_id IN ?", topupIDs)
+		} else {
+			conditions = conditions.Where("top_up_id IN ?", topupIDs)
+			applied = true
+		}
+	}
+	if !applied {
+		return maps, nil
+	}
+	var sessions []LdxpTopupSession
+	if err := query.Where(conditions).Order("created_time DESC").Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if session.SessionId != "" {
+			if _, ok := maps.bySessionId[session.SessionId]; !ok {
+				maps.bySessionId[session.SessionId] = session
+			}
+		}
+		if session.TradeNo != "" {
+			if _, ok := maps.byTradeNo[session.TradeNo]; !ok {
+				maps.byTradeNo[session.TradeNo] = session
+			}
+		}
+		if session.TopUpId > 0 {
+			if _, ok := maps.byTopUpId[session.TopUpId]; !ok {
+				maps.byTopUpId[session.TopUpId] = session
+			}
+		}
+	}
+	return maps, nil
+}
+
+func findSessionForCommission(maps *orderManagementSessionMaps, commission AffiliateCommission) (LdxpTopupSession, bool) {
+	if commission.SessionId != "" {
+		if session, ok := maps.bySessionId[commission.SessionId]; ok {
+			return session, true
+		}
+	}
+	if commission.TradeNo != "" {
+		if session, ok := maps.byTradeNo[commission.TradeNo]; ok {
+			return session, true
+		}
+	}
+	if commission.TopUpId > 0 {
+		if session, ok := maps.byTopUpId[commission.TopUpId]; ok {
+			return session, true
+		}
+	}
+	return LdxpTopupSession{}, false
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

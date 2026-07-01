@@ -152,3 +152,113 @@ func TestAffiliateWithdrawalRejectIsSingleTransition(t *testing.T) {
 	_, err = RejectAffiliateWithdrawal(withdrawal.Id, 100, "重复驳回")
 	require.ErrorIs(t, err, ErrAffiliateWithdrawalAlreadyProcessed)
 }
+
+func TestOrderManagementAnalyticsAggregatesByDayInGo(t *testing.T) {
+	truncateTables(t)
+
+	records := []*LdxpTopupSession{
+		{SessionId: "s1", UserId: 1, SiteAmountCents: 1000, ExternalPaidCents: 1030, MailStatus: MailCheckStatusVerified, CreatedTime: 1782518400},
+		{SessionId: "s2", UserId: 2, SiteAmountCents: 50000, ExternalPaidCents: 42500, MailStatus: MailCheckStatusAmountMismatch, CreatedTime: 1782518500},
+		{SessionId: "s3", UserId: 3, SiteAmountCents: 2000, ExternalPaidCents: 2060, MailStatus: MailCheckStatusPending, CreatedTime: 1782604800},
+	}
+	for _, record := range records {
+		require.NoError(t, DB.Create(record).Error)
+	}
+
+	result, err := GetOrderManagementAnalytics(1782518400, 1782691199)
+	require.NoError(t, err)
+	assert.Equal(t, int64(53000), result.Summary.SiteAmountCents)
+	assert.Equal(t, int64(45590), result.Summary.ExternalPaidCents)
+	assert.Equal(t, 3, result.Summary.OrderCount)
+	assert.Equal(t, 1, result.Summary.MailVerifiedCount)
+	assert.Equal(t, 1, result.Summary.MailPendingCount)
+	assert.Equal(t, 1, result.Summary.MailErrorCount)
+	assert.Equal(t, float64(1)/float64(3), result.Summary.MailVerifiedRate)
+	assert.Len(t, result.Daily, 2)
+	assert.Equal(t, "2026-06-27", result.Daily[0].Date)
+	assert.Equal(t, int64(51000), result.Daily[0].SiteAmountCents)
+	assert.Equal(t, 2, result.Daily[0].OrderCount)
+}
+
+func TestOrderManagementAffiliateStatsIncludesWithdrawalInfo(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Id: 77, Username: "inviter", Status: common.UserStatusEnabled, AffCode: "aff77"}).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{InviterUserId: 77, InviteeUserId: 88, TradeNo: "trade1", BaseMoneyCents: 42500, RateBps: 1500, CommissionCents: 6375, Status: AffiliateCommissionStatusAvailable, CreatedTime: 1782518400}).Error)
+	require.NoError(t, DB.Create(&AffiliateWithdrawal{WithdrawalId: "affw_pending", UserId: 77, AmountCents: 5000, Contact: "支付宝：138****8888", Status: AffiliateWithdrawalStatusPending, CreatedTime: 1782600000}).Error)
+
+	result, err := GetAffiliateStats(1782518400, 1782691199, "pending", 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Summary.AffiliateUserCount)
+	assert.Equal(t, int64(6375), result.Summary.PeriodCommissionCents)
+	assert.Equal(t, 1, result.Summary.PendingWithdrawalUserCount)
+	assert.Equal(t, int64(5000), result.Summary.PendingWithdrawalCents)
+	assert.Len(t, result.Items, 1)
+	assert.NotNil(t, result.Items[0].Withdrawal)
+	assert.Equal(t, "支付宝：138****8888", result.Items[0].Withdrawal.Contact)
+}
+
+func TestOrderManagementOrdersIncludesUsernameAndAffiliateInfo(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Id: 77, Username: "inviter", Status: common.UserStatusEnabled, AffCode: "aff77"}).Error)
+	require.NoError(t, DB.Create(&User{Id: 88, Username: "buyer", Status: common.UserStatusEnabled, AffCode: "aff88"}).Error)
+	session := &LdxpTopupSession{
+		SessionId:         "ldxp_order_test_1",
+		UserId:            88,
+		TopUpId:           7001,
+		TradeNo:           "trade_order_1",
+		SiteAmountCents:   50000,
+		ExternalPaidCents: 42500,
+		WorkerOrderNo:     "LD260628UZJ97P",
+		MailOrderNo:       "LD260628UZJ97P",
+		MailAmountCents:   42500,
+		MailStatus:        MailCheckStatusVerified,
+		CreatedTime:       1782604800,
+		VerifiedTime:      1782604900,
+	}
+	require.NoError(t, DB.Create(session).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{InviterUserId: 77, InviteeUserId: 88, TopUpId: 7001, SessionId: session.SessionId, TradeNo: session.TradeNo, BaseMoneyCents: 42500, RateBps: 1500, CommissionCents: 6375, Status: AffiliateCommissionStatusAvailable, CreatedTime: 1782604800}).Error)
+
+	rows, total, err := ListOrderManagementOrders(1782518400, 1782691199, "", "LD260628", 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "buyer", rows[0].Username)
+	assert.Equal(t, 77, rows[0].AffiliateInviterId)
+	assert.Equal(t, int64(6375), rows[0].AffiliateCommissionCents)
+	assert.Equal(t, AffiliateCommissionStatusAvailable, rows[0].AffiliateStatus)
+}
+
+func TestAffiliateSourceOrdersIncludesInviteeUsernameAndSessionStatus(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Id: 77, Username: "inviter", Status: common.UserStatusEnabled, AffCode: "aff77"}).Error)
+	require.NoError(t, DB.Create(&User{Id: 88, Username: "buyer", Status: common.UserStatusEnabled, AffCode: "aff88"}).Error)
+	session := &LdxpTopupSession{
+		SessionId:         "ldxp_source_test_1",
+		UserId:            88,
+		TopUpId:           7002,
+		TradeNo:           "trade_source_1",
+		SiteAmountCents:   50000,
+		ExternalPaidCents: 42500,
+		WorkerOrderNo:     "LD260628SOURCE",
+		MailStatus:        MailCheckStatusVerified,
+		CreatedTime:       1782604800,
+	}
+	require.NoError(t, DB.Create(session).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{InviterUserId: 77, InviteeUserId: 88, TopUpId: 7002, SessionId: session.SessionId, TradeNo: session.TradeNo, BaseMoneyCents: 42500, RateBps: 1500, CommissionCents: 6375, Status: AffiliateCommissionStatusAvailable, CreatedTime: 1782604800}).Error)
+
+	rows, err := GetAffiliateSourceOrders(77, 1782518400, 1782691199, 20)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, int64(1782604800), rows[0].OrderTime)
+	assert.Equal(t, 88, rows[0].InviteeUserId)
+	assert.Equal(t, "buyer", rows[0].InviteeUsername)
+	assert.Equal(t, "trade_source_1", rows[0].TradeNo)
+	assert.Equal(t, "LD260628SOURCE", rows[0].WorkerOrderNo)
+	assert.Equal(t, int64(42500), rows[0].BaseMoneyCents)
+	assert.Equal(t, 1500, rows[0].RateBps)
+	assert.Equal(t, int64(6375), rows[0].CommissionCents)
+	assert.Equal(t, MailCheckStatusVerified, rows[0].MailStatus)
+}
