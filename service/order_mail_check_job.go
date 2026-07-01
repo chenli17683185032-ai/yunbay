@@ -21,7 +21,7 @@ const (
 	orderMailCheckMaxJobs             = 1000
 )
 
-var defaultOrderMailCheckRunner = NewOrderMailCheckRunner(StoredLdxpMailSource{})
+var defaultOrderMailCheckRunner = NewOrderMailCheckRunner(ConfiguredLdxpMailSource())
 
 type OrderMailCheckResult struct {
 	JobId         string
