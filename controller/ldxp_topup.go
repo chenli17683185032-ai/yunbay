@@ -131,10 +131,6 @@ func CreateLdxpTopupSession(c *gin.Context) {
 		common.ApiErrorMsg(c, "ldxp topup unavailable")
 		return
 	}
-	if !service.IsLdxpUserIDAllowed(cfg, userID) {
-		common.ApiError(c, service.ErrLdxpTopupDisabled)
-		return
-	}
 	view, err := service.CreateLdxpTopupSession(userID, req.Amount, cfg)
 	if err != nil {
 		common.ApiError(c, err)

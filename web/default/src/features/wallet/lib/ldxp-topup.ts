@@ -21,6 +21,20 @@ import type { LdxpTopupStatus } from '../types'
 export const LDXP_TOPUP_AMOUNTS = [10, 20, 30, 50, 100, 500] as const
 export const LDXP_QR_CREATION_ANIMATION_SECONDS = 30
 
+export const LDXP_TOPUP_DISCOUNTS: Partial<Record<number, number>> = {
+  50: 0.95,
+  100: 0.9,
+  500: 0.85,
+}
+
+export type LdxpPricing = {
+  amount: number
+  discount: number
+  hasDiscount: boolean
+  payable: number
+  saved: number
+}
+
 const LDXP_TERMINAL_STATUSES = new Set<LdxpTopupStatus>([
   'success',
   'canceled',
@@ -45,6 +59,41 @@ const LDXP_STATUS_MESSAGE_KEYS: Record<LdxpTopupStatus, string> = {
   mail_timeout: 'Recharge failed',
   verify_failed: 'Recharge failed',
   redeem_failed: 'Recharge failed',
+}
+
+function roundMoney(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100
+}
+
+export function getLdxpDiscountForAmount(amount: number): number {
+  return LDXP_TOPUP_DISCOUNTS[amount] ?? 1
+}
+
+export function getLdxpPricing(amount: number): LdxpPricing {
+  const discount = getLdxpDiscountForAmount(amount)
+  const payable = roundMoney(amount * discount)
+  const saved = roundMoney(amount - payable)
+
+  return {
+    amount,
+    discount,
+    hasDiscount: discount > 0 && discount < 1,
+    payable,
+    saved,
+  }
+}
+
+export function getLdxpDiscountLabel(discount: number, locale = 'en'): string {
+  if (discount >= 1) {
+    return locale.toLowerCase().startsWith('zh') ? '标准价' : 'Standard'
+  }
+
+  const percent = Math.round(discount * 100)
+  if (locale.toLowerCase().startsWith('zh')) {
+    return percent % 10 === 0 ? `${percent / 10}折` : `${percent}折`
+  }
+
+  return `${percent}%`
 }
 
 const LDXP_SAFE_QR_DATA_PREFIXES = [

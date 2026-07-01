@@ -98,7 +98,7 @@ func GetTopUpInfo(c *gin.Context) {
 	enableLdxpTopup := false
 	ldxpAmountOptions := []int64{}
 	if ldxpCfg, err := service.LoadLdxpConfig(); err == nil {
-		enableLdxpTopup = ldxpCfg.Enabled && service.IsLdxpUserIDAllowed(ldxpCfg, c.GetInt("id"))
+		enableLdxpTopup = ldxpCfg.Enabled
 		ldxpAmountOptions = service.GetLdxpAmountOptions(ldxpCfg)
 	}
 

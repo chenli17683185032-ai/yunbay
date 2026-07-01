@@ -297,8 +297,7 @@ export function Wallet(props: WalletProps) {
   const ldxpTopupDisabled =
     ldxpTopup.loading ||
     Boolean(
-      ldxpTopup.session &&
-        !isLdxpTerminalStatus(ldxpTopup.session.status)
+      ldxpTopup.session && !isLdxpTerminalStatus(ldxpTopup.session.status)
     )
 
   const handleSubscriptionAvailabilityChange = useCallback(
@@ -331,6 +330,7 @@ export function Wallet(props: WalletProps) {
                     disabled={ldxpTopupDisabled}
                     error={!ldxpTopup.session ? ldxpTopup.error : null}
                     onStart={ldxpTopup.start}
+                    onOpenBilling={() => setBillingDialogOpen(true)}
                   />
                   <RechargeFormCard
                     topupInfo={topupInfo}

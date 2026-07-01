@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetTopUpInfoHidesLdxpOutsideAllowlist(t *testing.T) {
+func TestGetTopUpInfoShowsLdxpWhenAllowlistIsConfigured(t *testing.T) {
 	setupLdxpTopupControllerTest(t)
 	t.Setenv("LDXP_ALLOWED_USERNAMES", "jiance001")
 	user := createLdxpControllerTestUser(t, "ordinary_user")
@@ -18,10 +18,10 @@ func TestGetTopUpInfoHidesLdxpOutsideAllowlist(t *testing.T) {
 	body := assertLdxpAPIResponse(t, recorder)
 	data, ok := body["data"].(map[string]interface{})
 	require.True(t, ok)
-	assert.Equal(t, false, data["enable_ldxp_topup"])
+	assert.Equal(t, true, data["enable_ldxp_topup"])
 }
 
-func TestGetTopUpInfoShowsLdxpForAllowedUsername(t *testing.T) {
+func TestGetTopUpInfoStillShowsLdxpForPreviouslyAllowedUsername(t *testing.T) {
 	setupLdxpTopupControllerTest(t)
 	t.Setenv("LDXP_ALLOWED_USERNAMES", "jiance001")
 	user := createLdxpControllerTestUser(t, "jiance001")

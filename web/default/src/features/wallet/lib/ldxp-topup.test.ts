@@ -21,6 +21,9 @@ import test from 'node:test'
 import {
   LDXP_QR_CREATION_ANIMATION_SECONDS,
   LDXP_TOPUP_AMOUNTS,
+  getLdxpDiscountForAmount,
+  getLdxpDiscountLabel,
+  getLdxpPricing,
   getSafeLdxpQrCodeSrc,
   shouldShowLdxpQrCreationHint,
   getLdxpStatusMessageKey,
@@ -29,6 +32,39 @@ import {
 
 test('ldxp topup uses fixed allowed amounts', () => {
   assert.deepEqual(LDXP_TOPUP_AMOUNTS, [10, 20, 30, 50, 100, 500])
+})
+
+test('ldxp topup discount helpers calculate payable prices for promotional amounts', () => {
+  assert.equal(getLdxpDiscountForAmount(10), 1)
+  assert.equal(getLdxpDiscountForAmount(50), 0.95)
+  assert.deepEqual(getLdxpPricing(50), {
+    amount: 50,
+    discount: 0.95,
+    hasDiscount: true,
+    payable: 47.5,
+    saved: 2.5,
+  })
+  assert.deepEqual(getLdxpPricing(100), {
+    amount: 100,
+    discount: 0.9,
+    hasDiscount: true,
+    payable: 90,
+    saved: 10,
+  })
+  assert.deepEqual(getLdxpPricing(500), {
+    amount: 500,
+    discount: 0.85,
+    hasDiscount: true,
+    payable: 425,
+    saved: 75,
+  })
+})
+
+test('ldxp topup discount labels follow English and Chinese display conventions', () => {
+  assert.equal(getLdxpDiscountLabel(1, 'en'), 'Standard')
+  assert.equal(getLdxpDiscountLabel(0.95, 'en'), '95%')
+  assert.equal(getLdxpDiscountLabel(0.9, 'zh-CN'), '9折')
+  assert.equal(getLdxpDiscountLabel(0.85, 'zh-CN'), '85折')
 })
 
 test('ldxp topup exposes a 30 second QR creation animation duration', () => {
