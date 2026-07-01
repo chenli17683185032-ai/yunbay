@@ -22,6 +22,7 @@ import {
   formatCny,
   formatPercentRate,
   getMailStatusLabelKey,
+  isMailStatusError,
 } from './format'
 
 test('formatCny renders CNY with two decimals', () => {
@@ -40,4 +41,12 @@ test('mail status labels are stable i18n keys', () => {
   assert.equal(getMailStatusLabelKey('amount_mismatch'), 'Amount mismatch')
   assert.equal(getMailStatusLabelKey('order_mismatch'), 'Order number mismatch')
   assert.equal(getMailStatusLabelKey('waiting_mail'), 'Pending mail')
+})
+
+test('unknown mail status labels fall back to raw status', () => {
+  assert.equal(getMailStatusLabelKey('custom_unknown'), 'custom_unknown')
+})
+
+test('unknown mail status is not treated as an error', () => {
+  assert.equal(isMailStatusError('custom_unknown'), false)
 })

@@ -57,10 +57,10 @@ export function formatUnixTime(value?: number): string {
   return new Date(value * 1000).toLocaleString()
 }
 
-export function getMailStatusLabelKey(status: MailCheckStatus): string {
-  return mailStatusLabelKeys[status]
+export function getMailStatusLabelKey(status: MailCheckStatus | string): string {
+  return mailStatusLabelKeys[status as MailCheckStatus] ?? status
 }
 
-export function isMailStatusError(status: MailCheckStatus): boolean {
-  return mailStatusErrorSet.has(status)
+export function isMailStatusError(status: MailCheckStatus | string): boolean {
+  return mailStatusErrorSet.has(status as MailCheckStatus)
 }
