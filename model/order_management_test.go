@@ -262,3 +262,69 @@ func TestAffiliateSourceOrdersIncludesInviteeUsernameAndSessionStatus(t *testing
 	assert.Equal(t, int64(6375), rows[0].CommissionCents)
 	assert.Equal(t, MailCheckStatusVerified, rows[0].MailStatus)
 }
+
+func TestAffiliateStatsWithdrawalStatusFiltersItemsOnlyAndKeepsPendingSummary(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Id: 77, Username: "available-only", Status: common.UserStatusEnabled, AffCode: "aff77"}).Error)
+	require.NoError(t, DB.Create(&User{Id: 78, Username: "pending-user", Status: common.UserStatusEnabled, AffCode: "aff78"}).Error)
+	require.NoError(t, DB.Create(&User{Id: 79, Username: "paid-user", Status: common.UserStatusEnabled, AffCode: "aff79"}).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{InviterUserId: 77, InviteeUserId: 880, TradeNo: "trade_available", BaseMoneyCents: 10000, RateBps: 1000, CommissionCents: 1000, Status: AffiliateCommissionStatusAvailable, CreatedTime: 1782518400}).Error)
+	require.NoError(t, DB.Create(&AffiliateWithdrawal{WithdrawalId: "affw_pending_filter", UserId: 78, AmountCents: 5000, Contact: "pending contact", Status: AffiliateWithdrawalStatusPending, CreatedTime: 1782600000}).Error)
+	require.NoError(t, DB.Create(&AffiliateWithdrawal{WithdrawalId: "affw_paid_filter", UserId: 79, AmountCents: 7000, Contact: "paid contact", Status: AffiliateWithdrawalStatusPaid, CreatedTime: 1782600001}).Error)
+
+	pendingResult, err := GetAffiliateStats(1782518400, 1782691199, AffiliateWithdrawalStatusPending, 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), pendingResult.Total)
+	require.Len(t, pendingResult.Items, 1)
+	assert.Equal(t, 78, pendingResult.Items[0].UserId)
+	require.NotNil(t, pendingResult.Items[0].Withdrawal)
+	assert.Equal(t, AffiliateWithdrawalStatusPending, pendingResult.Items[0].Withdrawal.Status)
+	assert.Equal(t, 1, pendingResult.Summary.PendingWithdrawalUserCount)
+	assert.Equal(t, int64(5000), pendingResult.Summary.PendingWithdrawalCents)
+
+	paidResult, err := GetAffiliateStats(1782518400, 1782691199, AffiliateWithdrawalStatusPaid, 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), paidResult.Total)
+	require.Len(t, paidResult.Items, 1)
+	assert.Equal(t, 79, paidResult.Items[0].UserId)
+	require.NotNil(t, paidResult.Items[0].Withdrawal)
+	assert.Equal(t, AffiliateWithdrawalStatusPaid, paidResult.Items[0].Withdrawal.Status)
+	assert.Equal(t, 1, paidResult.Summary.PendingWithdrawalUserCount)
+	assert.Equal(t, int64(5000), paidResult.Summary.PendingWithdrawalCents)
+}
+
+func TestAffiliateStatsExcludesRejectedCommissionsFromAmounts(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Id: 77, Username: "inviter", Status: common.UserStatusEnabled, AffCode: "aff77"}).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{InviterUserId: 77, InviteeUserId: 88, TradeNo: "trade_available", BaseMoneyCents: 10000, RateBps: 1000, CommissionCents: 1000, Status: AffiliateCommissionStatusAvailable, CreatedTime: 1782518400}).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{InviterUserId: 77, InviteeUserId: 89, TradeNo: "trade_rejected", BaseMoneyCents: 20000, RateBps: 1000, CommissionCents: 2000, Status: AffiliateCommissionStatusRejected, CreatedTime: 1782518500}).Error)
+
+	stats, err := GetAffiliateStats(1782518400, 1782691199, "", 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), stats.Summary.PeriodCommissionCents)
+	require.Len(t, stats.Items, 1)
+	assert.Equal(t, int64(1000), stats.Items[0].PeriodCommissionCents)
+	assert.Equal(t, int64(1000), stats.Items[0].TotalCommissionCents)
+
+	analytics, err := GetOrderManagementAnalytics(1782518400, 1782691199)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1000), analytics.Summary.AffiliateAmountCents)
+}
+
+func TestOrderManagementOrdersRejectsConflictingAffiliateFallbackMatch(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Id: 88, Username: "buyer", Status: common.UserStatusEnabled, AffCode: "aff88"}).Error)
+	require.NoError(t, DB.Create(&LdxpTopupSession{SessionId: "session_a", UserId: 88, TradeNo: "shared_trade", WorkerOrderNo: "LD260628CONFLICT", MailStatus: MailCheckStatusVerified, CreatedTime: 1782604800}).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{InviterUserId: 77, InviteeUserId: 88, SessionId: "session_b", TradeNo: "shared_trade", BaseMoneyCents: 42500, RateBps: 1500, CommissionCents: 6375, Status: AffiliateCommissionStatusAvailable, CreatedTime: 1782604800}).Error)
+
+	rows, total, err := ListOrderManagementOrders(1782518400, 1782691199, "", "LD260628CONFLICT", 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, rows, 1)
+	assert.Equal(t, 0, rows[0].AffiliateInviterId)
+	assert.Equal(t, int64(0), rows[0].AffiliateCommissionCents)
+	assert.Empty(t, rows[0].AffiliateStatus)
+}

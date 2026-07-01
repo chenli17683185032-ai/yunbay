@@ -259,8 +259,9 @@ type OrderManagementOrderRow struct {
 
 func GetOrderManagementAnalytics(startTime, endTime int64) (*OrderAnalyticsResult, error) {
 	var sessions []LdxpTopupSession
-	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).
-		Order("created_time ASC").Find(&sessions).Error; err != nil {
+	if err := DB.Select("id", "site_amount_cents", "external_paid_cents", "mail_status", "created_time").
+		Where("created_time >= ? AND created_time <= ?", startTime, endTime).
+		Order("created_time ASC, id ASC").Find(&sessions).Error; err != nil {
 		return nil, err
 	}
 
@@ -303,7 +304,8 @@ func GetOrderManagementAnalytics(startTime, endTime int64) (*OrderAnalyticsResul
 	sort.Slice(result.Daily, func(i, j int) bool { return result.Daily[i].Date < result.Daily[j].Date })
 
 	var commissions []AffiliateCommission
-	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).Find(&commissions).Error; err != nil {
+	if err := DB.Select("inviter_user_id", "commission_cents", "status", "created_time").
+		Where("created_time >= ? AND created_time <= ?", startTime, endTime).Find(&commissions).Error; err != nil {
 		return nil, err
 	}
 	inviterSet := make(map[int]struct{})
@@ -311,12 +313,15 @@ func GetOrderManagementAnalytics(startTime, endTime int64) (*OrderAnalyticsResul
 		if commission.InviterUserId > 0 {
 			inviterSet[commission.InviterUserId] = struct{}{}
 		}
-		result.Summary.AffiliateAmountCents += commission.CommissionCents
+		if shouldCountAffiliateCommissionAmount(commission.Status) {
+			result.Summary.AffiliateAmountCents += commission.CommissionCents
+		}
 	}
 	result.Summary.AffiliateUserCount = len(inviterSet)
 
 	var withdrawals []AffiliateWithdrawal
-	if err := DB.Where("created_time >= ? AND created_time <= ? AND status = ?", startTime, endTime, AffiliateWithdrawalStatusPending).Find(&withdrawals).Error; err != nil {
+	if err := DB.Select("amount_cents").
+		Where("created_time >= ? AND created_time <= ? AND status = ?", startTime, endTime, AffiliateWithdrawalStatusPending).Find(&withdrawals).Error; err != nil {
 		return nil, err
 	}
 	result.Summary.PendingWithdrawalCount = len(withdrawals)
@@ -330,34 +335,48 @@ func GetOrderManagementAnalytics(startTime, endTime int64) (*OrderAnalyticsResul
 func GetAffiliateStats(startTime, endTime int64, withdrawalStatus string, offset int, limit int) (*AffiliateStatsResult, error) {
 	offset, limit = normalizeOffsetLimit(offset, limit, 20, 100)
 	result := &AffiliateStatsResult{}
-	userSet := make(map[int]struct{})
+	summaryUserSet := make(map[int]struct{})
+	itemUserSet := make(map[int]struct{})
 	periodByUser := make(map[int]int64)
 	totalByUser := make(map[int]int64)
 	availableByUser := make(map[int]int64)
 	withdrawnByUser := make(map[int]int64)
 
 	var periodCommissions []AffiliateCommission
-	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).Find(&periodCommissions).Error; err != nil {
+	if err := DB.Select("inviter_user_id", "commission_cents", "status", "created_time").
+		Where("created_time >= ? AND created_time <= ?", startTime, endTime).Find(&periodCommissions).Error; err != nil {
 		return nil, err
 	}
 	for _, commission := range periodCommissions {
 		if commission.InviterUserId <= 0 {
 			continue
 		}
-		userSet[commission.InviterUserId] = struct{}{}
+		summaryUserSet[commission.InviterUserId] = struct{}{}
+		if withdrawalStatus == "" {
+			itemUserSet[commission.InviterUserId] = struct{}{}
+		}
+		if !shouldCountAffiliateCommissionAmount(commission.Status) {
+			continue
+		}
 		periodByUser[commission.InviterUserId] += commission.CommissionCents
 		result.Summary.PeriodCommissionCents += commission.CommissionCents
 	}
 
 	var allCommissions []AffiliateCommission
-	if err := DB.Find(&allCommissions).Error; err != nil {
+	if err := DB.Select("inviter_user_id", "commission_cents", "status").Find(&allCommissions).Error; err != nil {
 		return nil, err
 	}
 	for _, commission := range allCommissions {
 		if commission.InviterUserId <= 0 {
 			continue
 		}
-		userSet[commission.InviterUserId] = struct{}{}
+		summaryUserSet[commission.InviterUserId] = struct{}{}
+		if withdrawalStatus == "" {
+			itemUserSet[commission.InviterUserId] = struct{}{}
+		}
+		if !shouldCountAffiliateCommissionAmount(commission.Status) {
+			continue
+		}
 		totalByUser[commission.InviterUserId] += commission.CommissionCents
 		switch commission.Status {
 		case AffiliateCommissionStatusAvailable:
@@ -367,7 +386,8 @@ func GetAffiliateStats(startTime, endTime int64, withdrawalStatus string, offset
 		}
 	}
 
-	withdrawalQuery := DB.Order("created_time DESC")
+	withdrawalQuery := DB.Select("id", "withdrawal_id", "user_id", "amount_cents", "contact", "remark", "status", "created_time", "admin_remark", "processed_time").
+		Order("created_time DESC, id DESC")
 	if withdrawalStatus != "" {
 		withdrawalQuery = withdrawalQuery.Where("status = ?", withdrawalStatus)
 	}
@@ -380,14 +400,16 @@ func GetAffiliateStats(startTime, endTime int64, withdrawalStatus string, offset
 		if withdrawal.UserId <= 0 {
 			continue
 		}
-		userSet[withdrawal.UserId] = struct{}{}
+		summaryUserSet[withdrawal.UserId] = struct{}{}
+		itemUserSet[withdrawal.UserId] = struct{}{}
 		if _, ok := latestWithdrawalByUser[withdrawal.UserId]; !ok {
 			latestWithdrawalByUser[withdrawal.UserId] = withdrawal
 		}
 	}
 
 	var pendingWithdrawals []AffiliateWithdrawal
-	if err := DB.Where("status = ?", AffiliateWithdrawalStatusPending).Find(&pendingWithdrawals).Error; err != nil {
+	if err := DB.Select("user_id", "amount_cents").
+		Where("status = ?", AffiliateWithdrawalStatusPending).Find(&pendingWithdrawals).Error; err != nil {
 		return nil, err
 	}
 	pendingWithdrawalUsers := make(map[int]struct{})
@@ -395,21 +417,26 @@ func GetAffiliateStats(startTime, endTime int64, withdrawalStatus string, offset
 		if withdrawal.UserId <= 0 {
 			continue
 		}
-		userSet[withdrawal.UserId] = struct{}{}
+		summaryUserSet[withdrawal.UserId] = struct{}{}
+		if withdrawalStatus == "" {
+			itemUserSet[withdrawal.UserId] = struct{}{}
+		}
 		pendingWithdrawalUsers[withdrawal.UserId] = struct{}{}
 		result.Summary.PendingWithdrawalCents += withdrawal.AmountCents
 	}
 	result.Summary.PendingWithdrawalUserCount = len(pendingWithdrawalUsers)
 
-	ids := sortedIntKeys(userSet)
-	result.Summary.AffiliateUserCount = len(ids)
-	for _, id := range ids {
+	summaryIDs := sortedIntKeys(summaryUserSet)
+	result.Summary.AffiliateUserCount = len(summaryIDs)
+	for _, id := range summaryIDs {
 		if availableByUser[id] > 0 {
 			if _, hasPendingWithdrawal := pendingWithdrawalUsers[id]; !hasPendingWithdrawal {
 				result.Summary.AvailableWithoutWithdrawalUserCount++
 			}
 		}
 	}
+
+	ids := sortedIntKeys(itemUserSet)
 	result.Total = int64(len(ids))
 
 	pageIDs := paginateIntSlice(ids, offset, limit)
@@ -454,7 +481,7 @@ func ListOrderManagementOrders(startTime, endTime int64, mailStatus string, keyw
 	}
 
 	var sessions []LdxpTopupSession
-	if err := query.Order("created_time DESC").Offset(offset).Limit(limit).Find(&sessions).Error; err != nil {
+	if err := query.Order("created_time DESC, id DESC").Offset(offset).Limit(limit).Find(&sessions).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -515,7 +542,7 @@ func GetAffiliateSourceOrders(inviterUserId int, startTime int64, endTime int64,
 	_, limit = normalizeOffsetLimit(0, limit, 50, 200)
 	var commissions []AffiliateCommission
 	if err := DB.Where("inviter_user_id = ? AND created_time >= ? AND created_time <= ?", inviterUserId, startTime, endTime).
-		Order("created_time DESC").Limit(limit).Find(&commissions).Error; err != nil {
+		Order("created_time DESC, id DESC").Limit(limit).Find(&commissions).Error; err != nil {
 		return nil, err
 	}
 
@@ -573,6 +600,10 @@ func isOrderManagementMailErrorStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func shouldCountAffiliateCommissionAmount(status string) bool {
+	return status != AffiliateCommissionStatusRejected
 }
 
 func normalizeOffsetLimit(offset int, limit int, defaultLimit int, maxLimit int) (int, int) {
@@ -693,7 +724,7 @@ func getAffiliateCommissionsBySessionKeys(sessionIDs []string, tradeNos []string
 		return maps, nil
 	}
 	var commissions []AffiliateCommission
-	if err := query.Where(conditions).Order("created_time DESC").Find(&commissions).Error; err != nil {
+	if err := query.Where(conditions).Order("created_time DESC, id DESC").Find(&commissions).Error; err != nil {
 		return nil, err
 	}
 	for _, commission := range commissions {
@@ -719,17 +750,23 @@ func getAffiliateCommissionsBySessionKeys(sessionIDs []string, tradeNos []string
 func findCommissionForSession(maps *orderManagementCommissionMaps, session LdxpTopupSession) (AffiliateCommission, bool) {
 	if session.SessionId != "" {
 		if commission, ok := maps.bySessionId[session.SessionId]; ok {
-			return commission, true
+			if orderManagementKeysMatchWithoutConflict(session.SessionId, session.TradeNo, session.TopUpId, commission.SessionId, commission.TradeNo, commission.TopUpId) {
+				return commission, true
+			}
 		}
 	}
 	if session.TradeNo != "" {
 		if commission, ok := maps.byTradeNo[session.TradeNo]; ok {
-			return commission, true
+			if orderManagementKeysMatchWithoutConflict(session.SessionId, session.TradeNo, session.TopUpId, commission.SessionId, commission.TradeNo, commission.TopUpId) {
+				return commission, true
+			}
 		}
 	}
 	if session.TopUpId > 0 {
 		if commission, ok := maps.byTopUpId[session.TopUpId]; ok {
-			return commission, true
+			if orderManagementKeysMatchWithoutConflict(session.SessionId, session.TradeNo, session.TopUpId, commission.SessionId, commission.TradeNo, commission.TopUpId) {
+				return commission, true
+			}
 		}
 	}
 	return AffiliateCommission{}, false
@@ -774,7 +811,7 @@ func getTopupSessionsByKeys(sessionIDs []string, tradeNos []string, topupIDs []i
 		return maps, nil
 	}
 	var sessions []LdxpTopupSession
-	if err := query.Where(conditions).Order("created_time DESC").Find(&sessions).Error; err != nil {
+	if err := query.Where(conditions).Order("created_time DESC, id DESC").Find(&sessions).Error; err != nil {
 		return nil, err
 	}
 	for _, session := range sessions {
@@ -800,20 +837,49 @@ func getTopupSessionsByKeys(sessionIDs []string, tradeNos []string, topupIDs []i
 func findSessionForCommission(maps *orderManagementSessionMaps, commission AffiliateCommission) (LdxpTopupSession, bool) {
 	if commission.SessionId != "" {
 		if session, ok := maps.bySessionId[commission.SessionId]; ok {
-			return session, true
+			if orderManagementKeysMatchWithoutConflict(session.SessionId, session.TradeNo, session.TopUpId, commission.SessionId, commission.TradeNo, commission.TopUpId) {
+				return session, true
+			}
 		}
 	}
 	if commission.TradeNo != "" {
 		if session, ok := maps.byTradeNo[commission.TradeNo]; ok {
-			return session, true
+			if orderManagementKeysMatchWithoutConflict(session.SessionId, session.TradeNo, session.TopUpId, commission.SessionId, commission.TradeNo, commission.TopUpId) {
+				return session, true
+			}
 		}
 	}
 	if commission.TopUpId > 0 {
 		if session, ok := maps.byTopUpId[commission.TopUpId]; ok {
-			return session, true
+			if orderManagementKeysMatchWithoutConflict(session.SessionId, session.TradeNo, session.TopUpId, commission.SessionId, commission.TradeNo, commission.TopUpId) {
+				return session, true
+			}
 		}
 	}
 	return LdxpTopupSession{}, false
+}
+
+func orderManagementKeysMatchWithoutConflict(sessionID1 string, tradeNo1 string, topUpID1 int, sessionID2 string, tradeNo2 string, topUpID2 int) bool {
+	hasMatch := false
+	if sessionID1 != "" && sessionID2 != "" {
+		if sessionID1 != sessionID2 {
+			return false
+		}
+		hasMatch = true
+	}
+	if tradeNo1 != "" && tradeNo2 != "" {
+		if tradeNo1 != tradeNo2 {
+			return false
+		}
+		hasMatch = true
+	}
+	if topUpID1 > 0 && topUpID2 > 0 {
+		if topUpID1 != topUpID2 {
+			return false
+		}
+		hasMatch = true
+	}
+	return hasMatch
 }
 
 func firstNonEmpty(values ...string) string {
