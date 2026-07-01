@@ -43,10 +43,6 @@ func decodeModelPriceSyncRequest(c *gin.Context) (service.ModelPriceSyncRequest,
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "请求参数格式错误"})
 		return req, false
 	}
-	if req.OpenRouterChannelID <= 0 {
-		c.JSON(http.StatusOK, gin.H{"success": false, "message": "请选择 OpenRouter 渠道"})
-		return req, false
-	}
 	models := make([]string, 0, len(req.Models))
 	seen := make(map[string]struct{}, len(req.Models))
 	for _, rawModel := range req.Models {

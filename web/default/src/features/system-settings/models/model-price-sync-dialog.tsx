@@ -16,21 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { RefreshCcw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import {
   Table,
@@ -42,18 +34,12 @@ import {
 } from '@/components/ui/table'
 import { Dialog } from '@/components/dialog'
 import { StatusBadge } from '@/components/status-badge'
-import {
-  applyModelPriceSync,
-  getUpstreamChannels,
-  previewModelPriceSync,
-} from '../api'
+import { applyModelPriceSync, previewModelPriceSync } from '../api'
 import type {
   CanonicalModelPrice,
   ModelPriceSyncItem,
   ModelPriceSyncResult,
-  UpstreamChannel,
 } from '../types'
-import { OPENROUTER_CHANNEL_TYPE } from './constants'
 
 type ModelPriceSyncDialogProps = {
   open: boolean
@@ -139,13 +125,6 @@ function getStatusLabel(item: ModelPriceSyncItem): string {
   return 'Skipped'
 }
 
-function findDefaultOpenRouterChannel(channels: UpstreamChannel[]) {
-  return channels.find(
-    (channel) =>
-      channel.type === OPENROUTER_CHANNEL_TYPE && channel.status === 1
-  )
-}
-
 export function ModelPriceSyncDialog({
   open,
   onOpenChange,
@@ -154,35 +133,15 @@ export function ModelPriceSyncDialog({
 }: ModelPriceSyncDialogProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
-  const [selectedChannelId, setSelectedChannelId] = useState('')
   const [preview, setPreview] = useState<ModelPriceSyncResult | null>(null)
-
-  const { data: channelsData } = useQuery({
-    queryKey: ['upstream-channels'],
-    queryFn: getUpstreamChannels,
-    enabled: open,
-  })
-
-  const openRouterChannels = useMemo(
-    () =>
-      (channelsData?.data ?? []).filter(
-        (channel) => channel.type === OPENROUTER_CHANNEL_TYPE
-      ),
-    [channelsData?.data]
-  )
 
   useEffect(() => {
     if (!open) {
       setPreview(null)
-      return
     }
-    if (selectedChannelId || openRouterChannels.length === 0) return
-    const defaultChannel = findDefaultOpenRouterChannel(openRouterChannels)
-    setSelectedChannelId(String(defaultChannel?.id ?? openRouterChannels[0].id))
-  }, [open, openRouterChannels, selectedChannelId])
+  }, [open])
 
   const requestPayload = () => ({
-    openrouter_channel_id: Number(selectedChannelId),
     models: selectedModels,
   })
 
@@ -227,12 +186,12 @@ export function ModelPriceSyncDialog({
     },
   })
 
-  const canPreview = selectedModels.length > 0 && selectedChannelId !== ''
+  const canPreview = selectedModels.length > 0
   const canApply = Boolean(preview && preview.syncable > 0)
 
   const handlePreview = () => {
     if (!canPreview) {
-      toast.error(t('Select an OpenRouter channel first'))
+      toast.error(t('Select at least one target model'))
       return
     }
     previewMutation.mutate(requestPayload())
@@ -302,39 +261,6 @@ export function ModelPriceSyncDialog({
             )}
           </AlertDescription>
         </Alert>
-
-        <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
-          <span className='text-sm font-medium'>{t('OpenRouter channel')}</span>
-          <Select
-            value={selectedChannelId}
-            onValueChange={(value) => setSelectedChannelId(value ?? '')}
-          >
-            <SelectTrigger className='w-full sm:w-80'>
-              <SelectValue placeholder={t('Select an OpenRouter channel')} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {openRouterChannels.map((channel) => (
-                  <SelectItem key={channel.id} value={String(channel.id)}>
-                    {channel.name}
-                    {channel.status !== 1 ? ` (${t('Disabled')})` : ''}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {openRouterChannels.length === 0 && (
-          <Alert variant='destructive'>
-            <AlertTitle>{t('No OpenRouter channel found')}</AlertTitle>
-            <AlertDescription>
-              {t(
-                'Create an OpenRouter channel with an API key before syncing prices.'
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
 
         <div className='min-h-0 overflow-auto rounded-lg border'>
           <Table>

@@ -1,7 +1,10 @@
 package service
 
 import (
+	"context"
+	"io"
 	"math"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -48,6 +51,38 @@ func TestModelPriceSync_OpenRouterParserCoversCacheWriteDimensions(t *testing.T)
 	if price.WebSearch == nil || *price.WebSearch != 0.01 {
 		t.Fatalf("WebSearch = %#v, want 0.01", price.WebSearch)
 	}
+}
+
+func TestModelPriceSync_DefaultOpenRouterFetcherUsesPublicCatalogWithoutChannel(t *testing.T) {
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "https://openrouter.ai/api/v1/models" {
+			t.Fatalf("requested URL = %q, want OpenRouter public catalog", req.URL.String())
+		}
+		if got := req.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization header = %q, want empty for public catalog", got)
+		}
+		body := `{"data":[{"id":"openai/gpt-4.1","pricing":{"prompt":"0.000002","completion":"0.000008"}}]}`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})
+	defer func() {
+		http.DefaultTransport = originalTransport
+	}()
+
+	prices, err := defaultOpenRouterModelPriceFetcher{}.FetchOpenRouterModelPrices(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("FetchOpenRouterModelPrices without channel returned error: %v", err)
+	}
+
+	price := prices["openai/gpt-4.1"]
+	assertPrice(t, price.Input, 2)
+	assertPrice(t, price.Output, 8)
 }
 
 func TestModelPriceSync_MatchOpenRouterModelIDConservatively(t *testing.T) {
@@ -174,6 +209,12 @@ func assertPrice(t *testing.T, got *float64, want float64) {
 	if *got != want {
 		t.Fatalf("price = %v, want %v", *got, want)
 	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
 }
 
 type ratioJSONUpdates struct {

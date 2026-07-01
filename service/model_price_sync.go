@@ -21,6 +21,7 @@ import (
 
 const (
 	openRouterModelsPath         = "/v1/models"
+	openRouterPublicModelsURL    = "https://openrouter.ai/api" + openRouterModelsPath
 	modelPriceSyncMaxBodyBytes   = 10 << 20
 	modelPriceSyncRequestTimeout = 20 * time.Second
 )
@@ -535,7 +536,7 @@ func (defaultOfficialModelPriceProvider) OfficialModelPrices(ctx context.Context
 
 func (defaultOpenRouterModelPriceFetcher) FetchOpenRouterModelPrices(ctx context.Context, channelID int) (map[string]CanonicalModelPrice, error) {
 	if channelID <= 0 {
-		return nil, fmt.Errorf("openrouter channel is required")
+		return fetchOpenRouterModelPrices(ctx, openRouterPublicModelsURL, "")
 	}
 	channel, err := model.GetChannelById(channelID, true)
 	if err != nil {
@@ -558,14 +559,21 @@ func (defaultOpenRouterModelPriceFetcher) FetchOpenRouterModelPrices(ctx context
 		return nil, fmt.Errorf("OpenRouter channel has no base URL")
 	}
 
+	return fetchOpenRouterModelPrices(ctx, baseURL+openRouterModelsPath, key)
+}
+
+func fetchOpenRouterModelPrices(ctx context.Context, url string, key string) (map[string]CanonicalModelPrice, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, modelPriceSyncRequestTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, baseURL+openRouterModelsPath, nil)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
+	if strings.TrimSpace(key) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(key))
+	}
 	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "new-api/price-sync")
 
 	client := &http.Client{Timeout: modelPriceSyncRequestTimeout}
 	resp, err := client.Do(req)

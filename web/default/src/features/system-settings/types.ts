@@ -427,7 +427,7 @@ export type ModelPriceSyncItem = {
 }
 
 export type ModelPriceSyncRequest = {
-  openrouter_channel_id: number
+  openrouter_channel_id?: number
   models: string[]
 }
 
