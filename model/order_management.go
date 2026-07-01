@@ -88,11 +88,13 @@ type AffiliateCommission struct {
 	Status          string `json:"status" gorm:"type:varchar(32);index;default:'available'"`
 	CreatedTime     int64  `json:"created_time" gorm:"index"`
 	ConfirmedTime   int64  `json:"confirmed_time" gorm:"index;default:0"`
-	WithdrawalId    int    `json:"withdrawal_id" gorm:"index;default:0"`
+	// WithdrawalId links to affiliate_withdrawals.id as an internal numeric ID.
+	WithdrawalId int `json:"withdrawal_id" gorm:"index;default:0"`
 }
 
 type AffiliateWithdrawal struct {
-	Id            int    `json:"id"`
+	Id int `json:"id"`
+	// WithdrawalId is the withdrawal request business number for external display.
 	WithdrawalId  string `json:"withdrawal_id" gorm:"uniqueIndex;type:varchar(64)"`
 	UserId        int    `json:"user_id" gorm:"index"`
 	AmountCents   int64  `json:"amount_cents" gorm:"type:bigint;not null;default:0"`
