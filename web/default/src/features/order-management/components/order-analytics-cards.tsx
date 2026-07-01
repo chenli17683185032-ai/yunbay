@@ -111,7 +111,9 @@ export function OrderAnalyticsCards({
       <MetricCard
         title={t('Pending verification')}
         description={t('Pending mail')}
-        value={String(safeSummary.mail_pending_count + safeSummary.mail_error_count)}
+        value={String(
+          safeSummary.mail_pending_count + safeSummary.mail_error_count
+        )}
         isLoading={isLoading}
       />
     </div>

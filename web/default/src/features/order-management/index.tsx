@@ -23,23 +23,23 @@ import { RefreshIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
-import { buildOrderManagementRangeParams } from './lib/range'
+import { SectionPageLayout } from '@/components/layout'
 import {
   getOrderAnalytics,
   getOrderManagementOrders,
   startBatchMailCheck,
   startSingleMailCheck,
 } from './api'
+import { AffiliateStatsSection } from './components/affiliate-stats-section'
 import { OrderAnalyticsCards } from './components/order-analytics-cards'
 import { OrderDetailsTable } from './components/order-details-table'
 import { OrderTrendChart } from './components/order-trend-chart'
 import { RangeToolbar } from './components/range-toolbar'
+import { buildOrderManagementRangeParams } from './lib/range'
 import type { DateRangeKey, MailCheckStatus } from './types'
 
 const route = getRouteApi('/_authenticated/order-management/')
-
 
 const MAIL_CHECK_STATUSES = new Set<MailCheckStatus>([
   'not_required',
@@ -55,7 +55,10 @@ const MAIL_CHECK_STATUSES = new Set<MailCheckStatus>([
 ])
 
 function isMailCheckStatus(value: unknown): value is MailCheckStatus {
-  return typeof value === 'string' && MAIL_CHECK_STATUSES.has(value as MailCheckStatus)
+  return (
+    typeof value === 'string' &&
+    MAIL_CHECK_STATUSES.has(value as MailCheckStatus)
+  )
 }
 
 const orderManagementKeys = {
@@ -101,7 +104,8 @@ export function OrderManagement() {
 
   const range: DateRangeKey = isDateRangeKey(search.range) ? search.range : '7d'
   const page = search.page && search.page > 0 ? search.page : 1
-  const pageSize = search.page_size && search.page_size > 0 ? search.page_size : 20
+  const pageSize =
+    search.page_size && search.page_size > 0 ? search.page_size : 20
   const startTime = toDefinedSearchNumber(search.start_time)
   const endTime = toDefinedSearchNumber(search.end_time)
   const mailStatus = isMailCheckStatus(search.mail_status)
@@ -128,7 +132,8 @@ export function OrderManagement() {
     queryKey: orderManagementKeys.analytics(rangeParams),
     queryFn: async () => {
       const result = await getOrderAnalytics(rangeParams)
-      if (!result.success) throw new Error(result.message || t('Request failed'))
+      if (!result.success)
+        throw new Error(result.message || t('Request failed'))
       return result.data
     },
   })
@@ -137,7 +142,8 @@ export function OrderManagement() {
     queryKey: orderManagementKeys.orders(orderParams),
     queryFn: async () => {
       const result = await getOrderManagementOrders(orderParams)
-      if (!result.success) throw new Error(result.message || t('Request failed'))
+      if (!result.success)
+        throw new Error(result.message || t('Request failed'))
       return result.data
     },
     placeholderData: (previousData) => previousData,
@@ -145,9 +151,15 @@ export function OrderManagement() {
 
   const invalidateOrderManagement = useCallback(async () => {
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['order-management', 'analytics'] }),
-      queryClient.invalidateQueries({ queryKey: ['order-management', 'orders'] }),
-      queryClient.invalidateQueries({ queryKey: ['order-management', 'affiliate'] }),
+      queryClient.invalidateQueries({
+        queryKey: ['order-management', 'analytics'],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['order-management', 'orders'],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['order-management', 'affiliate'],
+      }),
     ])
   }, [queryClient])
 
@@ -306,6 +318,13 @@ export function OrderManagement() {
             pageSize={pageSize}
             onPageChange={handlePageChange}
             onVerify={(id) => singleMailCheckMutation.mutate(id)}
+          />
+
+          <AffiliateStatsSection
+            range={range}
+            startTime={startTime}
+            endTime={endTime}
+            onChanged={invalidateOrderManagement}
           />
         </div>
       </SectionPageLayout.Content>

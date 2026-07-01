@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  formatBpsRate,
   formatCny,
   formatPercentRate,
   formatUnixTime,
@@ -52,9 +53,13 @@ test('unknown mail status is not treated as an error', () => {
   assert.equal(isMailStatusError('custom_unknown'), false)
 })
 
-
 test('formatUnixTime handles empty and unix seconds', () => {
   assert.equal(formatUnixTime(), '-')
   assert.notEqual(formatUnixTime(1782589062), '-')
   assert.match(formatUnixTime(1782589062), /2026/)
+})
+
+test('formatBpsRate renders basis points as percent', () => {
+  assert.equal(formatBpsRate(1250), '12.50%')
+  assert.equal(formatBpsRate(0), '0.00%')
 })

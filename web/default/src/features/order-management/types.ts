@@ -155,7 +155,6 @@ export interface AffiliateStatsItem {
   withdrawal: AffiliateWithdrawal | null
 }
 
-
 export interface AffiliateSourceOrder {
   order_time: number
   invitee_user_id: number

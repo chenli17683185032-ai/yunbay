@@ -52,11 +52,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import {
-  formatCny,
-  formatUnixTime,
-  isMailStatusError,
-} from '../lib/format'
+import { formatCny, formatUnixTime, isMailStatusError } from '../lib/format'
 import type { OrderManagementOrderItem, PageData } from '../types'
 import { MailCheckStatusBadge } from './mail-check-status-badge'
 
@@ -219,7 +215,8 @@ export function OrderDetailsTable({
                         variant='outline'
                         size='sm'
                         disabled={
-                          row.mail_status === 'checking' || verifyingId === row.id
+                          row.mail_status === 'checking' ||
+                          verifyingId === row.id
                         }
                         onClick={() => onVerify(row.id)}
                       >

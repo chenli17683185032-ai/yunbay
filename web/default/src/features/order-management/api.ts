@@ -39,8 +39,7 @@ export interface OrderManagementRangeParams {
   end_time?: string | number
 }
 
-export interface GetOrderManagementOrdersParams
-  extends OrderManagementRangeParams {
+export interface GetOrderManagementOrdersParams extends OrderManagementRangeParams {
   page?: number
   page_size?: number
   mail_status?: MailCheckStatus
@@ -99,7 +98,8 @@ export async function startBatchMailCheck(
     ...payload,
     start_time:
       payload.start_time === undefined ? undefined : String(payload.start_time),
-    end_time: payload.end_time === undefined ? undefined : String(payload.end_time),
+    end_time:
+      payload.end_time === undefined ? undefined : String(payload.end_time),
   }
   const res = await api.post(
     '/api/order-management/admin/mail-check',

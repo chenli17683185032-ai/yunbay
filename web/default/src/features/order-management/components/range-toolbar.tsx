@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Download01Icon, Mail01Icon, RefreshIcon } from '@hugeicons/core-free-icons'
+import {
+  Download01Icon,
+  Mail01Icon,
+  RefreshIcon,
+} from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { formatTimestampForInput, parseTimestampFromInput } from '@/lib/format'
@@ -155,7 +159,12 @@ export function RangeToolbar({
               )}
               {t('Verify unfinished orders now')}
             </Button>
-            <Button type='button' variant='outline' size='sm' onClick={onExportCsv}>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              onClick={onExportCsv}
+            >
               <HugeiconsIcon icon={Download01Icon} data-icon='inline-start' />
               {t('Export CSV')}
             </Button>
