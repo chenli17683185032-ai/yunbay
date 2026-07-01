@@ -890,3 +890,39 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+type OrderMailCheckBatchFilter struct {
+	StartTime int64
+	EndTime   int64
+	Limit     int
+}
+
+func ListMailCheckCandidates(filter OrderMailCheckBatchFilter) ([]LdxpTopupSession, error) {
+	limit := filter.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	query := DB.Where("mail_status IN ?", []string{MailCheckStatusPending, MailCheckStatusWaitingMail, MailCheckStatusAmountMismatch, MailCheckStatusOrderMismatch, MailCheckStatusMailFetchFailed, MailCheckStatusMailParseFailed, MailCheckStatusTimeout})
+	if filter.StartTime > 0 {
+		query = query.Where("created_time >= ?", filter.StartTime)
+	}
+	if filter.EndTime > 0 {
+		query = query.Where("created_time <= ?", filter.EndTime)
+	}
+	var sessions []LdxpTopupSession
+	err := query.Order("created_time DESC, id DESC").Limit(limit).Find(&sessions).Error
+	return sessions, err
+}
+
+func TruncateOrderManagementTablesForTest(t interface {
+	Helper()
+	Cleanup(func())
+}) {
+	t.Helper()
+	t.Cleanup(func() {
+		DB.Exec("DELETE FROM ldxp_topup_sessions")
+		DB.Exec("DELETE FROM ldxp_mail_events")
+		DB.Exec("DELETE FROM affiliate_commissions")
+		DB.Exec("DELETE FROM affiliate_withdrawals")
+	})
+}
