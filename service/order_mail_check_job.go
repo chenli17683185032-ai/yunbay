@@ -2,20 +2,26 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"gorm.io/gorm"
 )
 
 const (
 	orderMailCheckJobStatusRunning  = "running"
 	orderMailCheckJobStatusFinished = "finished"
 	orderMailCheckJobStatusFailed   = "failed"
+
+	orderMailCheckJobTimeoutSeconds   = 30
+	orderMailCheckJobRetentionSeconds = 600
+	orderMailCheckMaxJobs             = 1000
 )
+
+var defaultOrderMailCheckRunner = NewOrderMailCheckRunner(StoredLdxpMailSource{})
 
 type OrderMailCheckResult struct {
 	JobId         string
@@ -46,13 +52,15 @@ func NewOrderMailCheckRunner(source LdxpMailSource) *OrderMailCheckRunner {
 }
 
 func DefaultOrderMailCheckRunner() *OrderMailCheckRunner {
-	return NewOrderMailCheckRunner(StoredLdxpMailSource{})
+	return defaultOrderMailCheckRunner
 }
 
 func (r *OrderMailCheckRunner) StartSingle(ctx context.Context, sessionId int) *OrderMailCheckJobStatus {
 	job := r.createJob()
 	go func() {
-		result := r.RunSingle(ctx, sessionId)
+		jobCtx, cancel := context.WithTimeout(context.Background(), time.Duration(orderMailCheckJobTimeoutSeconds)*time.Second)
+		defer cancel()
+		result := r.RunSingle(jobCtx, sessionId)
 		r.finishJob(job.JobId, result)
 	}()
 	return job
@@ -61,7 +69,9 @@ func (r *OrderMailCheckRunner) StartSingle(ctx context.Context, sessionId int) *
 func (r *OrderMailCheckRunner) StartBatch(ctx context.Context, filter model.OrderMailCheckBatchFilter) *OrderMailCheckJobStatus {
 	job := r.createJob()
 	go func() {
-		result := r.RunBatch(ctx, filter)
+		jobCtx, cancel := context.WithTimeout(context.Background(), time.Duration(orderMailCheckJobTimeoutSeconds)*time.Second)
+		defer cancel()
+		result := r.RunBatch(jobCtx, filter)
 		r.finishJob(job.JobId, result)
 	}()
 	return job
@@ -87,7 +97,7 @@ func (r *OrderMailCheckRunner) RunSingle(ctx context.Context, sessionId int) Ord
 }
 
 func (r *OrderMailCheckRunner) RunBatch(ctx context.Context, filter model.OrderMailCheckBatchFilter) OrderMailCheckResult {
-	sessions, err := model.ListMailCheckCandidates(filter)
+	sessions, err := model.ListMailCheckCandidatesWithContext(ctx, filter)
 	if err != nil {
 		return OrderMailCheckResult{Error: err}
 	}
@@ -95,15 +105,50 @@ func (r *OrderMailCheckRunner) RunBatch(ctx context.Context, filter model.OrderM
 }
 
 func (r *OrderMailCheckRunner) createJob() *OrderMailCheckJobStatus {
+	now := common.GetTimestamp()
 	job := &OrderMailCheckJobStatus{
-		JobId:       strconv.FormatInt(time.Now().UnixNano(), 10),
 		Status:      orderMailCheckJobStatusRunning,
-		CreatedTime: common.GetTimestamp(),
+		CreatedTime: now,
 	}
+
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cleanupJobsLocked(now)
+	id := time.Now().UnixNano()
+	for {
+		job.JobId = strconv.FormatInt(id, 10)
+		if _, exists := r.jobs[job.JobId]; !exists {
+			break
+		}
+		id++
+	}
 	r.jobs[job.JobId] = job
-	r.mu.Unlock()
 	return job
+}
+
+func (r *OrderMailCheckRunner) cleanupJobsLocked(now int64) {
+	if len(r.jobs) == 0 {
+		return
+	}
+	for jobId, job := range r.jobs {
+		if job.Status == orderMailCheckJobStatusRunning {
+			continue
+		}
+		if job.FinishedTime > 0 && now-job.FinishedTime >= orderMailCheckJobRetentionSeconds {
+			delete(r.jobs, jobId)
+		}
+	}
+	if len(r.jobs) <= orderMailCheckMaxJobs {
+		return
+	}
+	for jobId, job := range r.jobs {
+		if len(r.jobs) <= orderMailCheckMaxJobs {
+			return
+		}
+		if job.Status != orderMailCheckJobStatusRunning {
+			delete(r.jobs, jobId)
+		}
+	}
 }
 
 func (r *OrderMailCheckRunner) finishJob(jobId string, result OrderMailCheckResult) {
@@ -129,7 +174,8 @@ func (r *OrderMailCheckRunner) verifySessions(ctx context.Context, sessions []mo
 	}
 	mails, err := r.source.FetchRecent(ctx)
 	if err != nil {
-		return OrderMailCheckResult{AffectedCount: r.markFetchFailed(ctx, sessions, err), Error: err}
+		affected, updateErr := r.markFetchFailed(ctx, sessions, err)
+		return OrderMailCheckResult{AffectedCount: affected, Error: errors.Join(err, updateErr)}
 	}
 
 	mailByOrder := make(map[string]*model.LdxpMailEvent)
@@ -143,20 +189,24 @@ func (r *OrderMailCheckRunner) verifySessions(ctx context.Context, sessions []mo
 	}
 
 	affected := 0
+	db := model.DB.WithContext(ctx)
 	for _, session := range sessions {
 		affected++
-		db := model.DB.WithContext(ctx)
-		db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(map[string]interface{}{
+		if err := db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(map[string]interface{}{
 			"mail_status": model.MailCheckStatusChecking,
-		})
+		}).Error; err != nil {
+			return OrderMailCheckResult{AffectedCount: affected, Error: err}
+		}
 
 		mail := mailByOrder[session.WorkerOrderNo]
 		if mail == nil {
-			db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(map[string]interface{}{
+			if err := db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(map[string]interface{}{
 				"mail_status":   model.MailCheckStatusWaitingMail,
 				"error_code":    "waiting_mail",
 				"error_message": "未找到匹配订单确认邮件",
-			})
+			}).Error; err != nil {
+				return OrderMailCheckResult{AffectedCount: affected, Error: err}
+			}
 			continue
 		}
 
@@ -180,12 +230,14 @@ func (r *OrderMailCheckRunner) verifySessions(ctx context.Context, sessions []mo
 		if verification.Status == model.MailCheckStatusVerified {
 			updates["verified_time"] = common.GetTimestamp()
 		}
-		db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates)
+		if err := db.Model(&model.LdxpTopupSession{}).Where("id = ?", session.Id).Updates(updates).Error; err != nil {
+			return OrderMailCheckResult{AffectedCount: affected, Error: err}
+		}
 	}
 	return OrderMailCheckResult{AffectedCount: affected}
 }
 
-func (r *OrderMailCheckRunner) markFetchFailed(ctx context.Context, sessions []model.LdxpTopupSession, fetchErr error) int {
+func (r *OrderMailCheckRunner) markFetchFailed(ctx context.Context, sessions []model.LdxpTopupSession, fetchErr error) (int, error) {
 	affected := 0
 	db := model.DB.WithContext(ctx)
 	for _, session := range sessions {
@@ -194,9 +246,10 @@ func (r *OrderMailCheckRunner) markFetchFailed(ctx context.Context, sessions []m
 			"error_code":    "mail_fetch_failed",
 			"error_message": fetchErr.Error(),
 		})
-		if result.Error == nil || result.Error == gorm.ErrRecordNotFound {
-			affected++
+		if result.Error != nil {
+			return affected, result.Error
 		}
+		affected++
 	}
-	return affected
+	return affected, nil
 }

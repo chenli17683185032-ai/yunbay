@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"strings"
@@ -898,11 +899,15 @@ type OrderMailCheckBatchFilter struct {
 }
 
 func ListMailCheckCandidates(filter OrderMailCheckBatchFilter) ([]LdxpTopupSession, error) {
+	return ListMailCheckCandidatesWithContext(context.Background(), filter)
+}
+
+func ListMailCheckCandidatesWithContext(ctx context.Context, filter OrderMailCheckBatchFilter) ([]LdxpTopupSession, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	query := DB.Where("mail_status IN ?", []string{MailCheckStatusPending, MailCheckStatusWaitingMail, MailCheckStatusAmountMismatch, MailCheckStatusOrderMismatch, MailCheckStatusMailFetchFailed, MailCheckStatusMailParseFailed, MailCheckStatusTimeout})
+	query := DB.WithContext(ctx).Where("mail_status IN ?", []string{MailCheckStatusPending, MailCheckStatusWaitingMail, MailCheckStatusAmountMismatch, MailCheckStatusOrderMismatch, MailCheckStatusMailFetchFailed, MailCheckStatusMailParseFailed, MailCheckStatusTimeout})
 	if filter.StartTime > 0 {
 		query = query.Where("created_time >= ?", filter.StartTime)
 	}
@@ -919,10 +924,13 @@ func TruncateOrderManagementTablesForTest(t interface {
 	Cleanup(func())
 }) {
 	t.Helper()
-	t.Cleanup(func() {
-		DB.Exec("DELETE FROM ldxp_topup_sessions")
-		DB.Exec("DELETE FROM ldxp_mail_events")
-		DB.Exec("DELETE FROM affiliate_commissions")
-		DB.Exec("DELETE FROM affiliate_withdrawals")
-	})
+	truncateOrderManagementTablesForTest()
+	t.Cleanup(truncateOrderManagementTablesForTest)
+}
+
+func truncateOrderManagementTablesForTest() {
+	DB.Exec("DELETE FROM ldxp_topup_sessions")
+	DB.Exec("DELETE FROM ldxp_mail_events")
+	DB.Exec("DELETE FROM affiliate_commissions")
+	DB.Exec("DELETE FROM affiliate_withdrawals")
 }
