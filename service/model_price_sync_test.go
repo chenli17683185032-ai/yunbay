@@ -152,6 +152,41 @@ func TestModelPriceSync_MergeUsesHigherPricePerDimensionAndBuildsExpr(t *testing
 	}
 }
 
+func TestModelPriceSync_BuildPreviewUsesOfficialPriceWhenOpenRouterMissing(t *testing.T) {
+	result := buildModelPriceSyncPreview(
+		[]string{"gpt-image-2"},
+		[]model.Pricing{{ModelName: "gpt-image-2"}},
+		map[string]CanonicalModelPrice{},
+		map[string]CanonicalModelPrice{
+			"gpt-image-2": {
+				Input:     ptrFloat(5),
+				Output:    ptrFloat(30),
+				CacheRead: ptrFloat(1.25),
+			},
+		},
+	)
+
+	if result.Syncable != 1 {
+		t.Fatalf("Syncable = %d, want 1; result = %#v", result.Syncable, result)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("Items length = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Status != "ready" {
+		t.Fatalf("Status = %q, want ready; reason = %q", item.Status, item.Reason)
+	}
+	if item.OpenRouterID != "" {
+		t.Fatalf("OpenRouterID = %q, want empty for official-only match", item.OpenRouterID)
+	}
+	assertPrice(t, item.Final.Input, 5)
+	assertPrice(t, item.Final.Output, 30)
+	assertPrice(t, item.Final.CacheRead, 1.25)
+	if !strings.Contains(item.BillingExpr, "p * 5") || !strings.Contains(item.BillingExpr, "c * 30") {
+		t.Fatalf("BillingExpr = %q, want official prices", item.BillingExpr)
+	}
+}
+
 func TestModelPriceSync_ModelsDevParserMergesDuplicateOfficialPricesByHigherDimension(t *testing.T) {
 	body := `{
 		"anthropic": {

@@ -628,7 +628,12 @@ func buildModelPriceSyncPreview(requested []string, catalog []model.Pricing, ope
 		}
 
 		match, hasMatch := matches[modelName]
+		official := FindCanonicalPriceForModel(modelName, officialPrices)
 		if !hasMatch || match.Status != "matched" {
+			if official.hasAnyBillablePrice() {
+				appendModelPriceSyncReadyItem(&items, modelName, "", pricing, official, CanonicalModelPrice{}, official)
+				continue
+			}
 			reason := "no_openrouter_match"
 			if hasMatch && match.Reason != "" {
 				reason = match.Reason
@@ -636,44 +641,15 @@ func buildModelPriceSyncPreview(requested []string, catalog []model.Pricing, ope
 			items = append(items, ModelPriceSyncItem{
 				ModelName: modelName,
 				Current:   CurrentCanonicalPriceFromPricing(pricing),
-				Official:  FindCanonicalPriceForModel(modelName, officialPrices),
+				Official:  official,
 				Status:    "skipped",
 				Reason:    reason,
 			})
 			continue
 		}
 
-		official := FindCanonicalPriceForModel(modelName, officialPrices)
 		final := MergeHigherPrices(official, match.Price)
-		expr, err := BuildBillingExprFromPrice(final)
-		if err != nil {
-			items = append(items, ModelPriceSyncItem{
-				ModelName:    modelName,
-				OpenRouterID: match.OpenRouterID,
-				Current:      CurrentCanonicalPriceFromPricing(pricing),
-				Official:     official,
-				OpenRouter:   match.Price,
-				Final:        final,
-				Status:       "skipped",
-				Reason:       "invalid_billing_expr: " + err.Error(),
-			})
-			continue
-		}
-
-		current := CurrentCanonicalPriceFromPricing(pricing)
-		items = append(items, ModelPriceSyncItem{
-			ModelName:     modelName,
-			OpenRouterID:  match.OpenRouterID,
-			Current:       current,
-			Official:      official,
-			OpenRouter:    match.Price,
-			Final:         final,
-			BillingExpr:   expr,
-			Status:        "ready",
-			SourceChoices: BuildModelPriceSourceChoices(official, match.Price, final),
-			WouldApply:    true,
-			Changed:       !CanonicalPricesEqual(current, final),
-		})
+		appendModelPriceSyncReadyItem(&items, modelName, match.OpenRouterID, pricing, official, match.Price, final)
 	}
 
 	sort.SliceStable(items, func(i, j int) bool { return items[i].ModelName < items[j].ModelName })
@@ -686,6 +662,38 @@ func buildModelPriceSyncPreview(requested []string, catalog []model.Pricing, ope
 		}
 	}
 	return result
+}
+
+func appendModelPriceSyncReadyItem(items *[]ModelPriceSyncItem, modelName string, openRouterID string, pricing model.Pricing, official CanonicalModelPrice, openRouter CanonicalModelPrice, final CanonicalModelPrice) {
+	expr, err := BuildBillingExprFromPrice(final)
+	if err != nil {
+		*items = append(*items, ModelPriceSyncItem{
+			ModelName:    modelName,
+			OpenRouterID: openRouterID,
+			Current:      CurrentCanonicalPriceFromPricing(pricing),
+			Official:     official,
+			OpenRouter:   openRouter,
+			Final:        final,
+			Status:       "skipped",
+			Reason:       "invalid_billing_expr: " + err.Error(),
+		})
+		return
+	}
+
+	current := CurrentCanonicalPriceFromPricing(pricing)
+	*items = append(*items, ModelPriceSyncItem{
+		ModelName:     modelName,
+		OpenRouterID:  openRouterID,
+		Current:       current,
+		Official:      official,
+		OpenRouter:    openRouter,
+		Final:         final,
+		BillingExpr:   expr,
+		Status:        "ready",
+		SourceChoices: BuildModelPriceSourceChoices(official, openRouter, final),
+		WouldApply:    true,
+		Changed:       !CanonicalPricesEqual(current, final),
+	})
 }
 
 func BuildModelPriceSourceChoices(official CanonicalModelPrice, openRouter CanonicalModelPrice, final CanonicalModelPrice) []ModelPriceSourceChoice {
