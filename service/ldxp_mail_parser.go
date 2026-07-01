@@ -3,7 +3,9 @@ package service
 import (
 	"errors"
 	"fmt"
+	"html"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,27 +22,32 @@ type ParsedLdxpMail struct {
 }
 
 var (
-	mailBRTagRegexp       = regexp.MustCompile(`(?i)<br\s*/?>`)
+	mailBlockTagRegexp    = regexp.MustCompile(`(?i)</?(?:br|p|div|tr|li)\b[^>]*>`)
 	mailHTMLTagRegexp     = regexp.MustCompile(`(?s)<[^>]*>`)
-	mailMoneyRegexp       = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
-	ldxpPaidRegexp        = regexp.MustCompile(`实付\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?)\s*元?`)
+	mailMoneyRegexp       = regexp.MustCompile(`^[[:space:] ]*([0-9]+(?:\.[0-9]{1,2})?)[[:space:] ]*(?:元)?[[:space:] ]*$`)
+	mailAnyMoneyRegexp    = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
+	ldxpPaidRegexp        = regexp.MustCompile(`实付\s*[:：]?\s*([0-9]+(?:\.[0-9]+)?\s*元?)`)
 	ldxpQuantityRegexp    = regexp.MustCompile(`数量\s*[:：]?\s*([0-9]+)\s*[，,]?`)
 	ldxpPaymentTimeRegexp = regexp.MustCompile(`付款时间\s*[:：]?\s*([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2})`)
 	ldxpOrderNoRegexp     = regexp.MustCompile(`单号\s*[:：]?\s*([^\s，,]+)`)
 )
 
 func MoneyTextToCents(input string) (int64, error) {
-	moneyText := mailMoneyRegexp.FindString(input)
-	if moneyText == "" {
-		return 0, fmt.Errorf("money amount missing: %q", input)
+	moneyInput := strings.ReplaceAll(html.UnescapeString(input), " ", " ")
+	moneyMatch := mailMoneyRegexp.FindStringSubmatch(moneyInput)
+	if len(moneyMatch) < 2 {
+		if mailAnyMoneyRegexp.FindString(moneyInput) == "" {
+			return 0, fmt.Errorf("money amount missing: %q", input)
+		}
+		return 0, fmt.Errorf("invalid money amount: %q", input)
 	}
 
-	amount, err := decimal.NewFromString(moneyText)
+	amount, err := decimal.NewFromString(moneyMatch[1])
 	if err != nil {
 		return 0, err
 	}
 
-	return amount.Mul(decimal.NewFromInt(100)).Round(0).IntPart(), nil
+	return amount.Mul(decimal.NewFromInt(100)).IntPart(), nil
 }
 
 func ParseLdxpOrderMail(raw string) (*ParsedLdxpMail, error) {
@@ -66,7 +73,9 @@ func ParseLdxpOrderMail(raw string) (*ParsedLdxpMail, error) {
 	}
 
 	if quantityMatch := ldxpQuantityRegexp.FindStringSubmatch(text); len(quantityMatch) >= 2 {
-		_, _ = fmt.Sscanf(quantityMatch[1], "%d", &mail.Quantity)
+		if quantity, err := strconv.Atoi(quantityMatch[1]); err == nil {
+			mail.Quantity = quantity
+		}
 	}
 
 	if timeMatch := ldxpPaymentTimeRegexp.FindStringSubmatch(text); len(timeMatch) >= 2 {
@@ -85,8 +94,10 @@ func ParseLdxpOrderMail(raw string) (*ParsedLdxpMail, error) {
 func normalizeMailText(raw string) string {
 	text := strings.ReplaceAll(raw, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
-	text = mailBRTagRegexp.ReplaceAllString(text, "\n")
+	text = mailBlockTagRegexp.ReplaceAllString(text, "\n")
 	text = mailHTMLTagRegexp.ReplaceAllString(text, "")
+	text = html.UnescapeString(text)
+	text = strings.ReplaceAll(text, "\u00a0", " ")
 	return text
 }
 
@@ -97,10 +108,13 @@ func extractLdxpProductName(text string) string {
 		return ""
 	}
 	rest := text[idx+len(prefix):]
-	if lineEnd := strings.IndexByte(rest, '\n'); lineEnd >= 0 {
-		rest = rest[:lineEnd]
+	end := len(rest)
+	for _, marker := range []string{"\n", "实付", "数量", "付款时间", "单号", "以下是您的购买内容"} {
+		if markerIdx := strings.Index(rest, marker); markerIdx >= 0 && markerIdx < end {
+			end = markerIdx
+		}
 	}
-	return strings.TrimSpace(rest)
+	return strings.TrimSpace(rest[:end])
 }
 
 func extractLdxpPurchaseContent(text string) string {
@@ -111,7 +125,13 @@ func extractLdxpPurchaseContent(text string) string {
 	}
 	content := text[idx+len(marker):]
 	content = strings.TrimLeft(content, " \t\n:：，,。.;；")
-	return strings.TrimSpace(content)
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func maskPurchaseContent(content string) string {
