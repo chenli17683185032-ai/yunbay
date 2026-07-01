@@ -203,6 +203,20 @@ func SetApiRouter(router *gin.Engine) {
 			subscriptionAdminRoute.DELETE("/user_subscriptions/:id", controller.AdminDeleteUserSubscription)
 		}
 
+		orderManagementAdminRoute := apiRouter.Group("/order-management/admin")
+		orderManagementAdminRoute.Use(middleware.AdminAuth())
+		{
+			orderManagementAdminRoute.GET("/analytics", controller.AdminOrderManagementAnalytics)
+			orderManagementAdminRoute.GET("/orders", controller.AdminOrderManagementOrders)
+			orderManagementAdminRoute.POST("/orders/:id/mail-check", controller.AdminOrderManagementOrderMailCheck)
+			orderManagementAdminRoute.POST("/mail-check", controller.AdminOrderManagementMailCheck)
+			orderManagementAdminRoute.GET("/mail-check/:job_id", controller.AdminOrderManagementMailCheckJob)
+			orderManagementAdminRoute.GET("/affiliate-stats", controller.AdminOrderManagementAffiliateStats)
+			orderManagementAdminRoute.GET("/affiliate-stats/:user_id/source-orders", controller.AdminAffiliateSourceOrders)
+			orderManagementAdminRoute.POST("/affiliate-withdrawals/:id/paid", controller.AdminAffiliateWithdrawalPaid)
+			orderManagementAdminRoute.POST("/affiliate-withdrawals/:id/reject", controller.AdminAffiliateWithdrawalReject)
+		}
+
 		// Subscription payment callbacks (no auth)
 		apiRouter.POST("/subscription/epay/notify", anonymousRequestBodyLimit, controller.SubscriptionEpayNotify)
 		apiRouter.GET("/subscription/epay/notify", controller.SubscriptionEpayNotify)

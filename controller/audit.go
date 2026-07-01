@@ -47,6 +47,11 @@ var auditContentTemplates = map[string]string{
 
 	"redemption.create": "Created ${count} ${kind} redemption codes named ${name} (${quota} each, amount ${amount}, money ${money}, count_as_topup ${count_as_topup}, source ${source}, batch ${batch_id})",
 	"redemption.export": "Exported ${count} redemption codes from batch ${batch_id} as ${format}",
+
+	"order.mail_check_single":     "Started mail verification for order ${order_id} (${job_id})",
+	"order.mail_check_batch":      "Started batch mail verification (${job_id}, range ${range}, limit ${limit})",
+	"affiliate.withdrawal_paid":   "Marked affiliate withdrawal ${withdrawal_id} as paid for user ${user_id} (${amount})",
+	"affiliate.withdrawal_reject": "Rejected affiliate withdrawal ${withdrawal_id} for user ${user_id} (${amount})",
 }
 
 // auditContentEN 按 action 模板渲染英文兜底文本；未登记的 action 退回 action 本身。

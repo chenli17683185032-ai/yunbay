@@ -173,9 +173,59 @@ docker run --name new-api -d --restart always \
 |------|------|
 | 🚀 Deployment Guide | [Installation Documentation](https://docs.newapi.pro/en/docs/installation) |
 | ⚙️ Environment Configuration | [Environment Variables](https://docs.newapi.pro/en/docs/installation/config-maintenance/environment-variables) |
+| 🛠️ Yunbay Maintenance | [README maintenance audit/log](#maintenance-audit-log) · [Repository maintenance notes, production sync notes, and usage logs compatibility](./docs/yunbay-maintenance.md) · [GitHub project context and PR queue](./.github/README.md) |
 | 📡 API Documentation | [API Documentation](https://docs.newapi.pro/en/docs/api) |
 | ❓ FAQ | [FAQ](https://docs.newapi.pro/en/docs/support/faq) |
 | 💬 Community Interaction | [Communication Channels](https://docs.newapi.pro/en/docs/support/community-interaction) |
+
+---
+
+<a id="maintenance-audit-log"></a>
+
+## 🛠️ 维护审计与持续维护日志
+
+本节是项目的**最终维护日志入口**。所有维护人员在完成一次维护、修复、上线、回滚、审计或生产同步后，都必须在本节末尾追加记录；**只能追加，不能复写、覆盖、删除或替换前面的历史内容**。如果之前的记录有误，请新增一条“更正记录”说明原因和正确结论，不要直接改写旧记录。
+
+### 维护记录追加规则
+
+每次维护完成后，请追加一条记录，并至少包含：
+
+- 日期与时区：使用 `YYYY-MM-DD`，默认按 `Asia/Shanghai` 记录。
+- 操作人：Git 作者、维护人或负责账号。
+- 分支与提交：记录维护所在分支、关键 commit hash；未提交时写明工作区状态。
+- 维护范围：列出涉及的模块、页面、接口、配置、部署目标或文档。
+- 验证结果：记录实际执行过的测试、构建、冒烟检查或生产验证命令及结果摘要。
+- 生产状态：说明是否已同步生产、是否需要重启服务、是否有回滚点。
+- 后续事项：记录遗留风险、待合并分支、待清理 worktree、待补测试或待复核项。
+
+> 维护完成后的硬性要求：**先验证，再记录；记录时追加到本节末尾；不要为了“整理格式”覆盖旧日志。**
+
+### 历史版本审计基线（2026-06-30）
+
+本次审计覆盖本地仓库当前可达的全部提交历史与本地/远端引用，审计基线如下：
+
+- 仓库状态：`git rev-parse --is-shallow-repository` 返回 `false`，当前不是浅克隆。
+- 审计范围：`git log --all`、`git for-each-ref refs/heads refs/remotes`、`git worktree list`、`git fsck --full --no-reflogs`。
+- 全引用提交数：`6066` 个提交；当前分支提交数：`5937` 个提交。
+- 历史范围：从 `2023-04-22` 的 `4cbef078`（`Initial commit`）到 `2026-06-30` 的 `83479b48`（`fix(router): register user group tags route`）。
+- 年度分布：`2023: 833`、`2024: 1154`、`2025: 2925`、`2026: 1154`。
+- 远端引用：`origin` 当前有 `10` 个 head、`0` 个 tag，本地 `origin/*` 与远端 head 已对齐。
+- 本地 tag：`0` 个。
+- 历史主题分布（按提交主题粗分类）：`feat: 1385`、`fix: 1332`、`docs: 162`、`refactor: 246`、`chore: 261`、其他历史提交 `2580`。
+- 主要变更热点（按历史触达提交粗分类）：后端 Go `2978`、relay/provider 适配 `1237`、model/db `697`、i18n `436`、docs/README `413`、tests `239`、infra/deploy `181`、`web/default` `203`。
+- 结构结论：历史上项目从上游基础能力演进到当前多前端、多 provider relay、数据库模型、生产部署与云贝本地维护并行的状态；当前维护需要同时关注后端兼容性、默认前端、i18n、生产同步文档和多个并行 Codex worktree/分支。
+- 风险结论：本地存在多个尚未合并到当前分支的 `codex/*` 维护分支与 worktree；删除、reset、clean、覆盖同步前必须确认对应分支是否已经合并、推送或另行备份。
+- 悬空提交：`git fsck` 发现 `5` 个 dangling commit（均为 2026-06-25 到 2026-06-29 的本地维护相关提交）。这些提交不可直接视为当前产品基线；如需恢复，必须先新建分支保存，再审查 diff。
+
+### 持续维护日志
+
+| 日期 | 操作人 | 分支 / 提交 | 维护范围 | 验证结果 | 生产状态 | 后续事项 |
+|------|--------|-------------|----------|----------|----------|----------|
+| 2026-06-30 | Codex | `codex/fix-usage-logs-stat-null` / `ff849d72`；全引用最新 `83479b48` | 审计全部可达 Git 历史、本地/远端引用、worktree、悬空提交；在 `README.md` 建立追加式最终维护日志 | 已执行 Git 历史统计、引用核对、worktree 清点、`git fsck --full --no-reflogs`；本次仅文档维护，未运行后端/前端构建 | 未同步生产；无服务重启 | 以后每次维护都必须在本表末尾追加记录；不要复写旧记录；合并或清理 `codex/*` 分支前先确认对应功能和生产状态 |
+| 2026-06-30 | Codex | `codex/fix-usage-logs-stat-null` / `0a420c3c` | 补提交已在生产执行并验证过的邮件链路维护文档：`docs/email-delivery.md`、`docs/yunbay-maintenance.md`、`infra/cloudflare-plan.md` | 已执行目标文档 diff 核对、敏感信息模式检查、`git diff --check`；提交 `docs: record yunbay email delivery setup` | 记录对应生产状态：Resend SMTP 出站、Cloudflare Email Routing 入站、应用发信验证、`yunbay-new-api` healthy；本次提交本身仅补仓库文档 | 后续邮件配置变更继续追加记录；不要写入 Resend API Key、SMTP Token、Cloudflare Token 或备份文件内容 |
+| 2026-06-30 | Codex | `codex/full-rollout-no-overlap-clean` / `83479b48`；公告实现 `59756734` | 补记全量上线与必读公告弹窗生产完成事实，修正旧设计文档中的“等待实现/落地”状态 | 已复核生产公开入口 `/`、`/api/status`、`/api/notice` 均为 HTTP 200；生产入口 JS `/static/js/index.599262f2f0.js` 包含 `I have read`、`我已阅读`、`notification-storage`、`markNoticeRead`、`markAnnouncementsRead` | 已完成生产同步；本次仓库维护只补文档事实，不重新部署服务 | 后续覆盖 wallet、Quick Start、公告、路由或分组逻辑前必须对照全量上线记录；Jeepay 与 Sub2API billing 仍不属于本轮完成范围 |
+| 2026-06-30 | Codex | 用户标签 `a1a38836` / `0f0ac266`；Claude 钱包灰测 `1ea932fd` | 补提交用户标签与模型分组分离设计、Claude 价格与钱包灰测设计，并修正旧状态为已生产同步/已生产灰测 | 已核对用户标签生产同步记录、用户标签接口与生产数据复核；已核对 Claude 钱包灰测记录、生产 smoke、bundle 脱敏字符串检查和 `jiance001` 灰测摘要 | 用户标签功能已同步生产并纳入全量上线；Claude 钱包改动已完成代码侧上线和灰测，但 Claude 真实价格 options 与 LDXP 折扣真实支付闭环保留后续变更窗口 | 后续不要把用户标签和模型分组混用；Claude/LDXP 扩大前必须备份 options/商品映射并追加维护记录 |
+| 2026-06-30 | Codex | `codex/fix-usage-logs-stat-null` / 本次 GitHub 文档维护提交；GitHub 仓库 `chenli17683185032-ai/yunbay` | 重新盘点 Git / GitHub 工作数量，并新增 `.github/README.md` 作为 GitHub 项目脉络、PR 队列和 workflow 维护入口 | 已执行 `git fetch --all --prune --tags`、`gh repo view`、`gh pr list`、`gh issue list`、分支/提交计数与 workflow 文件审阅；结果：全引用 `6071` 提交、当前 HEAD `5942` 提交、`origin/main` `5922` 提交、开放 Draft PR `7` 个、开放 issue `0` 个、workflow `7` 个、本地分支 `18` 个、远端 head `10` 个 | 本次仅维护 GitHub / README 文档，未同步生产、未重启服务；`infra/sub2api/**` 4 个未提交代码文件继续排除 | 推送当前分支前确认本地领先远端当前分支 `5` 个文档/维护提交；处理 PR 时优先看 `.github/README.md` 的队列关系，尤其 `#5` 冲突和 `#6 → #7` 依赖 |
 
 ---
 

@@ -23,6 +23,7 @@ import { buildSidebarData } from './sidebar-data-model'
 const zh: Record<string, string> = {
   'Getting Started': '开始',
   'AI Usage': 'AI 使用',
+  Data: 'Data',
   API: 'API',
   Wallet: '钱包',
   Account: '账户',
@@ -39,6 +40,7 @@ test('ordinary users see quick-start and required user functions only', () => {
   assert.deepEqual(groups.map((group) => group.title), [
     '开始',
     'AI 使用',
+    'Data',
     'API',
     '钱包',
     '账户',
@@ -53,12 +55,20 @@ test('ordinary users see quick-start and required user functions only', () => {
     [
       'Quick Start',
       'Playground',
-      'Chat',
-      'API Keys',
+      'Dashboard',
       'Usage Logs',
+      'API Keys',
       'Wallet / Top up',
       'Profile',
     ]
+  )
+  assert.equal(
+    items.some((item) => 'url' in item && item.url === '/dashboard/models'),
+    true
+  )
+  assert.equal(
+    items.some((item) => 'type' in item && item.type === 'chat-presets'),
+    false
   )
   assert.equal(
     items.some((item) => 'url' in item && item.url === '/wallet?section=redeem'),
@@ -68,11 +78,29 @@ test('ordinary users see quick-start and required user functions only', () => {
   assert.equal(items.some((item) => item.title === 'Rankings'), false)
   assert.equal(items.some((item) => item.title === 'Docs'), false)
   assert.equal(items.some((item) => item.title === 'About'), false)
+  assert.equal(
+    items.some((item) => 'url' in item && item.url === '/order-management'),
+    false
+  )
 })
 
-test('admin users keep the existing admin group', () => {
+test('admin users keep admin functions but lose the chat preset widget', () => {
   const groups = buildSidebarData(t, 10).navGroups
+  const items = groups.flatMap((group) => group.items)
 
   assert.equal(groups.some((group) => group.id === 'admin'), true)
   assert.equal(groups.some((group) => group.title === 'General'), true)
+  assert.equal(groups.some((group) => group.title === 'AI 使用'), true)
+  assert.equal(
+    items.some((item) => 'type' in item && item.type === 'chat-presets'),
+    false
+  )
+  assert.equal(
+    items.some((item) => 'url' in item && item.url === '/channels'),
+    true
+  )
+  assert.equal(
+    items.some((item) => 'url' in item && item.url === '/order-management'),
+    true
+  )
 })
