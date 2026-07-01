@@ -119,9 +119,11 @@ export interface MailCheckPayload {
   range?: DateRangeKey
   scope?: string
   limit?: number
-  start_time?: string | number
-  end_time?: string | number
+  start_time?: string
+  end_time?: string
 }
+
+export type AffiliateWithdrawalStatus = 'pending' | 'paid' | 'rejected'
 
 export interface AffiliateWithdrawal {
   id: number
@@ -129,7 +131,7 @@ export interface AffiliateWithdrawal {
   amount: number
   contact: string
   remark: string
-  status: string
+  status: AffiliateWithdrawalStatus
   created_time: number
   admin_remark: string
   processed_time: number
@@ -151,6 +153,19 @@ export interface AffiliateStatsItem {
   available_amount: number
   withdrawn_amount: number
   withdrawal: AffiliateWithdrawal | null
+}
+
+
+export interface AffiliateSourceOrder {
+  order_time: number
+  invitee_user_id: number
+  invitee_username: string
+  trade_no: string
+  worker_order_no: string
+  base_money: number
+  rate_bps: number
+  commission_money: number
+  mail_status: MailCheckStatus
 }
 
 export interface AffiliateStatsResponse {

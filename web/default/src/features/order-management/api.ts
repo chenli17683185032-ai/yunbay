@@ -18,13 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 import type {
+  AffiliateSourceOrder,
   AffiliateStatsResponse,
   AffiliateWithdrawal,
+  AffiliateWithdrawalStatus,
   ApiResponse,
   DateRangeKey,
   MailCheckJobStatus,
   MailCheckPayload,
   MailCheckResponse,
+  MailCheckStatus,
   OrderAnalyticsResponse,
   OrderManagementOrderItem,
   PageData,
@@ -40,14 +43,14 @@ export interface GetOrderManagementOrdersParams
   extends OrderManagementRangeParams {
   page?: number
   page_size?: number
-  mail_status?: string
+  mail_status?: MailCheckStatus
   keyword?: string
 }
 
 export interface GetAffiliateStatsParams extends OrderManagementRangeParams {
   page?: number
   page_size?: number
-  withdrawal_status?: string
+  withdrawal_status?: AffiliateWithdrawalStatus
 }
 
 export function withDefinedParams(params: Record<string, unknown>): string {
@@ -92,7 +95,16 @@ export async function startSingleMailCheck(
 export async function startBatchMailCheck(
   payload: MailCheckPayload
 ): Promise<ApiResponse<MailCheckResponse>> {
-  const res = await api.post('/api/order-management/admin/mail-check', payload)
+  const normalizedPayload = {
+    ...payload,
+    start_time:
+      payload.start_time === undefined ? undefined : String(payload.start_time),
+    end_time: payload.end_time === undefined ? undefined : String(payload.end_time),
+  }
+  const res = await api.post(
+    '/api/order-management/admin/mail-check',
+    normalizedPayload
+  )
   return res.data
 }
 
@@ -110,6 +122,16 @@ export async function getAffiliateStats(
 ): Promise<ApiResponse<AffiliateStatsResponse>> {
   const res = await api.get(
     `/api/order-management/admin/affiliate-stats${withDefinedParams(params)}`
+  )
+  return res.data
+}
+
+export async function getAffiliateSourceOrders(
+  userId: number,
+  params: OrderManagementRangeParams & { limit?: number } = {}
+): Promise<ApiResponse<AffiliateSourceOrder[]>> {
+  const res = await api.get(
+    `/api/order-management/admin/affiliate-stats/${userId}/source-orders${withDefinedParams(params)}`
   )
   return res.data
 }
