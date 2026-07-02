@@ -279,6 +279,8 @@ func migrateDB() error {
 		&Checkin{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
+		&UserValuePackagePreference{},
+		&ValuePackageUsageRecord{},
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
@@ -291,6 +293,9 @@ func migrateDB() error {
 	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureUserSubscriptionTableSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -332,6 +337,8 @@ func migrateDBFast() error {
 		{&Checkin{}, "Checkin"},
 		{&SubscriptionOrder{}, "SubscriptionOrder"},
 		{&UserSubscription{}, "UserSubscription"},
+		{&UserValuePackagePreference{}, "UserValuePackagePreference"},
+		{&ValuePackageUsageRecord{}, "ValuePackageUsageRecord"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
@@ -364,6 +371,9 @@ func migrateDBFast() error {
 	}
 	if common.UsingSQLite {
 		if err := ensureSubscriptionPlanTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureUserSubscriptionTableSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -405,6 +415,19 @@ func ensureSubscriptionPlanTableSQLite() error {
 ` + "`custom_seconds`" + ` bigint NOT NULL DEFAULT 0,
 ` + "`enabled`" + ` numeric DEFAULT 1,
 ` + "`sort_order`" + ` integer DEFAULT 0,
+` + "`plan_kind`" + ` varchar(32) NOT NULL DEFAULT 'subscription',
+` + "`package_type`" + ` varchar(16) DEFAULT '',
+` + "`package_level`" + ` integer DEFAULT 0,
+` + "`model_group`" + ` varchar(64) DEFAULT '',
+` + "`concurrency_limit`" + ` integer DEFAULT 1,
+` + "`limit_5h_amount`" + ` bigint NOT NULL DEFAULT 0,
+` + "`limit_7d_amount`" + ` bigint NOT NULL DEFAULT 0,
+` + "`benefits`" + ` text,
+` + "`ldxp_product_url`" + ` text,
+` + "`ldxp_product_name`" + ` text,
+` + "`ldxp_product_amount`" + ` decimal(10,6) NOT NULL DEFAULT 0,
+` + "`ldxp_product_ref`" + ` varchar(128) DEFAULT '',
+` + "`ldxp_session_ttl_seconds`" + ` bigint NOT NULL DEFAULT 0,
 ` + "`allow_balance_pay`" + ` numeric DEFAULT 1,
 ` + "`stripe_price_id`" + ` varchar(128) DEFAULT '',
 ` + "`creem_product_id`" + ` varchar(128) DEFAULT '',
@@ -440,6 +463,19 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "custom_seconds", DDL: "`custom_seconds` bigint NOT NULL DEFAULT 0"},
 		{Name: "enabled", DDL: "`enabled` numeric DEFAULT 1"},
 		{Name: "sort_order", DDL: "`sort_order` integer DEFAULT 0"},
+		{Name: "plan_kind", DDL: "`plan_kind` varchar(32) NOT NULL DEFAULT 'subscription'"},
+		{Name: "package_type", DDL: "`package_type` varchar(16) DEFAULT ''"},
+		{Name: "package_level", DDL: "`package_level` integer DEFAULT 0"},
+		{Name: "model_group", DDL: "`model_group` varchar(64) DEFAULT ''"},
+		{Name: "concurrency_limit", DDL: "`concurrency_limit` integer DEFAULT 1"},
+		{Name: "limit_5h_amount", DDL: "`limit_5h_amount` bigint NOT NULL DEFAULT 0"},
+		{Name: "limit_7d_amount", DDL: "`limit_7d_amount` bigint NOT NULL DEFAULT 0"},
+		{Name: "benefits", DDL: "`benefits` text"},
+		{Name: "ldxp_product_url", DDL: "`ldxp_product_url` text"},
+		{Name: "ldxp_product_name", DDL: "`ldxp_product_name` text"},
+		{Name: "ldxp_product_amount", DDL: "`ldxp_product_amount` decimal(10,6) NOT NULL DEFAULT 0"},
+		{Name: "ldxp_product_ref", DDL: "`ldxp_product_ref` varchar(128) DEFAULT ''"},
+		{Name: "ldxp_session_ttl_seconds", DDL: "`ldxp_session_ttl_seconds` bigint NOT NULL DEFAULT 0"},
 		{Name: "allow_balance_pay", DDL: "`allow_balance_pay` numeric DEFAULT 1"},
 		{Name: "stripe_price_id", DDL: "`stripe_price_id` varchar(128) DEFAULT ''"},
 		{Name: "creem_product_id", DDL: "`creem_product_id` varchar(128) DEFAULT ''"},
@@ -451,6 +487,39 @@ PRIMARY KEY (` + "`id`" + `)
 		{Name: "quota_reset_custom_seconds", DDL: "`quota_reset_custom_seconds` bigint DEFAULT 0"},
 		{Name: "created_at", DDL: "`created_at` bigint"},
 		{Name: "updated_at", DDL: "`updated_at` bigint"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureUserSubscriptionTableSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "user_subscriptions"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "covered_by_subscription_id", DDL: "`covered_by_subscription_id` integer DEFAULT 0"},
+		{Name: "covered_time", DDL: "`covered_time` bigint DEFAULT 0"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

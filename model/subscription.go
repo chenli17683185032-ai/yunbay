@@ -33,6 +33,30 @@ const (
 	SubscriptionResetCustom  = "custom"
 )
 
+const (
+	SubscriptionPlanKindSubscription = "subscription"
+	SubscriptionPlanKindValuePackage = "value_package"
+)
+
+const (
+	ValuePackageTypeDay   = "day"
+	ValuePackageTypeWeek  = "week"
+	ValuePackageTypeMonth = "month"
+)
+
+const (
+	ValuePackageLevelDay   = 1
+	ValuePackageLevelWeek  = 2
+	ValuePackageLevelMonth = 3
+)
+
+const (
+	UserSubscriptionStatusActive    = "active"
+	UserSubscriptionStatusExpired   = "expired"
+	UserSubscriptionStatusCancelled = "cancelled"
+	UserSubscriptionStatusCovered   = "covered"
+)
+
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
@@ -160,6 +184,22 @@ type SubscriptionPlan struct {
 	Enabled   bool `json:"enabled" gorm:"default:true"`
 	SortOrder int  `json:"sort_order" gorm:"type:int;default:0"`
 
+	PlanKind     string `json:"plan_kind" gorm:"type:varchar(32);not null;default:'subscription'"`
+	PackageType  string `json:"package_type" gorm:"type:varchar(16);default:''"`
+	PackageLevel int    `json:"package_level" gorm:"type:int;default:0"`
+
+	ModelGroup       string `json:"model_group" gorm:"type:varchar(64);default:''"`
+	ConcurrencyLimit int    `json:"concurrency_limit" gorm:"type:int;default:1"`
+	Limit5hAmount    int64  `json:"limit_5h_amount" gorm:"type:bigint;not null;default:0"`
+	Limit7dAmount    int64  `json:"limit_7d_amount" gorm:"type:bigint;not null;default:0"`
+	Benefits         string `json:"benefits" gorm:"type:text"`
+
+	LdxpProductUrl        string  `json:"ldxp_product_url" gorm:"type:text"`
+	LdxpProductName       string  `json:"ldxp_product_name" gorm:"type:text"`
+	LdxpProductAmount     float64 `json:"ldxp_product_amount" gorm:"type:decimal(10,6);not null;default:0"`
+	LdxpProductRef        string  `json:"ldxp_product_ref" gorm:"type:varchar(128);default:''"`
+	LdxpSessionTTLSeconds int64   `json:"ldxp_session_ttl_seconds" gorm:"type:bigint;not null;default:0"`
+
 	AllowBalancePay *bool `json:"allow_balance_pay" gorm:"default:true"`
 
 	StripePriceId         string `json:"stripe_price_id" gorm:"type:varchar(128);default:''"`
@@ -198,6 +238,12 @@ func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 func (p *SubscriptionPlan) NormalizeDefaults() {
 	if p.AllowBalancePay == nil {
 		p.AllowBalancePay = common.GetPointer(true)
+	}
+	if strings.TrimSpace(p.PlanKind) == "" {
+		p.PlanKind = SubscriptionPlanKindSubscription
+	}
+	if p.ConcurrencyLimit <= 0 {
+		p.ConcurrencyLimit = 1
 	}
 }
 
@@ -258,6 +304,9 @@ type UserSubscription struct {
 	LastResetTime int64 `json:"last_reset_time" gorm:"type:bigint;default:0"`
 	NextResetTime int64 `json:"next_reset_time" gorm:"type:bigint;default:0;index"`
 
+	CoveredBySubscriptionId int   `json:"covered_by_subscription_id" gorm:"type:int;default:0"`
+	CoveredTime             int64 `json:"covered_time" gorm:"type:bigint;default:0"`
+
 	UpgradeGroup  string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 	PrevUserGroup string `json:"prev_user_group" gorm:"type:varchar(64);default:''"`
 
@@ -274,6 +323,46 @@ func (s *UserSubscription) BeforeCreate(tx *gorm.DB) error {
 
 func (s *UserSubscription) BeforeUpdate(tx *gorm.DB) error {
 	s.UpdatedAt = common.GetTimestamp()
+	return nil
+}
+
+type UserValuePackagePreference struct {
+	Id                       int   `json:"id"`
+	UserId                   int   `json:"user_id" gorm:"uniqueIndex"`
+	Enabled                  bool  `json:"enabled" gorm:"default:false"`
+	ActiveUserSubscriptionId int   `json:"active_user_subscription_id" gorm:"index;default:0"`
+	CreatedAt                int64 `json:"created_at" gorm:"bigint"`
+	UpdatedAt                int64 `json:"updated_at" gorm:"bigint"`
+}
+
+func (p *UserValuePackagePreference) BeforeCreate(tx *gorm.DB) error {
+	now := common.GetTimestamp()
+	p.CreatedAt = now
+	p.UpdatedAt = now
+	return nil
+}
+
+func (p *UserValuePackagePreference) BeforeUpdate(tx *gorm.DB) error {
+	p.UpdatedAt = common.GetTimestamp()
+	return nil
+}
+
+type ValuePackageUsageRecord struct {
+	Id                 int    `json:"id"`
+	UserId             int    `json:"user_id" gorm:"index:idx_vp_usage_user_time,priority:1"`
+	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index"`
+	PlanId             int    `json:"plan_id" gorm:"index"`
+	PackageType        string `json:"package_type" gorm:"type:varchar(16);index"`
+	ModelGroup         string `json:"model_group" gorm:"type:varchar(64);index"`
+	RequestId          string `json:"request_id" gorm:"type:varchar(64);index"`
+	Quota              int64  `json:"quota" gorm:"type:bigint;not null;default:0"`
+	CreatedAt          int64  `json:"created_at" gorm:"bigint;index:idx_vp_usage_user_time,priority:2"`
+}
+
+func (r *ValuePackageUsageRecord) BeforeCreate(tx *gorm.DB) error {
+	if r.CreatedAt == 0 {
+		r.CreatedAt = common.GetTimestamp()
+	}
 	return nil
 }
 
