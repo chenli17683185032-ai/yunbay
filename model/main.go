@@ -456,7 +456,7 @@ PRIMARY KEY (` + "`id`" + `)
 	required := []sqliteColumnDef{
 		{Name: "title", DDL: "`title` varchar(128) NOT NULL"},
 		{Name: "subtitle", DDL: "`subtitle` varchar(255) DEFAULT ''"},
-		{Name: "price_amount", DDL: "`price_amount` decimal(10,6) NOT NULL"},
+		{Name: "price_amount", DDL: "`price_amount` decimal(10,6) NOT NULL DEFAULT 0"},
 		{Name: "currency", DDL: "`currency` varchar(8) NOT NULL DEFAULT 'USD'"},
 		{Name: "duration_unit", DDL: "`duration_unit` varchar(16) NOT NULL DEFAULT 'month'"},
 		{Name: "duration_value", DDL: "`duration_value` integer NOT NULL DEFAULT 1"},

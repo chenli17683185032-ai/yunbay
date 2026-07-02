@@ -96,6 +96,7 @@ func TestValuePackagePlanFieldsPersist(t *testing.T) {
 func TestEnsureSubscriptionPlanTableSQLiteAddsValuePackageColumns(t *testing.T) {
 	setupValuePackageMigrationTestDB(t)
 	require.NoError(t, DB.Exec("CREATE TABLE `subscription_plans` (`id` integer, `title` varchar(128) NOT NULL, PRIMARY KEY (`id`))").Error)
+	require.NoError(t, DB.Exec("INSERT INTO `subscription_plans` (`id`, `title`) VALUES (1, 'Legacy Plan')").Error)
 
 	require.NoError(t, ensureSubscriptionPlanTableSQLite())
 
@@ -116,6 +117,63 @@ func TestEnsureSubscriptionPlanTableSQLiteAddsValuePackageColumns(t *testing.T) 
 	} {
 		require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, col), "missing column %s", col)
 	}
+
+	var got struct {
+		Id                    int
+		Title                 string
+		PlanKind              string
+		ConcurrencyLimit      int
+		Limit5hAmount         int64
+		Limit7dAmount         int64
+		LdxpProductAmount     float64
+		LdxpSessionTTLSeconds int64
+	}
+	require.NoError(t, DB.Table("subscription_plans").Where("id = ?", 1).First(&got).Error)
+	require.Equal(t, 1, got.Id)
+	require.Equal(t, "Legacy Plan", got.Title)
+	require.Equal(t, SubscriptionPlanKindSubscription, got.PlanKind)
+	require.Equal(t, 1, got.ConcurrencyLimit)
+	require.EqualValues(t, 0, got.Limit5hAmount)
+	require.EqualValues(t, 0, got.Limit7dAmount)
+	require.Equal(t, 0.0, got.LdxpProductAmount)
+	require.EqualValues(t, 0, got.LdxpSessionTTLSeconds)
+}
+
+func TestEnsureUserSubscriptionTableSQLiteAddsCoveredColumns(t *testing.T) {
+	setupValuePackageMigrationTestDB(t)
+	require.NoError(t, DB.Exec("CREATE TABLE `user_subscriptions` (`id` integer, `user_id` integer, `plan_id` integer, PRIMARY KEY (`id`))").Error)
+	require.NoError(t, DB.Exec("INSERT INTO `user_subscriptions` (`id`, `user_id`, `plan_id`) VALUES (1, 100, 200)").Error)
+
+	require.NoError(t, ensureUserSubscriptionTableSQLite())
+
+	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_by_subscription_id"))
+	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_time"))
+
+	var got struct {
+		Id                      int
+		UserId                  int
+		PlanId                  int
+		CoveredBySubscriptionId int
+		CoveredTime             int64
+	}
+	require.NoError(t, DB.Table("user_subscriptions").Where("id = ?", 1).First(&got).Error)
+	require.Equal(t, 1, got.Id)
+	require.Equal(t, 100, got.UserId)
+	require.Equal(t, 200, got.PlanId)
+	require.Equal(t, 0, got.CoveredBySubscriptionId)
+	require.EqualValues(t, 0, got.CoveredTime)
+}
+
+func TestValuePackageMigrateDBCreatesTablesAndColumns(t *testing.T) {
+	setupValuePackageMigrationTestDB(t)
+
+	require.NoError(t, migrateDB())
+
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "plan_kind"))
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "concurrency_limit"))
+	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_by_subscription_id"))
+	require.True(t, DB.Migrator().HasTable(&UserValuePackagePreference{}))
+	require.True(t, DB.Migrator().HasTable(&ValuePackageUsageRecord{}))
 }
 
 func TestValuePackageNewTablesMigrate(t *testing.T) {
