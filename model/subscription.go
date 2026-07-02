@@ -13,6 +13,7 @@ import (
 	"github.com/samber/hot"
 	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Subscription duration units
@@ -254,12 +255,13 @@ type SubscriptionOrder struct {
 	PlanId int     `json:"plan_id" gorm:"index"`
 	Money  float64 `json:"money"`
 
-	TradeNo         string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	Status          string `json:"status"`
-	CreateTime      int64  `json:"create_time"`
-	CompleteTime    int64  `json:"complete_time"`
+	TradeNo            string `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod      string `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider    string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index;default:0"`
+	Status             string `json:"status"`
+	CreateTime         int64  `json:"create_time"`
+	CompleteTime       int64  `json:"complete_time"`
 
 	ProviderPayload string `json:"provider_payload" gorm:"type:text"`
 }
@@ -647,9 +649,13 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 			// still allow completion for already purchased orders
 		}
 		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
-		_, err = CreateUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order")
+		createdSub, err := CreateUserSubscriptionFromPlanTx(tx, order.UserId, plan, "order")
 		if err != nil {
 			return err
+		}
+		order.UserSubscriptionId = createdSub.Id
+		if actualPaymentMethod != "" && order.PaymentMethod != actualPaymentMethod {
+			order.PaymentMethod = actualPaymentMethod
 		}
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
@@ -662,9 +668,6 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		order.CompleteTime = common.GetTimestamp()
 		if providerPayload != "" {
 			order.ProviderPayload = providerPayload
-		}
-		if actualPaymentMethod != "" && order.PaymentMethod != actualPaymentMethod {
-			order.PaymentMethod = actualPaymentMethod
 		}
 		if err := tx.Save(&order).Error; err != nil {
 			return err
@@ -699,25 +702,38 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if err := tx.Where("trade_no = ?", order.TradeNo).First(&topup).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			topup = TopUp{
-				UserId:        order.UserId,
-				Amount:        0,
-				Money:         order.Money,
-				TradeNo:       order.TradeNo,
-				PaymentMethod: order.PaymentMethod,
-				CreateTime:    order.CreateTime,
-				CompleteTime:  now,
-				Status:        common.TopUpStatusSuccess,
+				UserId:          order.UserId,
+				Amount:          0,
+				Money:           order.Money,
+				TradeNo:         order.TradeNo,
+				PaymentMethod:   order.PaymentMethod,
+				PaymentProvider: order.PaymentProvider,
+				CreateTime:      order.CreateTime,
+				CompleteTime:    now,
+				Status:          common.TopUpStatusSuccess,
 			}
 			return tx.Create(&topup).Error
 		}
 		return err
 	}
-	topup.Money = order.Money
+	if topup.UserId != order.UserId {
+		return errors.New("topup user mismatch")
+	}
+	if topup.Amount > 0 {
+		return errors.New("existing topup is a balance recharge")
+	}
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
 	} else if topup.PaymentMethod != order.PaymentMethod {
 		return ErrPaymentMethodMismatch
 	}
+	if topup.PaymentProvider == "" {
+		topup.PaymentProvider = order.PaymentProvider
+	} else if topup.PaymentProvider != order.PaymentProvider {
+		return ErrPaymentMethodMismatch
+	}
+	topup.Amount = 0
+	topup.Money = order.Money
 	if topup.CreateTime == 0 {
 		topup.CreateTime = order.CreateTime
 	}
@@ -756,7 +772,7 @@ func AdminBindSubscription(userId int, planId int, sourceNote string) (string, e
 	if userId <= 0 || planId <= 0 {
 		return "", errors.New("invalid userId or planId")
 	}
-	plan, err := getSubscriptionPlanByIdTx(DB, planId)
+	plan, err := GetSubscriptionPlanById(planId)
 	if err != nil {
 		return "", err
 	}
@@ -1032,7 +1048,7 @@ func CheckValuePackagePurchaseIntent(userId int, planId int, confirmedCover bool
 	if userId <= 0 || planId <= 0 {
 		return nil, errors.New("invalid userId or planId")
 	}
-	plan, err := getSubscriptionPlanByIdTx(DB, planId)
+	plan, err := GetSubscriptionPlanById(planId)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,14 +1084,22 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 			return ErrPaymentMethodMismatch
 		}
 		if order.Status == common.TopUpStatusSuccess {
-			var sub UserSubscription
-			if err := tx.Where("user_id = ? AND plan_id = ?", order.UserId, order.PlanId).Order("end_time desc, id desc").First(&sub).Error; err == nil {
-				completed = &sub
+			if order.UserSubscriptionId <= 0 {
+				return errors.New("completed order missing user subscription id")
 			}
+			var sub UserSubscription
+			if err := tx.Where("id = ? AND user_id = ?", order.UserSubscriptionId, order.UserId).First(&sub).Error; err != nil {
+				return fmt.Errorf("completed subscription not found: %w", err)
+			}
+			completed = &sub
 			return nil
 		}
 		if order.Status != common.TopUpStatusPending {
 			return ErrSubscriptionOrderStatusInvalid
+		}
+		var user User
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", order.UserId).First(&user).Error; err != nil {
+			return err
 		}
 		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
 		if err != nil {
@@ -1139,6 +1163,13 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		default:
 			return errors.New("unknown value package purchase action")
 		}
+		if completed == nil || completed.Id <= 0 {
+			return errors.New("completed subscription missing")
+		}
+		order.UserSubscriptionId = completed.Id
+		if actualPaymentMethod != "" {
+			order.PaymentMethod = actualPaymentMethod
+		}
 		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
 		}
@@ -1150,9 +1181,6 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		order.CompleteTime = common.GetTimestamp()
 		if providerPayload != "" {
 			order.ProviderPayload = providerPayload
-		}
-		if actualPaymentMethod != "" {
-			order.PaymentMethod = actualPaymentMethod
 		}
 		if err := tx.Save(&order).Error; err != nil {
 			return err
@@ -1245,20 +1273,35 @@ func DeactivateValuePackage(userId int) (*ValuePackageState, error) {
 }
 
 func upsertValuePackagePreferenceTx(tx *gorm.DB, userId int, enabled bool, activeSubId int) (*UserValuePackagePreference, error) {
-	var pref UserValuePackagePreference
-	q := tx.Where("user_id = ?", userId).First(&pref)
-	if errors.Is(q.Error, gorm.ErrRecordNotFound) {
-		pref = UserValuePackagePreference{UserId: userId, Enabled: enabled, ActiveUserSubscriptionId: activeSubId}
-		return &pref, tx.Create(&pref).Error
+	if tx == nil {
+		return nil, errors.New("tx is nil")
 	}
-	if q.Error != nil {
-		return nil, q.Error
+	now := common.GetTimestamp()
+	pref := UserValuePackagePreference{
+		UserId:                   userId,
+		Enabled:                  enabled,
+		ActiveUserSubscriptionId: activeSubId,
+		CreatedAt:                now,
+		UpdatedAt:                now,
 	}
-	pref.Enabled = enabled
+	updates := map[string]interface{}{
+		"enabled":    enabled,
+		"updated_at": now,
+	}
 	if activeSubId > 0 || !enabled {
-		pref.ActiveUserSubscriptionId = activeSubId
+		updates["active_user_subscription_id"] = activeSubId
 	}
-	return &pref, tx.Save(&pref).Error
+	if err := tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}},
+		DoUpdates: clause.Assignments(updates),
+	}).Create(&pref).Error; err != nil {
+		return nil, err
+	}
+	var reloaded UserValuePackagePreference
+	if err := tx.Where("user_id = ?", userId).First(&reloaded).Error; err != nil {
+		return nil, err
+	}
+	return &reloaded, nil
 }
 
 func RecordValuePackageUsage(record *ValuePackageUsageRecord) error {

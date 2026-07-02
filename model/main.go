@@ -298,6 +298,9 @@ func migrateDB() error {
 		if err := ensureUserSubscriptionTableSQLite(); err != nil {
 			return err
 		}
+		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
+			return err
+		}
 	} else {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
@@ -374,6 +377,9 @@ func migrateDBFast() error {
 			return err
 		}
 		if err := ensureUserSubscriptionTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -520,6 +526,38 @@ func ensureUserSubscriptionTableSQLite() error {
 	required := []sqliteColumnDef{
 		{Name: "covered_by_subscription_id", DDL: "`covered_by_subscription_id` integer DEFAULT 0"},
 		{Name: "covered_time", DDL: "`covered_time` bigint DEFAULT 0"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureSubscriptionOrderTableSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "subscription_orders"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "user_subscription_id", DDL: "`user_subscription_id` integer DEFAULT 0"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

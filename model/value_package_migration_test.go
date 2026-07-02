@@ -198,3 +198,25 @@ func TestValuePackageNewTablesMigrate(t *testing.T) {
 	require.True(t, DB.Migrator().HasTable(&UserValuePackagePreference{}))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageUsageRecord{}))
 }
+
+func TestEnsureSubscriptionOrderTableSQLiteAddsUserSubscriptionID(t *testing.T) {
+	setupValuePackageMigrationTestDB(t)
+	require.NoError(t, DB.Exec("CREATE TABLE `subscription_orders` (`id` integer, `user_id` integer, `plan_id` integer, `trade_no` varchar(255), PRIMARY KEY (`id`))").Error)
+	require.NoError(t, DB.Exec("INSERT INTO `subscription_orders` (`id`, `user_id`, `plan_id`, `trade_no`) VALUES (1, 100, 200, 'legacy-order')").Error)
+
+	require.NoError(t, ensureSubscriptionOrderTableSQLite())
+
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionOrder{}, "user_subscription_id"))
+	var got struct {
+		Id                 int
+		UserSubscriptionId int
+	}
+	require.NoError(t, DB.Table("subscription_orders").Where("id = ?", 1).First(&got).Error)
+	require.Equal(t, 1, got.Id)
+	require.Equal(t, 0, got.UserSubscriptionId)
+
+	require.NoError(t, DB.Table("subscription_orders").Where("id = ?", 1).Update("user_subscription_id", 321).Error)
+	var order SubscriptionOrder
+	require.NoError(t, DB.First(&order, 1).Error)
+	require.Equal(t, 321, order.UserSubscriptionId)
+}
