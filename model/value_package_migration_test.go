@@ -171,9 +171,25 @@ func TestValuePackageMigrateDBCreatesTablesAndColumns(t *testing.T) {
 
 	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "plan_kind"))
 	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "concurrency_limit"))
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "ldxp_session_ttl_seconds"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_by_subscription_id"))
+	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_time"))
 	require.True(t, DB.Migrator().HasTable(&UserValuePackagePreference{}))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageUsageRecord{}))
+
+	var columns []struct {
+		Name         string `gorm:"column:name"`
+		DefaultValue string `gorm:"column:dflt_value"`
+	}
+	require.NoError(t, DB.Raw("PRAGMA table_info(`subscription_plans`)").Scan(&columns).Error)
+	var priceAmountDefault string
+	for _, column := range columns {
+		if column.Name == "price_amount" {
+			priceAmountDefault = column.DefaultValue
+			break
+		}
+	}
+	require.Equal(t, "0", priceAmountDefault)
 }
 
 func TestValuePackageNewTablesMigrate(t *testing.T) {
