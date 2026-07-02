@@ -53,6 +53,14 @@ function SubscriptionsContent() {
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='flex h-full min-h-0 flex-col gap-4'>
+            <Alert variant='default' className='shrink-0'>
+              <Info className='h-4 w-4' />
+              <AlertDescription>
+                {t(
+                  'Enabled subscription plans saved here are shown on the user wallet subscription tab. Disabled plans remain visible only to administrators.'
+                )}
+              </AlertDescription>
+            </Alert>
             {!complianceConfirmed ? (
               <Alert variant='destructive' className='shrink-0'>
                 <AlertDescription>
