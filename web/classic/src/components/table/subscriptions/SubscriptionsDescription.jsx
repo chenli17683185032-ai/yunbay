@@ -27,9 +27,16 @@ const { Text } = Typography;
 const SubscriptionsDescription = ({ compactMode, setCompactMode, t }) => {
   return (
     <div className='flex flex-col md:flex-row justify-between items-start md:items-center gap-2 w-full'>
-      <div className='flex items-center text-blue-500'>
-        <CalendarClock size={16} className='mr-2' />
-        <Text>{t('订阅管理')}</Text>
+      <div className='flex flex-col gap-1'>
+        <div className='flex items-center text-blue-500'>
+          <CalendarClock size={16} className='mr-2' />
+          <Text>{t('订阅管理')}</Text>
+        </div>
+        <Text type='secondary' size='small'>
+          {t(
+            '保存并启用的套餐会同步展示在用户钱包页的订阅套餐区域，禁用套餐只在管理员页面保留。',
+          )}
+        </Text>
       </div>
 
       <CompactModeToggle
