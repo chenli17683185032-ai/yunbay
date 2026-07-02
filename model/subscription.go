@@ -455,7 +455,7 @@ func getSubscriptionPlanByIdTx(tx *gorm.DB, id int) (*SubscriptionPlan, error) {
 		return nil, errors.New("invalid plan id")
 	}
 	key := subscriptionPlanCacheKey(id)
-	if key != "" {
+	if tx == nil && key != "" {
 		if cached, found, err := getSubscriptionPlanCache().Get(key); err == nil && found {
 			cached.NormalizeDefaults()
 			return &cached, nil
@@ -470,7 +470,9 @@ func getSubscriptionPlanByIdTx(tx *gorm.DB, id int) (*SubscriptionPlan, error) {
 		return nil, err
 	}
 	plan.NormalizeDefaults()
-	_ = getSubscriptionPlanCache().SetWithTTL(key, plan, subscriptionPlanCacheTTL())
+	if tx == nil {
+		_ = getSubscriptionPlanCache().SetWithTTL(key, plan, subscriptionPlanCacheTTL())
+	}
 	return &plan, nil
 }
 
@@ -754,7 +756,7 @@ func AdminBindSubscription(userId int, planId int, sourceNote string) (string, e
 	if userId <= 0 || planId <= 0 {
 		return "", errors.New("invalid userId or planId")
 	}
-	plan, err := GetSubscriptionPlanById(planId)
+	plan, err := getSubscriptionPlanByIdTx(DB, planId)
 	if err != nil {
 		return "", err
 	}
@@ -934,6 +936,355 @@ func buildSubscriptionSummaries(subs []UserSubscription) []SubscriptionSummary {
 		})
 	}
 	return result
+}
+
+const (
+	ValuePackagePurchaseActionCreate  = "create"
+	ValuePackagePurchaseActionExtend  = "extend"
+	ValuePackagePurchaseActionUpgrade = "upgrade"
+)
+
+type ValuePackagePurchaseIntent struct {
+	Action               string            `json:"action"`
+	RequiresConfirmation bool              `json:"requires_confirmation"`
+	CurrentSubscription  *UserSubscription `json:"current_subscription,omitempty"`
+	CurrentPlan          *SubscriptionPlan `json:"current_plan,omitempty"`
+	TargetPlan           *SubscriptionPlan `json:"target_plan,omitempty"`
+	Message              string            `json:"message,omitempty"`
+}
+
+func (p *SubscriptionPlan) IsValuePackage() bool {
+	return strings.TrimSpace(p.PlanKind) == SubscriptionPlanKindValuePackage
+}
+
+func normalizeValuePackagePlan(plan *SubscriptionPlan) {
+	if plan == nil {
+		return
+	}
+	plan.PlanKind = strings.TrimSpace(plan.PlanKind)
+	if plan.PlanKind == "" {
+		plan.PlanKind = SubscriptionPlanKindSubscription
+	}
+	plan.PackageType = strings.TrimSpace(plan.PackageType)
+	if plan.PackageLevel <= 0 {
+		switch plan.PackageType {
+		case ValuePackageTypeDay:
+			plan.PackageLevel = ValuePackageLevelDay
+		case ValuePackageTypeWeek:
+			plan.PackageLevel = ValuePackageLevelWeek
+		case ValuePackageTypeMonth:
+			plan.PackageLevel = ValuePackageLevelMonth
+		}
+	}
+	if plan.ConcurrencyLimit <= 0 {
+		plan.ConcurrencyLimit = 1
+	}
+}
+
+func getActiveValuePackageSubscriptionsTx(tx *gorm.DB, userId int, now int64) ([]UserSubscription, error) {
+	if tx == nil {
+		tx = DB
+	}
+	var subs []UserSubscription
+	err := tx.Where("user_id = ? AND status = ? AND end_time > ?", userId, UserSubscriptionStatusActive, now).
+		Order("end_time desc, id desc").
+		Find(&subs).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UserSubscription, 0, len(subs))
+	for _, sub := range subs {
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			return nil, err
+		}
+		normalizeValuePackagePlan(plan)
+		if plan.IsValuePackage() {
+			out = append(out, sub)
+		}
+	}
+	return out, nil
+}
+
+func getHighestActiveValuePackageTx(tx *gorm.DB, userId int, now int64) (*UserSubscription, *SubscriptionPlan, error) {
+	subs, err := getActiveValuePackageSubscriptionsTx(tx, userId, now)
+	if err != nil {
+		return nil, nil, err
+	}
+	var bestSub *UserSubscription
+	var bestPlan *SubscriptionPlan
+	for _, sub := range subs {
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			return nil, nil, err
+		}
+		normalizeValuePackagePlan(plan)
+		if bestPlan == nil || plan.PackageLevel > bestPlan.PackageLevel || (plan.PackageLevel == bestPlan.PackageLevel && sub.EndTime > bestSub.EndTime) {
+			subCopy := sub
+			bestSub = &subCopy
+			bestPlan = plan
+		}
+	}
+	return bestSub, bestPlan, nil
+}
+
+func CheckValuePackagePurchaseIntent(userId int, planId int, confirmedCover bool) (*ValuePackagePurchaseIntent, error) {
+	if userId <= 0 || planId <= 0 {
+		return nil, errors.New("invalid userId or planId")
+	}
+	plan, err := getSubscriptionPlanByIdTx(DB, planId)
+	if err != nil {
+		return nil, err
+	}
+	normalizeValuePackagePlan(plan)
+	if !plan.IsValuePackage() {
+		return nil, errors.New("目标套餐不是超值套餐")
+	}
+	if !plan.Enabled {
+		return nil, errors.New("套餐未启用")
+	}
+	return checkValuePackagePurchaseIntentTx(nil, userId, plan, confirmedCover)
+}
+
+type ValuePackageState struct {
+	Preference   UserValuePackagePreference `json:"preference"`
+	Subscription *UserSubscription          `json:"subscription,omitempty"`
+	Plan         *SubscriptionPlan          `json:"plan,omitempty"`
+}
+
+func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string, confirmedCover bool) (*UserSubscription, error) {
+	if strings.TrimSpace(tradeNo) == "" {
+		return nil, errors.New("tradeNo is empty")
+	}
+	var completed *UserSubscription
+	var vipUpgraded bool
+	var userId int
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var order SubscriptionOrder
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
+			return ErrSubscriptionOrderNotFound
+		}
+		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
+			return ErrPaymentMethodMismatch
+		}
+		if order.Status == common.TopUpStatusSuccess {
+			var sub UserSubscription
+			if err := tx.Where("user_id = ? AND plan_id = ?", order.UserId, order.PlanId).Order("end_time desc, id desc").First(&sub).Error; err == nil {
+				completed = &sub
+			}
+			return nil
+		}
+		if order.Status != common.TopUpStatusPending {
+			return ErrSubscriptionOrderStatusInvalid
+		}
+		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
+		if err != nil {
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			return errors.New("order plan is not value package")
+		}
+		intent, err := checkValuePackagePurchaseIntentTx(tx, order.UserId, plan, confirmedCover)
+		if err != nil {
+			return err
+		}
+		if intent.RequiresConfirmation {
+			return errors.New("购买高级套餐需要确认覆盖当前低级套餐")
+		}
+		nowUnix := GetDBTimestamp()
+		start := time.Unix(nowUnix, 0)
+		endUnix, err := calcPlanEndTime(start, plan)
+		if err != nil {
+			return err
+		}
+		switch intent.Action {
+		case ValuePackagePurchaseActionExtend:
+			var existing UserSubscription
+			if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", intent.CurrentSubscription.Id).First(&existing).Error; err != nil {
+				return err
+			}
+			base := existing.EndTime
+			if base < nowUnix {
+				base = nowUnix
+			}
+			duration := endUnix - nowUnix
+			existing.EndTime = base + duration
+			if err := tx.Save(&existing).Error; err != nil {
+				return err
+			}
+			completed = &existing
+		case ValuePackagePurchaseActionUpgrade:
+			if intent.CurrentSubscription != nil {
+				if err := tx.Model(&UserSubscription{}).Where("id = ?", intent.CurrentSubscription.Id).Updates(map[string]interface{}{
+					"status":       UserSubscriptionStatusCovered,
+					"covered_time": nowUnix,
+					"updated_at":   common.GetTimestamp(),
+				}).Error; err != nil {
+					return err
+				}
+			}
+			fallthrough
+		case ValuePackagePurchaseActionCreate:
+			sub := &UserSubscription{UserId: order.UserId, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 0, StartTime: nowUnix, EndTime: endUnix, Status: UserSubscriptionStatusActive, Source: "ldxp", CreatedAt: common.GetTimestamp(), UpdatedAt: common.GetTimestamp()}
+			if err := tx.Create(sub).Error; err != nil {
+				return err
+			}
+			completed = sub
+			if intent.Action == ValuePackagePurchaseActionUpgrade && intent.CurrentSubscription != nil {
+				if err := tx.Model(&UserSubscription{}).Where("id = ?", intent.CurrentSubscription.Id).Update("covered_by_subscription_id", sub.Id).Error; err != nil {
+					return err
+				}
+			}
+		default:
+			return errors.New("unknown value package purchase action")
+		}
+		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
+			return err
+		}
+		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, order.UserId)
+		if err != nil {
+			return err
+		}
+		order.Status = common.TopUpStatusSuccess
+		order.CompleteTime = common.GetTimestamp()
+		if providerPayload != "" {
+			order.ProviderPayload = providerPayload
+		}
+		if actualPaymentMethod != "" {
+			order.PaymentMethod = actualPaymentMethod
+		}
+		if err := tx.Save(&order).Error; err != nil {
+			return err
+		}
+		userId = order.UserId
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if vipUpgraded && userId > 0 {
+		_ = UpdateUserGroupCache(userId, UserGroupVIP)
+	}
+	return completed, nil
+}
+
+func checkValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, confirmedCover bool) (*ValuePackagePurchaseIntent, error) {
+	if tx == nil {
+		tx = DB
+	}
+	now := GetDBTimestamp()
+	currentSub, currentPlan, err := getHighestActiveValuePackageTx(tx, userId, now)
+	if err != nil {
+		return nil, err
+	}
+	intent := &ValuePackagePurchaseIntent{Action: ValuePackagePurchaseActionCreate, TargetPlan: plan}
+	if currentSub == nil || currentPlan == nil {
+		return intent, nil
+	}
+	intent.CurrentSubscription = currentSub
+	intent.CurrentPlan = currentPlan
+	if plan.PackageLevel == currentPlan.PackageLevel {
+		intent.Action = ValuePackagePurchaseActionExtend
+		return intent, nil
+	}
+	if plan.PackageLevel < currentPlan.PackageLevel {
+		return nil, errors.New("当前已有更高等级套餐未过期，暂不能购买低等级套餐")
+	}
+	intent.Action = ValuePackagePurchaseActionUpgrade
+	if !confirmedCover {
+		intent.RequiresConfirmation = true
+		intent.Message = fmt.Sprintf("购买 %s 将直接覆盖当前 %s，剩余时间不会折算或顺延", plan.Title, currentPlan.Title)
+	}
+	return intent, nil
+}
+
+func ActivateValuePackage(userId int, userSubscriptionId int) (*ValuePackageState, error) {
+	if userId <= 0 || userSubscriptionId <= 0 {
+		return nil, errors.New("invalid activation args")
+	}
+	now := GetDBTimestamp()
+	var state *ValuePackageState
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var sub UserSubscription
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", userSubscriptionId, userId, UserSubscriptionStatusActive, now).First(&sub).Error; err != nil {
+			return err
+		}
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			return errors.New("订阅不是超值套餐")
+		}
+		pref, err := upsertValuePackagePreferenceTx(tx, userId, true, sub.Id)
+		if err != nil {
+			return err
+		}
+		state = &ValuePackageState{Preference: *pref, Subscription: &sub, Plan: plan}
+		return nil
+	})
+	return state, err
+}
+
+func DeactivateValuePackage(userId int) (*ValuePackageState, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid userId")
+	}
+	var state *ValuePackageState
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		pref, err := upsertValuePackagePreferenceTx(tx, userId, false, 0)
+		if err != nil {
+			return err
+		}
+		state = &ValuePackageState{Preference: *pref}
+		return nil
+	})
+	return state, err
+}
+
+func upsertValuePackagePreferenceTx(tx *gorm.DB, userId int, enabled bool, activeSubId int) (*UserValuePackagePreference, error) {
+	var pref UserValuePackagePreference
+	q := tx.Where("user_id = ?", userId).First(&pref)
+	if errors.Is(q.Error, gorm.ErrRecordNotFound) {
+		pref = UserValuePackagePreference{UserId: userId, Enabled: enabled, ActiveUserSubscriptionId: activeSubId}
+		return &pref, tx.Create(&pref).Error
+	}
+	if q.Error != nil {
+		return nil, q.Error
+	}
+	pref.Enabled = enabled
+	if activeSubId > 0 || !enabled {
+		pref.ActiveUserSubscriptionId = activeSubId
+	}
+	return &pref, tx.Save(&pref).Error
+}
+
+func RecordValuePackageUsage(record *ValuePackageUsageRecord) error {
+	if record == nil || record.UserId <= 0 || record.UserSubscriptionId <= 0 || record.Quota <= 0 {
+		return errors.New("invalid value package usage record")
+	}
+	return DB.Create(record).Error
+}
+
+func GetValuePackageWindowUsage(userId int, userSubscriptionId int, now int64) (int64, int64, error) {
+	if now <= 0 {
+		now = GetDBTimestamp()
+	}
+	var used5h int64
+	if err := DB.Model(&ValuePackageUsageRecord{}).
+		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-5*3600).
+		Select("COALESCE(SUM(quota), 0)").Scan(&used5h).Error; err != nil {
+		return 0, 0, err
+	}
+	var used7d int64
+	if err := DB.Model(&ValuePackageUsageRecord{}).
+		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-7*24*3600).
+		Select("COALESCE(SUM(quota), 0)").Scan(&used7d).Error; err != nil {
+		return 0, 0, err
+	}
+	return used5h, used7d, nil
 }
 
 // AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.
