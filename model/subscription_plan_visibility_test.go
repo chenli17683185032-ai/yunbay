@@ -15,6 +15,11 @@ import (
 func setupSubscriptionPlanVisibilityTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	originalUsingSQLite := common.UsingSQLite
+	originalUsingMySQL := common.UsingMySQL
+	originalUsingPostgreSQL := common.UsingPostgreSQL
+	originalRedisEnabled := common.RedisEnabled
+
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
@@ -32,6 +37,10 @@ func setupSubscriptionPlanVisibilityTestDB(t *testing.T) *gorm.DB {
 	t.Cleanup(func() {
 		DB = originalDB
 		LOG_DB = originalLogDB
+		common.UsingSQLite = originalUsingSQLite
+		common.UsingMySQL = originalUsingMySQL
+		common.UsingPostgreSQL = originalUsingPostgreSQL
+		common.RedisEnabled = originalRedisEnabled
 		sqlDB, err := db.DB()
 		if err == nil {
 			_ = sqlDB.Close()
@@ -73,6 +82,16 @@ func setPaymentComplianceForModelPlanVisibilityTest(t *testing.T, confirmed bool
 
 func createSubscriptionVisibilityPlan(t *testing.T, plan SubscriptionPlan) SubscriptionPlan {
 	t.Helper()
+	if plan.Id > 0 {
+		InvalidateSubscriptionPlanCache(plan.Id)
+	}
+	t.Cleanup(func() {
+		if plan.Id > 0 {
+			InvalidateSubscriptionPlanCache(plan.Id)
+		}
+	})
+
+	// gorm:"default:true" may turn a false create into the DB default, so disabled plans are explicitly updated after insert.
 	desiredEnabled := plan.Enabled
 	if plan.Title == "" {
 		plan.Title = fmt.Sprintf("Plan %d", plan.Id)
@@ -87,8 +106,14 @@ func createSubscriptionVisibilityPlan(t *testing.T, plan SubscriptionPlan) Subsc
 		plan.DurationValue = 1
 	}
 	require.NoError(t, DB.Create(&plan).Error)
+	if plan.Id > 0 {
+		InvalidateSubscriptionPlanCache(plan.Id)
+	}
 	if !desiredEnabled {
 		require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", plan.Id).Update("enabled", false).Error)
+		if plan.Id > 0 {
+			InvalidateSubscriptionPlanCache(plan.Id)
+		}
 		plan.Enabled = false
 	}
 	return plan
