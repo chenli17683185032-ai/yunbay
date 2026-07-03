@@ -77,6 +77,7 @@ import {
 import {
   getDurationUnitOptions,
   getResetPeriodOptions,
+  getValuePackageDuration,
   getValuePackageLevel,
   getValuePackageTypeOptions,
 } from '../constants'
@@ -170,6 +171,18 @@ export function SubscriptionsMutateDrawer({
 
     const level = getValuePackageLevel(packageType)
     form.setValue('package_level', level, { shouldDirty: true })
+    const duration = getValuePackageDuration(packageType)
+    if (duration) {
+      form.setValue('duration_unit', duration.duration_unit, {
+        shouldDirty: true,
+      })
+      form.setValue('duration_value', duration.duration_value, {
+        shouldDirty: true,
+      })
+      form.setValue('custom_seconds', duration.custom_seconds, {
+        shouldDirty: true,
+      })
+    }
   }, [form, isValuePackage, packageType])
 
   const onSubmit = async (values: PlanFormValues) => {
@@ -778,6 +791,7 @@ export function SubscriptionsMutateDrawer({
                         ]}
                         onValueChange={field.onChange}
                         value={field.value}
+                        disabled={isValuePackage}
                       >
                         <FormControl>
                           <SelectTrigger>
@@ -794,6 +808,13 @@ export function SubscriptionsMutateDrawer({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      {isValuePackage ? (
+                        <FormDescription>
+                          {t(
+                            'Value package duration is fixed by package type.'
+                          )}
+                        </FormDescription>
+                      ) : null}
                       <FormMessage />
                     </FormItem>
                   )}
@@ -811,6 +832,7 @@ export function SubscriptionsMutateDrawer({
                             {...field}
                             type='number'
                             min={1}
+                            disabled={isValuePackage}
                             onChange={(e) =>
                               field.onChange(parseInt(e.target.value, 10) || 0)
                             }
@@ -832,11 +854,19 @@ export function SubscriptionsMutateDrawer({
                             {...field}
                             type='number'
                             min={1}
+                            disabled={isValuePackage}
                             onChange={(e) =>
                               field.onChange(parseInt(e.target.value, 10) || 0)
                             }
                           />
                         </FormControl>
+                        {isValuePackage ? (
+                          <FormDescription>
+                            {t(
+                              'Value package duration is fixed by package type.'
+                            )}
+                          </FormDescription>
+                        ) : null}
                         <FormMessage />
                       </FormItem>
                     )}

@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 import type { TFunction } from 'i18next'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
+import {
+  getValuePackageDuration,
+  getValuePackageLevel,
+} from '../constants'
 import type { SubscriptionPlan, PlanPayload } from '../types'
 
 export function getPlanFormSchema(t: TFunction) {
@@ -134,32 +138,25 @@ export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
   }
 }
 
-function getValuePackageLevel(packageType?: string): number {
-  switch (packageType) {
-    case 'day':
-      return 1
-    case 'week':
-      return 2
-    case 'month':
-      return 3
-    default:
-      return 0
-  }
-}
-
 export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
   const isValuePackage = values.plan_kind === 'value_package'
   const packageLevel = isValuePackage
     ? getValuePackageLevel(values.package_type)
     : Number(values.package_level || 0)
+  const packageDuration = isValuePackage
+    ? getValuePackageDuration(values.package_type)
+    : null
 
   return {
     plan: {
       ...values,
       price_amount: Number(values.price_amount || 0),
       currency: 'USD',
-      duration_value: Number(values.duration_value || 0),
-      custom_seconds: Number(values.custom_seconds || 0),
+      duration_unit: packageDuration?.duration_unit || values.duration_unit,
+      duration_value:
+        packageDuration?.duration_value ?? Number(values.duration_value || 0),
+      custom_seconds:
+        packageDuration?.custom_seconds ?? Number(values.custom_seconds || 0),
       quota_reset_period: values.quota_reset_period || 'never',
       quota_reset_custom_seconds:
         values.quota_reset_period === 'custom'

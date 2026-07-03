@@ -52,6 +52,28 @@ test('value package limit fields convert dollars to quota payload', () => {
   assert.equal(payload.plan.upgrade_group, '')
 })
 
+test('value package package_type controls submitted duration', () => {
+  const values = {
+    ...PLAN_FORM_DEFAULTS,
+    title: '周卡',
+    plan_kind: 'value_package' as const,
+    package_type: 'week' as const,
+    package_level: 2,
+    duration_unit: 'month' as const,
+    duration_value: 99,
+    custom_seconds: 12345,
+    model_group: 'week-card',
+    concurrency_limit: 1,
+    ldxp_product_url: 'https://ldxp.example.test/week',
+    ldxp_product_name: '周卡商品',
+    ldxp_product_amount: 19.9,
+  }
+  const payload = formValuesToPlanPayload(values)
+  assert.equal(payload.plan.duration_unit, 'day')
+  assert.equal(payload.plan.duration_value, 7)
+  assert.equal(payload.plan.custom_seconds, 0)
+})
+
 test('planToFormValues preserves per-card ldxp payment config', () => {
   const plan: SubscriptionPlan = {
     id: 1,

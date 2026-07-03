@@ -44,5 +44,10 @@ test('mutate drawer source exposes complete value package fields', async () => {
   for (const field of requiredFields) {
     assert.match(source, new RegExp(field))
   }
+  assert.match(source, /getValuePackageDuration/)
+  assert.match(source, /duration_unit/)
+  assert.match(source, /duration_value/)
+  assert.match(source, /custom_seconds/)
+  assert.match(source, /disabled=\{isValuePackage\}/)
   assert.match(source, /保存后用户购买将直接调用现有联动小铺支付系统创建付款会话|existing LDXP payment system/)
 })

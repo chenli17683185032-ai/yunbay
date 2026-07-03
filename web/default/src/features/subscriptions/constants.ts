@@ -81,3 +81,16 @@ export function getValuePackageTypeOptions(t: TFunction) {
 export function getValuePackageLevel(packageType?: string): number {
   return VALUE_PACKAGE_TYPES.find((p) => p.value === packageType)?.level || 0
 }
+
+export function getValuePackageDuration(packageType?: string) {
+  const type = VALUE_PACKAGE_TYPES.find((p) => p.value === packageType)
+  if (!type) {
+    return null
+  }
+
+  return {
+    duration_unit: type.durationUnit,
+    duration_value: type.durationValue,
+    custom_seconds: 0,
+  }
+}
