@@ -66,7 +66,11 @@ require (
 	github.com/waffo-com/waffo-pancake-sdk-go v0.3.1
 )
 
-require github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
+require (
+	github.com/alicebob/miniredis/v2 v2.38.0 // indirect
+	github.com/emersion/go-sasl v0.0.0-20241020182733-b788ff22d5a6 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
+)
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0 // indirect

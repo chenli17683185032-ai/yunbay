@@ -4891,7 +4891,7 @@
     "Wallet management and personal preferences.": "Gestion du portefeuille et préférences personnelles.",
     "Wallet Only": "Portefeuille uniquement",
     "Warning": "Avertissement",
-    "Warning: Base URL should not end with /v1. New API will handle it automatically. This may cause request failures.": "Avertissement : L'URL de base ne doit pas se terminer par /v1. La nouvelle API le gérera automatiquement. Cela peut causer des échecs de requêtes.",
+    "Warning: Base URL should not end with /v1. New API will handle it automatically. This may cause request failures.": "Avertissement : l'URL de base ne doit pas se terminer par /v1. New API la gérera automatiquement. Cela peut causer des échecs de requêtes.",
     "Warning: Disabling 2FA will make your account less secure.": "Avertissement : La désactivation de la 2FA rendra votre compte moins sécurisé.",
     "Warning: This action is permanent and irreversible!": "Avertissement : Cette action est permanente et irréversible !",
     "We apologize for the inconvenience.": "Nous nous excusons pour le désagrément.",

@@ -13,8 +13,10 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -162,7 +164,8 @@ func TestValuePackageRealtimeRejectsOverRollingWindows(t *testing.T) {
 func TestValuePackageRealtimeHonorsConcurrencyLimit(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, _, sub := seedValuePackageMiddlewareState(t, true, 1000, 5000, 1)
-	release, ok := acquireValuePackageSlot(sub.Id, 1)
+	release, ok, err := acquireValuePackageSlot(sub.Id, 1)
+	require.NoError(t, err)
 	require.True(t, ok)
 	defer release()
 
@@ -192,7 +195,8 @@ func TestValuePackageReadOnlyRequestsOnlyApplyPackageGroup(t *testing.T) {
 func TestValuePackageGroupScopeSkipsConcurrencyLimit(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, _, _ := seedValuePackageMiddlewareState(t, true, 1000, 5000, 1)
-	release, ok := acquireValuePackageSlot(1, 1)
+	release, ok, err := acquireValuePackageSlot(1, 1)
+	require.NoError(t, err)
 	require.True(t, ok)
 	defer release()
 
@@ -251,11 +255,11 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 func TestValuePackageConcurrencyLimiter(t *testing.T) {
 	valuePackageConcurrencyCounters.Delete(9001)
 	valuePackageConcurrencyCounters.Delete(9002)
-	release1, ok := acquireValuePackageSlot(9001, 1)
+	release1, ok := acquireValuePackageMemorySlot(9001, 1)
 	require.True(t, ok)
 	defer release1()
 
-	release2, ok := acquireValuePackageSlot(9001, 1)
+	release2, ok := acquireValuePackageMemorySlot(9001, 1)
 	require.False(t, ok)
 	require.Nil(t, release2)
 
@@ -266,18 +270,18 @@ func TestValuePackageConcurrencyLimiter(t *testing.T) {
 	_, exists = valuePackageConcurrencyCounters.Load(9001)
 	require.False(t, exists)
 
-	release3, ok := acquireValuePackageSlot(9001, 1)
+	release3, ok := acquireValuePackageMemorySlot(9001, 1)
 	require.True(t, ok)
 	require.NotNil(t, release3)
 	release3()
 	_, exists = valuePackageConcurrencyCounters.Load(9001)
 	require.False(t, exists)
 
-	releaseA, ok := acquireValuePackageSlot(9002, 9)
+	releaseA, ok := acquireValuePackageMemorySlot(9002, 9)
 	require.True(t, ok)
-	releaseB, ok := acquireValuePackageSlot(9002, 9)
+	releaseB, ok := acquireValuePackageMemorySlot(9002, 9)
 	require.True(t, ok)
-	releaseC, ok := acquireValuePackageSlot(9002, 9)
+	releaseC, ok := acquireValuePackageMemorySlot(9002, 9)
 	require.False(t, ok)
 	require.Nil(t, releaseC)
 	releaseA()
@@ -286,6 +290,38 @@ func TestValuePackageConcurrencyLimiter(t *testing.T) {
 	releaseB()
 	_, exists = valuePackageConcurrencyCounters.Load(9002)
 	require.False(t, exists)
+}
+
+func TestValuePackageRedisConcurrencyLimiter(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	oldRedisEnabled := common.RedisEnabled
+	oldRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RDB = oldRDB
+		common.RedisEnabled = oldRedisEnabled
+	})
+
+	release1, ok, err := acquireValuePackageSlot(9101, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, release1)
+
+	release2, ok, err := acquireValuePackageSlot(9101, 1)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, release2)
+
+	release1()
+	require.False(t, redisServer.Exists(valuePackageConcurrencyRedisKey(9101)))
+
+	release3, ok, err := acquireValuePackageSlot(9101, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, release3)
+	release3()
 }
 
 func TestValuePackageMiddlewareDisabledPreferenceDoesNotForceGroup(t *testing.T) {

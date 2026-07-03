@@ -29,6 +29,20 @@ interface ValuePackagePaymentDialogProps {
   onClose: () => void
 }
 
+export function toValuePackageTopupSession(
+  sessionResponse: ValuePackageLdxpSessionResponse | null
+): LdxpTopupSession | null {
+  if (!sessionResponse?.session) {
+    return null
+  }
+
+  const session = sessionResponse.session
+  return {
+    ...session,
+    amount: session.money > 0 ? session.money : session.amount,
+  } as LdxpTopupSession
+}
+
 export function ValuePackagePaymentDialog({
   sessionResponse,
   loading,
@@ -36,13 +50,10 @@ export function ValuePackagePaymentDialog({
   onCancel,
   onClose,
 }: ValuePackagePaymentDialogProps) {
-  const session = useMemo<LdxpTopupSession | null>(() => {
-    if (!sessionResponse?.session) {
-      return null
-    }
-
-    return sessionResponse.session as LdxpTopupSession
-  }, [sessionResponse])
+  const session = useMemo(
+    () => toValuePackageTopupSession(sessionResponse),
+    [sessionResponse]
+  )
 
   return (
     <LdxpPaymentDialog

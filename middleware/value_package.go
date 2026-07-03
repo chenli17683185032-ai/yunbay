@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -17,8 +19,42 @@ type valuePackageConcurrencyCounter struct {
 	count int
 }
 
-// valuePackageConcurrencyCounters 仅在当前进程内做 best-effort 并发限制。
-// 多实例/分布式部署不会共享该状态，如需严格全局限流需改为 Redis/DB 等共享限流器。
+const valuePackageConcurrencySlotTTL = 30 * time.Minute
+
+const valuePackageConcurrencyRedisAcquireScript = `
+local key = KEYS[1]
+local token = ARGV[1]
+local limit = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local ttl = tonumber(ARGV[4])
+redis.call('ZREMRANGEBYSCORE', key, '-inf', now - ttl)
+local count = redis.call('ZCARD', key)
+if count >= limit then
+  redis.call('EXPIRE', key, ttl)
+  return 0
+end
+redis.call('ZADD', key, now, token)
+redis.call('EXPIRE', key, ttl)
+return 1
+`
+
+const valuePackageConcurrencyRedisReleaseScript = `
+local key = KEYS[1]
+local token = ARGV[1]
+local ttl = tonumber(ARGV[2])
+redis.call('ZREM', key, token)
+local count = redis.call('ZCARD', key)
+if count == 0 then
+  redis.call('DEL', key)
+else
+  redis.call('EXPIRE', key, ttl)
+end
+return count
+`
+
+// valuePackageConcurrencyCounters is the fallback limiter used when Redis is
+// disabled. Production deployments with Redis enabled use a shared Redis slot
+// set so the 1-2 concurrency limit is enforced across app instances.
 var valuePackageConcurrencyCounters sync.Map
 
 func normalizeValuePackageConcurrencyLimit(limit int) int {
@@ -31,7 +67,18 @@ func normalizeValuePackageConcurrencyLimit(limit int) int {
 	return limit
 }
 
-func acquireValuePackageSlot(userSubscriptionId int, limit int) (func(), bool) {
+func acquireValuePackageSlot(userSubscriptionId int, limit int) (func(), bool, error) {
+	if userSubscriptionId <= 0 {
+		return nil, false, nil
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		return acquireValuePackageRedisSlot(userSubscriptionId, limit)
+	}
+	release, ok := acquireValuePackageMemorySlot(userSubscriptionId, limit)
+	return release, ok, nil
+}
+
+func acquireValuePackageMemorySlot(userSubscriptionId int, limit int) (func(), bool) {
 	if userSubscriptionId <= 0 {
 		return nil, false
 	}
@@ -67,6 +114,49 @@ func acquireValuePackageSlot(userSubscriptionId int, limit int) (func(), bool) {
 			valuePackageConcurrencyCounters.CompareAndDelete(userSubscriptionId, counter)
 		}
 	}, true
+}
+
+func acquireValuePackageRedisSlot(userSubscriptionId int, limit int) (func(), bool, error) {
+	limit = normalizeValuePackageConcurrencyLimit(limit)
+	token, err := common.GenerateRandomCharsKey(24)
+	if err != nil {
+		return nil, false, err
+	}
+	key := valuePackageConcurrencyRedisKey(userSubscriptionId)
+	ttlSeconds := int64(valuePackageConcurrencySlotTTL / time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	acquired, err := common.RDB.Eval(ctx, valuePackageConcurrencyRedisAcquireScript, []string{key}, token, limit, time.Now().Unix(), ttlSeconds).Int()
+	if err != nil {
+		return nil, false, err
+	}
+	if acquired != 1 {
+		return nil, false, nil
+	}
+
+	var mu sync.Mutex
+	released := false
+	return func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if released {
+			return
+		}
+		released = true
+		if err := releaseValuePackageRedisSlot(key, token, ttlSeconds); err != nil {
+			common.SysError(fmt.Sprintf("failed to release value package concurrency slot: %v", err))
+		}
+	}, true, nil
+}
+
+func releaseValuePackageRedisSlot(key string, token string, ttlSeconds int64) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return common.RDB.Eval(ctx, valuePackageConcurrencyRedisReleaseScript, []string{key}, token, ttlSeconds).Err()
+}
+
+func valuePackageConcurrencyRedisKey(userSubscriptionId int) string {
+	return fmt.Sprintf("value_package_concurrency:%d", userSubscriptionId)
 }
 
 func ValuePackageGroupScope() gin.HandlerFunc {
@@ -129,7 +219,11 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 			return
 		}
 
-		release, ok := acquireValuePackageSlot(state.Subscription.Id, state.Plan.ConcurrencyLimit)
+		release, ok, err := acquireValuePackageSlot(state.Subscription.Id, state.Plan.ConcurrencyLimit)
+		if err != nil {
+			abortWithOpenAiMessage(c, http.StatusInternalServerError, "申请超值套餐并发额度失败")
+			return
+		}
 		if !ok {
 			abortWithOpenAiMessage(c, http.StatusTooManyRequests, "超值套餐并发请求数已达上限")
 			return
