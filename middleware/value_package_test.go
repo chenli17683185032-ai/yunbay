@@ -233,6 +233,44 @@ func TestValuePackageMiddlewareForcesPackageGroup(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"day-card"`)
 }
 
+func TestValuePackageMiddlewareOverridesUserGroupForPackageBilling(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 1000, 5000, 1)
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("group", model.UserGroupVIP).Error)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyUserId, user.Id)
+		common.SetContextKey(c, constant.ContextKeyUserGroup, model.UserGroupVIP)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "gpt-plus")
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, "gpt-plus")
+		c.Next()
+	})
+	router.Use(ValuePackageEntitlement())
+	router.POST("/relay", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"user_group":                    common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+			"using_group":                   common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+			"token_group":                   common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+			"value_package_subscription_id": common.GetContextKeyInt(c, constant.ContextKeyValuePackageSubscriptionId),
+		})
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/relay", nil)
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), fmt.Sprintf(`"value_package_subscription_id":%d`, sub.Id))
+	require.Contains(t, recorder.Body.String(), `"user_group":"`+plan.ModelGroup+`"`)
+	require.Contains(t, recorder.Body.String(), `"using_group":"`+plan.ModelGroup+`"`)
+	require.Contains(t, recorder.Body.String(), `"token_group":"`+plan.ModelGroup+`"`)
+
+	var reloaded model.User
+	require.NoError(t, model.DB.First(&reloaded, user.Id).Error)
+	require.Equal(t, model.UserGroupVIP, reloaded.Group)
+}
+
 func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
@@ -333,6 +371,37 @@ func TestValuePackageMiddlewareDisabledPreferenceDoesNotForceGroup(t *testing.T)
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), `"using_group":"gpt-plus"`)
 	require.Contains(t, recorder.Body.String(), `"value_package_subscription_id":0`)
+}
+
+func TestValuePackageMiddlewareDisabledPreferenceKeepsOriginalUserGroup(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, _, _ := seedValuePackageMiddlewareState(t, false, 1000, 5000, 1)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyUserId, user.Id)
+		common.SetContextKey(c, constant.ContextKeyUserGroup, model.UserGroupVIP)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "gpt-plus")
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, "gpt-plus")
+		c.Next()
+	})
+	router.Use(ValuePackageEntitlement())
+	router.POST("/relay", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"user_group":  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+			"using_group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+			"token_group": common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+		})
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/relay", nil)
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"user_group":"vip"`)
+	require.Contains(t, recorder.Body.String(), `"using_group":"gpt-plus"`)
+	require.Contains(t, recorder.Body.String(), `"token_group":"gpt-plus"`)
 }
 
 func TestValuePackagePlaygroundDistributeKeepsPackageGroup(t *testing.T) {
