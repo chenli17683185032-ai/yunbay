@@ -141,6 +141,9 @@ func valuePackageControllerRoutePattern(path string) string {
 	if strings.HasPrefix(path, "/subscription/admin/plans/") {
 		return "/subscription/admin/plans/:id"
 	}
+	if strings.HasPrefix(path, "/subscription/admin/users/") && strings.HasSuffix(path, "/subscriptions") {
+		return "/subscription/admin/users/:id/subscriptions"
+	}
 	return path
 }
 
@@ -254,6 +257,42 @@ func TestGetValuePackagePlansReturnsOnlyEnabledValuePackages(t *testing.T) {
 	plans := data["plans"].([]interface{})
 	require.Len(t, plans, 1)
 	assert.Equal(t, float64(enabled.Id), plans[0].(map[string]interface{})["id"])
+}
+
+func TestGetValuePackagePlansHidesDisabledPlanButSelfKeepsActiveSubscription(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_disabled_active_self_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: common.GetTimestamp() - 10, EndTime: common.GetTimestamp() + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	_, err := model.ActivateValuePackage(user.Id, sub.Id)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Update("enabled", false).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
+
+	rec := valuePackageControllerRequest(GetValuePackagePlans, http.MethodGet, "/value-packages/plans", nil, user.Id)
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	plans := data["plans"].([]interface{})
+	require.Empty(t, plans)
+
+	rec = valuePackageControllerRequest(GetValuePackageSelf, http.MethodGet, "/value-packages/self", nil, user.Id)
+	body = decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	self := body["data"].(map[string]interface{})
+	pref := self["preference"].(map[string]interface{})
+	assert.Equal(t, true, pref["enabled"])
+	assert.Equal(t, float64(sub.Id), pref["active_user_subscription_id"])
+	rawSubscription := self["subscription"]
+	require.NotNil(t, rawSubscription)
+	subscription := rawSubscription.(map[string]interface{})
+	assert.Equal(t, float64(sub.Id), subscription["id"])
+	rawPlan := self["plan"]
+	require.NotNil(t, rawPlan)
+	statePlan := rawPlan.(map[string]interface{})
+	assert.Equal(t, float64(plan.Id), statePlan["id"])
+	assert.Equal(t, false, statePlan["enabled"])
 }
 
 func TestGetSubscriptionPlansExcludesValuePackages(t *testing.T) {
@@ -489,6 +528,26 @@ func TestSubscriptionBalancePayRejectsValuePackagePlan(t *testing.T) {
 	assert.Equal(t, 1000000, reloaded.Quota)
 }
 
+func TestAdminBindSubscriptionHandlersRejectValuePackagePlan(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_admin_bind_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+
+	rec := valuePackageControllerRequest(AdminBindSubscription, http.MethodPost, "/subscription/admin/bind", gin.H{"user_id": user.Id, "plan_id": plan.Id}, 1)
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, false, body["success"], rec.Body.String())
+	require.Contains(t, body["message"], "超值套餐不能通过普通订阅绑定，请使用超值套餐专用流程")
+
+	rec = valuePackageControllerRequest(AdminCreateUserSubscription, http.MethodPost, fmt.Sprintf("/subscription/admin/users/%d/subscriptions", user.Id), gin.H{"plan_id": plan.Id}, 1)
+	body = decodeTestResponse(t, rec)
+	require.Equal(t, false, body["success"], rec.Body.String())
+	require.Contains(t, body["message"], "超值套餐不能通过普通订阅绑定，请使用超值套餐专用流程")
+
+	var subCount int64
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", user.Id).Count(&subCount).Error)
+	assert.Zero(t, subCount)
+}
+
 func TestSubscriptionOrderCompletionRejectsValuePackagePlan(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	user := createLdxpControllerTestUser(t, "vp_webhook_user")
@@ -564,6 +623,35 @@ func TestAdminCreateSubscriptionPlanNormalizesValuePackageLevelFromType(t *testi
 	var persisted model.SubscriptionPlan
 	require.NoError(t, model.DB.First(&persisted, int(data["id"].(float64))).Error)
 	assert.Equal(t, model.ValuePackageLevelDay, persisted.PackageLevel)
+}
+
+func TestAdminCreateSubscriptionPlanPersistsDisabledValuePackageWithoutLdxpConfig(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+	plan.Title = "disabled value package without ldxp"
+	plan.Enabled = false
+	plan.LdxpProductUrl = ""
+	plan.LdxpProductName = ""
+	plan.LdxpProductAmount = 0
+	plan.LdxpProductRef = ""
+	plan.LdxpSessionTTLSeconds = 0
+
+	rec := valuePackageControllerRequest(AdminCreateSubscriptionPlan, http.MethodPost, "/subscription/admin/plans", gin.H{"plan": plan}, 1)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	id := int(data["id"].(float64))
+	var persisted model.SubscriptionPlan
+	require.NoError(t, model.DB.First(&persisted, id).Error)
+	assert.False(t, persisted.Enabled)
+
+	user := createLdxpControllerTestUser(t, "vp_disabled_created_list_user")
+	plans, err := model.GetValuePackagePlansForUser(user.Id)
+	require.NoError(t, err)
+	for _, visible := range plans {
+		assert.NotEqual(t, persisted.Id, visible.Id)
+	}
 }
 
 func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageConfig(t *testing.T) {

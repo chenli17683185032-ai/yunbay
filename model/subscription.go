@@ -677,18 +677,19 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
 			return ErrPaymentMethodMismatch
 		}
+		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
+		if err != nil {
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if plan.IsValuePackage() {
+			return errors.New("超值套餐仅支持联动小铺购买")
+		}
 		if order.Status == common.TopUpStatusSuccess {
 			return nil
 		}
 		if order.Status != common.TopUpStatusPending {
 			return ErrSubscriptionOrderStatusInvalid
-		}
-		plan, err := GetSubscriptionPlanById(order.PlanId)
-		if err != nil {
-			return err
-		}
-		if plan.IsValuePackage() {
-			return errors.New("超值套餐仅支持联动小铺购买")
 		}
 		if !plan.Enabled {
 			// still allow completion for already purchased orders
@@ -820,6 +821,10 @@ func AdminBindSubscription(userId int, planId int, sourceNote string) (string, e
 	plan, err := GetSubscriptionPlanById(planId)
 	if err != nil {
 		return "", err
+	}
+	normalizeValuePackagePlan(plan)
+	if plan.IsValuePackage() {
+		return "", errors.New("超值套餐不能通过普通订阅绑定，请使用超值套餐专用流程")
 	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		_, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "admin")
@@ -1195,7 +1200,7 @@ func GetValuePackageState(userId int) (*ValuePackageState, error) {
 		return nil, err
 	}
 	state := &ValuePackageState{Preference: pref}
-	if !pref.Enabled || pref.ActiveUserSubscriptionId <= 0 {
+	if pref.ActiveUserSubscriptionId <= 0 {
 		return state, nil
 	}
 	now := GetDBTimestamp()
@@ -1214,7 +1219,7 @@ func GetValuePackageState(userId int) (*ValuePackageState, error) {
 		return nil, err
 	}
 	normalizeValuePackagePlan(plan)
-	if !plan.IsValuePackage() || !plan.Enabled {
+	if !plan.IsValuePackage() {
 		return state, nil
 	}
 	state.Subscription = &sub
@@ -1252,6 +1257,10 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 				return err
 			}
 			completed = &sub
+			if err := ensureValuePackagePreferenceAfterPurchaseTx(tx, order.UserId, completed.Id); err != nil {
+				return err
+			}
+			userId = order.UserId
 			return nil
 		}
 		if order.Status != common.TopUpStatusPending {
@@ -1326,6 +1335,9 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		if completed == nil || completed.Id <= 0 {
 			return errors.New("completed subscription missing")
 		}
+		if err := ensureValuePackagePreferenceAfterPurchaseTx(tx, order.UserId, completed.Id); err != nil {
+			return err
+		}
 		order.UserSubscriptionId = completed.Id
 		if actualPaymentMethod != "" {
 			order.PaymentMethod = actualPaymentMethod
@@ -1355,6 +1367,44 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		_ = UpdateUserGroupCache(userId, UserGroupVIP)
 	}
 	return completed, nil
+}
+
+func ensureValuePackagePreferenceAfterPurchaseTx(tx *gorm.DB, userId int, completedSubId int) error {
+	if tx == nil {
+		return errors.New("tx is nil")
+	}
+	if userId <= 0 || completedSubId <= 0 {
+		return errors.New("invalid value package preference args")
+	}
+	var pref UserValuePackagePreference
+	if err := tx.Where("user_id = ?", userId).First(&pref).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			_, err = upsertValuePackagePreferenceTx(tx, userId, false, completedSubId)
+			return err
+		}
+		return err
+	}
+	if !pref.Enabled {
+		_, err := upsertValuePackagePreferenceTx(tx, userId, false, completedSubId)
+		return err
+	}
+	if pref.ActiveUserSubscriptionId == completedSubId {
+		return nil
+	}
+	if pref.ActiveUserSubscriptionId > 0 {
+		var activeSub UserSubscription
+		if err := tx.Where("id = ? AND user_id = ?", pref.ActiveUserSubscriptionId, userId).First(&activeSub).Error; err == nil {
+			if activeSub.CoveredBySubscriptionId == completedSubId {
+				_, err = upsertValuePackagePreferenceTx(tx, userId, true, completedSubId)
+				return err
+			}
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+	}
+	_, err := upsertValuePackagePreferenceTx(tx, userId, true, completedSubId)
+	return err
 }
 
 func checkValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, confirmedCover bool) (*ValuePackagePurchaseIntent, error) {

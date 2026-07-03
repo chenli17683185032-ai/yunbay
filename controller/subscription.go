@@ -261,7 +261,19 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, msg)
 		return
 	}
-	err := model.DB.Create(&req.Plan).Error
+	requestedEnabled := req.Plan.Enabled
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Select("*").Omit("Id").Create(&req.Plan).Error; err != nil {
+			return err
+		}
+		if !requestedEnabled {
+			if err := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", req.Plan.Id).Update("enabled", false).Error; err != nil {
+				return err
+			}
+			req.Plan.Enabled = false
+		}
+		return nil
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return

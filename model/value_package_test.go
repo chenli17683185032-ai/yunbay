@@ -340,6 +340,69 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	require.Equal(t, first.Id, reloadedOrder.UserSubscriptionId)
 }
 
+func TestCompleteValuePackageOrderCreatesDisabledPreferenceForPaidButNotActivatedPackage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3111, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	order := SubscriptionOrder{UserId: user.Id, PlanId: day.Id, Money: day.PriceAmount, TradeNo: "vp-paid-not-activated", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
+	require.NoError(t, DB.Create(&order).Error)
+
+	completed, err := CompleteValuePackageOrder(order.TradeNo, "payload", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+
+	state, err := GetValuePackageState(user.Id)
+	require.NoError(t, err)
+	require.False(t, state.Preference.Enabled)
+	require.Equal(t, completed.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, completed.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
+}
+
+func TestGetValuePackageStateKeepsActiveSubscriptionWhenPlanDisabled(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3112, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	_, err := ActivateValuePackage(user.Id, sub.Id)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&SubscriptionPlan{}).Where("id = ?", day.Id).Update("enabled", false).Error)
+	InvalidateSubscriptionPlanCache(day.Id)
+
+	plans, err := GetValuePackagePlansForUser(user.Id)
+	require.NoError(t, err)
+	require.Empty(t, plans)
+
+	state, err := GetValuePackageState(user.Id)
+	require.NoError(t, err)
+	require.True(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
+	require.False(t, state.Plan.Enabled)
+}
+
+func TestAdminBindSubscriptionRejectsValuePackagePlan(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3113, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+
+	msg, err := AdminBindSubscription(user.Id, day.Id, "")
+
+	require.Error(t, err)
+	require.Empty(t, msg)
+	require.Contains(t, err.Error(), "超值套餐不能通过普通订阅绑定，请使用超值套餐专用流程")
+	var subCount int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ?", user.Id).Count(&subCount).Error)
+	require.Zero(t, subCount)
+}
+
 func TestCompleteValuePackageOrderUnconfirmedUpgradeDoesNotMutateState(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3102, UserGroupTiyan)
@@ -542,4 +605,27 @@ func TestCompleteValuePackageOrderReturnsTypedErrorWhenCompletedSubscriptionMiss
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrCompletedSubscriptionNotFound)
 	require.Nil(t, retry)
+}
+
+func TestCompleteSubscriptionOrderRejectsAlreadySuccessfulValuePackageOrder(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3114, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	order := SubscriptionOrder{
+		UserId:          user.Id,
+		PlanId:          day.Id,
+		Money:           day.PriceAmount,
+		TradeNo:         "vp-already-success-ordinary-complete",
+		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: PaymentProviderStripe,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      common.GetTimestamp(),
+		CompleteTime:    common.GetTimestamp(),
+	}
+	require.NoError(t, DB.Create(&order).Error)
+
+	err := CompleteSubscriptionOrder(order.TradeNo, "payload", PaymentProviderStripe, PaymentMethodStripe)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "超值套餐仅支持联动小铺购买")
 }
