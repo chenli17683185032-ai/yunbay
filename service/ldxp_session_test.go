@@ -1080,7 +1080,7 @@ func TestCreateLdxpValuePackageSessionRejectsActiveSessionWithoutOrderID(t *test
 
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
-	assert.Contains(t, err.Error(), "invalid active value package session")
+	assert.Contains(t, err.Error(), "active value package session mismatch")
 	assert.Nil(t, view)
 	assert.Nil(t, order)
 }
@@ -1125,7 +1125,8 @@ func TestCreateLdxpValuePackageSessionRejectsActiveSessionMissingOrder(t *testin
 	view, order, err := CreateLdxpValuePackageSession(1004, plan.Id, true, testLdxpSessionConfig(true))
 
 	require.Error(t, err)
-	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
+	assert.Contains(t, err.Error(), "active value package session mismatch")
 	assert.Nil(t, view)
 	assert.Nil(t, order)
 }

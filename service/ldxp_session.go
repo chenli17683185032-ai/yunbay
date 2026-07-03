@@ -184,11 +184,11 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 		}
 		if activeSession, err := findActiveLdxpValuePackageSessionForUserTx(tx, userID, now); err == nil {
 			if activeSession.SubscriptionOrderId <= 0 {
-				return fmt.Errorf("%w: invalid active value package session missing order", ErrLdxpInvalidSessionRequest)
+				return fmt.Errorf("%w: active value package session mismatch", ErrLdxpInvalidSessionRequest)
 			}
 			var existingOrder model.SubscriptionOrder
 			if err := tx.Where("id = ?", activeSession.SubscriptionOrderId).First(&existingOrder).Error; err != nil {
-				return err
+				return fmt.Errorf("%w: active value package session mismatch", ErrLdxpInvalidSessionRequest)
 			}
 			if !isLdxpValuePackageSessionRequestMatch(activeSession, &existingOrder, plan, confirmedCover) {
 				return fmt.Errorf("%w: active value package session mismatch", ErrLdxpInvalidSessionRequest)
