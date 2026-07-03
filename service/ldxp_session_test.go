@@ -17,14 +17,59 @@ import (
 
 func setupLdxpSessionServiceTest(t *testing.T) {
 	t.Helper()
-	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.SubscriptionOrder{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}))
+	ensureLdxpSessionSubscriptionPlanTable(t)
 	cleanup := func() {
 		require.NoError(t, model.DB.Exec("DELETE FROM ldxp_topup_sessions").Error)
 		require.NoError(t, model.DB.Exec("DELETE FROM ldxp_mail_events").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM user_value_package_preferences").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM user_subscriptions").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM subscription_orders").Error)
+		require.NoError(t, model.DB.Exec("DELETE FROM subscription_plans").Error)
 		require.NoError(t, model.DB.Exec("DELETE FROM users").Error)
 	}
 	cleanup()
 	t.Cleanup(cleanup)
+}
+
+func ensureLdxpSessionSubscriptionPlanTable(t *testing.T) {
+	t.Helper()
+	require.NoError(t, model.DB.Exec(`CREATE TABLE IF NOT EXISTS subscription_plans (
+		id integer PRIMARY KEY AUTOINCREMENT,
+		title varchar(128) NOT NULL,
+		subtitle varchar(255) DEFAULT '',
+		price_amount decimal(10,6) NOT NULL DEFAULT 0,
+		currency varchar(8) NOT NULL DEFAULT 'USD',
+		duration_unit varchar(16) NOT NULL DEFAULT 'month',
+		duration_value integer NOT NULL DEFAULT 1,
+		custom_seconds bigint NOT NULL DEFAULT 0,
+		enabled numeric DEFAULT 1,
+		sort_order integer DEFAULT 0,
+		plan_kind varchar(32) NOT NULL DEFAULT 'subscription',
+		package_type varchar(16) DEFAULT '',
+		package_level integer DEFAULT 0,
+		model_group varchar(64) DEFAULT '',
+		concurrency_limit integer DEFAULT 1,
+		limit5h_amount bigint NOT NULL DEFAULT 0,
+		limit7d_amount bigint NOT NULL DEFAULT 0,
+		benefits text,
+		ldxp_product_url text,
+		ldxp_product_name text,
+		ldxp_product_amount decimal(10,6) NOT NULL DEFAULT 0,
+		ldxp_product_ref varchar(128) DEFAULT '',
+		ldxp_session_ttl_seconds bigint NOT NULL DEFAULT 0,
+		allow_balance_pay numeric DEFAULT 1,
+		stripe_price_id varchar(128) DEFAULT '',
+		creem_product_id varchar(128) DEFAULT '',
+		waffo_pancake_product_id varchar(128) DEFAULT '',
+		max_purchase_per_user integer DEFAULT 0,
+		upgrade_group varchar(64) DEFAULT '',
+		total_amount bigint NOT NULL DEFAULT 0,
+		quota_reset_period varchar(16) DEFAULT 'never',
+		quota_reset_custom_seconds bigint DEFAULT 0,
+		created_at bigint,
+		updated_at bigint
+	)`).Error)
 }
 
 func testLdxpSessionConfig(enabled bool) *LdxpConfig {
@@ -915,4 +960,43 @@ func TestRecordLdxpWorkerErrorRejectsCreatedSessionAndDifferentWorker(t *testing
 	assert.Empty(t, claimed.ErrorCode)
 	assert.Empty(t, claimed.DebugSnapshotPath)
 	assert.EqualValues(t, 100, claimed.UpdatedTime)
+}
+
+func TestCreateLdxpValuePackageSessionUsesPlanProductConfig(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1001)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day",
+		LdxpProductName:       "日卡商品",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+
+	view, order, err := CreateLdxpValuePackageSession(1001, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.NoError(t, err)
+	require.NotNil(t, view)
+	require.NotNil(t, order)
+	assert.Equal(t, 9.9, view.Money)
+	assert.Equal(t, common.TopUpStatusPending, order.Status)
+	persisted, err := model.GetLdxpTopupSessionBySessionId(view.SessionID)
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpPurposeValuePackage, persisted.Purpose)
+	assert.Equal(t, order.Id, persisted.SubscriptionOrderId)
+	assert.Equal(t, plan.Id, persisted.SubscriptionPlanId)
+	assert.Equal(t, "https://ldxp.example.test/day", persisted.ProductUrl)
+	assert.Equal(t, "日卡商品", persisted.ProductName)
+	assert.EqualValues(t, persisted.CreatedTime+900, persisted.ExpiredTime)
 }

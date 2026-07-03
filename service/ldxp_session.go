@@ -6,6 +6,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -42,6 +43,11 @@ var ldxpCreateSessionMu sync.Mutex
 
 type LdxpCreateSessionRequest struct {
 	Amount int64 `json:"amount"`
+}
+
+type LdxpCreateValuePackageSessionRequest struct {
+	PlanId         int  `json:"plan_id"`
+	ConfirmedCover bool `json:"confirmed_cover"`
 }
 
 type LdxpSessionPublicView struct {
@@ -140,6 +146,74 @@ func CreateLdxpTopupSession(userID int, amount int64, cfg *LdxpConfig) (*LdxpSes
 		return nil, err
 	}
 	return publicLdxpSessionView(session), nil
+}
+
+func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, cfg *LdxpConfig) (*LdxpSessionPublicView, *model.SubscriptionOrder, error) {
+	if cfg == nil {
+		return nil, nil, fmt.Errorf("%w: missing config", ErrLdxpInvalidSessionRequest)
+	}
+	if !cfg.Enabled {
+		return nil, nil, ErrLdxpTopupDisabled
+	}
+	if userID <= 0 || planID <= 0 {
+		return nil, nil, fmt.Errorf("%w: invalid value package request", ErrLdxpInvalidSessionRequest)
+	}
+	plan, err := model.GetSubscriptionPlanById(planID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !plan.IsValuePackage() {
+		return nil, nil, fmt.Errorf("%w: not value package", ErrLdxpInvalidSessionRequest)
+	}
+	if strings.TrimSpace(plan.LdxpProductUrl) == "" || strings.TrimSpace(plan.LdxpProductName) == "" || plan.LdxpProductAmount <= 0 {
+		return nil, nil, fmt.Errorf("%w: ldxp product incomplete", ErrLdxpInvalidSessionRequest)
+	}
+	if _, err := model.CheckValuePackagePurchaseIntent(userID, planID, confirmedCover); err != nil {
+		return nil, nil, err
+	}
+
+	now := common.GetTimestamp()
+	ldxpCreateSessionMu.Lock()
+	defer ldxpCreateSessionMu.Unlock()
+
+	var session *model.LdxpTopupSession
+	var order *model.SubscriptionOrder
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockLdxpUserRowIfPossible(tx, userID); err != nil {
+			return err
+		}
+		if activeSession, err := findActiveLdxpValuePackageSessionForUserTx(tx, userID, now); err == nil {
+			session = activeSession
+			var existingOrder model.SubscriptionOrder
+			if activeSession.SubscriptionOrderId > 0 {
+				_ = tx.Where("id = ?", activeSession.SubscriptionOrderId).First(&existingOrder).Error
+				order = &existingOrder
+			}
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+
+		tradeNo := fmt.Sprintf("LDXP_VP-%d-%d-%s", userID, time.Now().UnixMilli(), common.GetRandomString(6))
+		order = &model.SubscriptionOrder{UserId: userID, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: tradeNo, PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, CreateTime: now, Status: common.TopUpStatusPending}
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+		sessionID, err := generateLdxpSessionID()
+		if err != nil {
+			return err
+		}
+		ttl := cfg.SessionTTLSeconds
+		if plan.LdxpSessionTTLSeconds > 0 {
+			ttl = plan.LdxpSessionTTLSeconds
+		}
+		session = &model.LdxpTopupSession{SessionId: sessionID, UserId: userID, Amount: 0, Money: plan.LdxpProductAmount, ProductUrl: plan.LdxpProductUrl, ProductName: plan.LdxpProductName, ContactEmail: cfg.ContactEmail, Status: model.LdxpStatusCreated, Purpose: model.LdxpPurposeValuePackage, SubscriptionOrderId: order.Id, SubscriptionPlanId: plan.Id, ConfirmedCover: confirmedCover, CreatedTime: now, UpdatedTime: now, ExpiredTime: now + ttl}
+		return tx.Create(session).Error
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return publicLdxpSessionView(session), order, nil
 }
 
 func GetLdxpSessionPublicView(sessionID string, userID int) (*LdxpSessionPublicView, error) {
@@ -478,7 +552,7 @@ func activeLdxpSessionStatuses() []string {
 func findActiveLdxpTopupSessionForUser(userID int, now int64) (*model.LdxpTopupSession, error) {
 	var session model.LdxpTopupSession
 	err := model.DB.
-		Where("user_id = ? AND status IN ? AND expired_time > ?", userID, activeLdxpSessionStatuses(), now).
+		Where("user_id = ? AND status IN ? AND expired_time > ? AND (purpose = ? OR purpose = '' OR purpose IS NULL)", userID, activeLdxpSessionStatuses(), now, model.LdxpPurposeTopup).
 		Order("created_time ASC, id ASC").
 		First(&session).Error
 	return &session, err
@@ -487,7 +561,19 @@ func findActiveLdxpTopupSessionForUser(userID int, now int64) (*model.LdxpTopupS
 func findActiveLdxpTopupSessionForUserTx(tx *gorm.DB, userID int, now int64) (*model.LdxpTopupSession, error) {
 	var session model.LdxpTopupSession
 	query := tx.
-		Where("user_id = ? AND status IN ? AND expired_time > ?", userID, activeLdxpSessionStatuses(), now).
+		Where("user_id = ? AND status IN ? AND expired_time > ? AND (purpose = ? OR purpose = '' OR purpose IS NULL)", userID, activeLdxpSessionStatuses(), now, model.LdxpPurposeTopup).
+		Order("created_time ASC, id ASC")
+	if !common.UsingSQLite {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&session).Error
+	return &session, err
+}
+
+func findActiveLdxpValuePackageSessionForUserTx(tx *gorm.DB, userID int, now int64) (*model.LdxpTopupSession, error) {
+	var session model.LdxpTopupSession
+	query := tx.
+		Where("user_id = ? AND status IN ? AND expired_time > ? AND purpose = ?", userID, activeLdxpSessionStatuses(), now, model.LdxpPurposeValuePackage).
 		Order("created_time ASC, id ASC")
 	if !common.UsingSQLite {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})

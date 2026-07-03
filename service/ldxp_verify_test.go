@@ -7,8 +7,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 //go:linkname initLdxpVerifyModelColumns github.com/QuantumNous/new-api/model.initCol
@@ -28,6 +30,26 @@ func setupLdxpVerifyServiceTest(t *testing.T) {
 	}
 	cleanup()
 	t.Cleanup(cleanup)
+}
+
+func setupLdxpVerifyValuePackageServiceTest(t *testing.T) {
+	t.Helper()
+	oldDB := model.DB
+	oldLogDB := model.LOG_DB
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.SubscriptionOrder{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}, &model.Redemption{}, &model.TopUp{}, &model.Log{}, &model.AffiliateCommission{}, &model.AffiliateWithdrawal{}))
+	ensureLdxpSessionSubscriptionPlanTable(t)
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+		model.DB = oldDB
+		model.LOG_DB = oldLogDB
+	})
 }
 
 func insertLdxpVerifyUserWithInviter(t *testing.T, userID int, quota int, inviterID int) {
@@ -827,4 +849,68 @@ func TestLdxpVerifyTask6Suite(t *testing.T) {
 	t.Run("RollsBackRedeemWritesWhenTopUpCreateFails", TestVerifyLdxpSessionRollsBackRedeemWritesWhenTopUpCreateFails)
 	t.Run("IsIdempotent", TestVerifyLdxpSessionIsIdempotent)
 	t.Run("StoresRedeemFailure", TestVerifyLdxpSessionStoresRedeemFailure)
+}
+
+func TestVerifyValuePackageLdxpSessionCreatesSubscriptionWithoutQuotaTopup(t *testing.T) {
+	setupLdxpVerifyValuePackageServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 7101, 12345)
+	var user model.User
+	require.NoError(t, model.DB.First(&user, 7101).Error)
+	originalQuota := user.Quota
+	plan := model.SubscriptionPlan{
+		Title:             "日卡",
+		PriceAmount:       9.9,
+		Currency:          "USD",
+		DurationUnit:      model.SubscriptionDurationDay,
+		DurationValue:     1,
+		Enabled:           true,
+		PlanKind:          model.SubscriptionPlanKindValuePackage,
+		PackageType:       model.ValuePackageTypeDay,
+		PackageLevel:      model.ValuePackageLevelDay,
+		ModelGroup:        "day-card",
+		ConcurrencyLimit:  1,
+		TotalAmount:       1000,
+		LdxpProductUrl:    "https://ldxp.example.test/day",
+		LdxpProductName:   "日卡商品",
+		LdxpProductAmount: 9.9,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	order := model.SubscriptionOrder{UserId: user.Id, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: "ldxp-vp-verify-order", PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, CreateTime: now, Status: common.TopUpStatusPending}
+	require.NoError(t, model.DB.Create(&order).Error)
+	session := &model.LdxpTopupSession{
+		SessionId:           "ldxp_verify_value_package",
+		UserId:              user.Id,
+		Amount:              0,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusWorkerPaid,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		ConfirmedCover:      true,
+		WorkerId:            "worker-a",
+		WorkerOrderNo:       "LDVERIFYVP",
+		WorkerAmount:        plan.LdxpProductAmount,
+		WorkerProductName:   plan.LdxpProductName,
+		WorkerStatusText:    "已付款",
+		WorkerSuccessUrl:    "https://pay.ldxp.cn/order/result/LDVERIFYVP",
+	}
+	insertLdxpVerifySession(t, session)
+
+	result, err := TryVerifyAndRedeemLdxpSession(session.SessionId)
+	require.NoError(t, err)
+	require.True(t, result.Redeemed)
+	require.Equal(t, model.LdxpStatusSuccess, result.Status)
+
+	var subs []model.UserSubscription
+	require.NoError(t, model.DB.Where("user_id = ?", user.Id).Find(&subs).Error)
+	require.Len(t, subs, 1)
+	require.Equal(t, plan.Id, subs[0].PlanId)
+
+	var reloaded model.User
+	require.NoError(t, model.DB.First(&reloaded, user.Id).Error)
+	require.Equal(t, originalQuota, reloaded.Quota)
 }

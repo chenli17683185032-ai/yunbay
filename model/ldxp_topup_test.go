@@ -367,3 +367,30 @@ func TestUpdateLdxpSessionStatusPersistsWorkerFields(t *testing.T) {
 	assert.EqualValues(t, 300, persisted.WorkerDetectedTime)
 	assert.EqualValues(t, 301, persisted.UpdatedTime)
 }
+
+func TestLdxpTopupSessionPersistsValuePackagePurpose(t *testing.T) {
+	setupLdxpTopupTest(t)
+
+	session := &LdxpTopupSession{
+		SessionId:           "ldxp-vp-session",
+		UserId:              1001,
+		Amount:              0,
+		Money:               9.90,
+		ProductUrl:          "https://example.test/value-package/day",
+		ProductName:         "日卡",
+		Status:              LdxpStatusCreated,
+		Purpose:             LdxpPurposeValuePackage,
+		SubscriptionOrderId: 7001,
+		SubscriptionPlanId:  8001,
+		CreatedTime:         100,
+		UpdatedTime:         100,
+		ExpiredTime:         200,
+	}
+
+	require.NoError(t, InsertLdxpTopupSession(session))
+	persisted, err := GetLdxpTopupSessionBySessionId("ldxp-vp-session")
+	require.NoError(t, err)
+	assert.Equal(t, LdxpPurposeValuePackage, persisted.Purpose)
+	assert.Equal(t, 7001, persisted.SubscriptionOrderId)
+	assert.Equal(t, 8001, persisted.SubscriptionPlanId)
+}

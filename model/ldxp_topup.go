@@ -10,6 +10,11 @@ import (
 )
 
 const (
+	LdxpPurposeTopup        = "topup"
+	LdxpPurposeValuePackage = "value_package"
+)
+
+const (
 	LdxpStatusCreated       = "created"
 	LdxpStatusWorkerClaimed = "worker_claimed"
 	LdxpStatusQrReady       = "qr_ready"
@@ -34,6 +39,10 @@ type LdxpTopupSession struct {
 	ProductUrl           string         `json:"product_url" gorm:"type:text"`
 	ProductName          string         `json:"product_name" gorm:"type:text"`
 	ContactEmail         string         `json:"contact_email" gorm:"type:varchar(255)"`
+	Purpose              string         `json:"purpose" gorm:"type:varchar(32);not null;default:'topup';index"`
+	SubscriptionOrderId  int            `json:"subscription_order_id" gorm:"index;default:0"`
+	SubscriptionPlanId   int            `json:"subscription_plan_id" gorm:"index;default:0"`
+	ConfirmedCover       bool           `json:"confirmed_cover" gorm:"default:false"`
 	Status               string         `json:"status" gorm:"type:varchar(64);index"`
 	WorkerId             string         `json:"worker_id" gorm:"type:varchar(128);index"`
 	QrCode               string         `json:"qr_code" gorm:"type:text"`

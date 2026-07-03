@@ -301,6 +301,9 @@ func migrateDB() error {
 		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
 			return err
 		}
+		if err := ensureLdxpTopupSessionTableSQLite(); err != nil {
+			return err
+		}
 	} else {
 		if err := DB.AutoMigrate(&SubscriptionPlan{}); err != nil {
 			return err
@@ -380,6 +383,9 @@ func migrateDBFast() error {
 			return err
 		}
 		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureLdxpTopupSessionTableSQLite(); err != nil {
 			return err
 		}
 	} else {
@@ -558,6 +564,41 @@ func ensureSubscriptionOrderTableSQLite() error {
 	}
 	required := []sqliteColumnDef{
 		{Name: "user_subscription_id", DDL: "`user_subscription_id` integer DEFAULT 0"},
+	}
+	for _, col := range required {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureLdxpTopupSessionTableSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "ldxp_topup_sessions"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := DB.Raw("PRAGMA table_info(`" + tableName + "`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	required := []sqliteColumnDef{
+		{Name: "purpose", DDL: "`purpose` varchar(32) NOT NULL DEFAULT 'topup'"},
+		{Name: "subscription_order_id", DDL: "`subscription_order_id` integer DEFAULT 0"},
+		{Name: "subscription_plan_id", DDL: "`subscription_plan_id` integer DEFAULT 0"},
+		{Name: "confirmed_cover", DDL: "`confirmed_cover` numeric DEFAULT 0"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {

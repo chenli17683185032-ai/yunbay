@@ -72,6 +72,7 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 
 	var result *LdxpVerifyResult
 	var redeemResult *model.RedeemResult
+	var valuePackageSessionToSettle *model.LdxpTopupSession
 	var redeemLogUserID int
 	var vipUpgradeUserID int
 	var vipUpgraded bool
@@ -116,6 +117,11 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 			}
 			if err := persistLdxpVerifiedTx(tx, session, nil); err != nil {
 				return err
+			}
+			if session.Purpose == model.LdxpPurposeValuePackage {
+				sessionCopy := *session
+				valuePackageSessionToSettle = &sessionCopy
+				return nil
 			}
 			directVIPUpgraded, err := directTopUpLdxpSessionTx(tx, session)
 			if err != nil {
@@ -194,6 +200,11 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 		if err := persistLdxpVerifiedTx(tx, session, event); err != nil {
 			return err
 		}
+		if session.Purpose == model.LdxpPurposeValuePackage {
+			sessionCopy := *session
+			valuePackageSessionToSettle = &sessionCopy
+			return nil
+		}
 		if err := beginLdxpRedeemSavePointTx(tx); err != nil {
 			return err
 		}
@@ -248,6 +259,19 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 	})
 	if err != nil {
 		return nil, err
+	}
+	if valuePackageSessionToSettle != nil {
+		if _, settleErr := model.CompleteValuePackageOrder(ldxpValuePackageTradeNo(model.DB, valuePackageSessionToSettle), "ldxp session verified", model.PaymentProviderLDXP, model.PaymentMethodLDXP, valuePackageSessionToSettle.ConfirmedCover); settleErr != nil {
+			message := strings.TrimSpace(settleErr.Error())
+			if updateErr := persistLdxpRedeemFailure(valuePackageSessionToSettle, message); updateErr != nil {
+				return nil, updateErr
+			}
+			return &LdxpVerifyResult{Verified: true, Redeemed: false, Status: model.LdxpStatusRedeemFailed, ErrorCode: ldxpVerifyCodeRedeemFailed, ErrorMessage: message}, nil
+		}
+		if updateErr := persistLdxpRedeemSuccess(valuePackageSessionToSettle); updateErr != nil {
+			return nil, updateErr
+		}
+		return &LdxpVerifyResult{Verified: true, Redeemed: true, Status: model.LdxpStatusSuccess}, nil
 	}
 	if result != nil && result.Redeemed && redeemResult != nil {
 		model.RecordRedeemLog(redeemLogUserID, redeemResult)
@@ -387,6 +411,21 @@ func RedeemLdxpSessionCardTx(tx *gorm.DB, session *model.LdxpTopupSession) (*mod
 	}
 	session.TopupId = 0
 	return result, nil
+}
+
+func ldxpValuePackageTradeNoTx(tx *gorm.DB, session *model.LdxpTopupSession) string {
+	return ldxpValuePackageTradeNo(tx, session)
+}
+
+func ldxpValuePackageTradeNo(db *gorm.DB, session *model.LdxpTopupSession) string {
+	if db == nil || session == nil || session.SubscriptionOrderId <= 0 {
+		return ""
+	}
+	var order model.SubscriptionOrder
+	if err := db.Where("id = ?", session.SubscriptionOrderId).First(&order).Error; err != nil {
+		return ""
+	}
+	return order.TradeNo
 }
 
 func directTopUpLdxpSessionTx(tx *gorm.DB, session *model.LdxpTopupSession) (bool, error) {
