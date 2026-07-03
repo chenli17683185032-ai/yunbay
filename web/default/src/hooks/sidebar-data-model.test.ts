@@ -34,6 +34,23 @@ const zh: Record<string, string> = {
 
 const t = (value: string) => zh[value] ?? value
 
+function findValuePackageItem(role: number) {
+  const items = buildSidebarData(t, role).navGroups.flatMap((group) => group.items)
+  const item = items.find((entry) => 'url' in entry && entry.url === '/value-packages')
+  assert.ok(item)
+  return item
+}
+
+test('ordinary value package sidebar entry is attention marked', () => {
+  const item = findValuePackageItem(1)
+  assert.equal('attention' in item ? item.attention : undefined, 'value-packages')
+})
+
+test('admin value package sidebar entry is attention marked', () => {
+  const item = findValuePackageItem(10)
+  assert.equal('attention' in item ? item.attention : undefined, 'value-packages')
+})
+
 test('ordinary users see quick-start and required user functions only', () => {
   const groups = buildSidebarData(t, 1).navGroups
   const items = groups.flatMap((group) => group.items)

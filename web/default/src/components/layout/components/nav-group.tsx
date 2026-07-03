@@ -20,6 +20,7 @@ import { type ReactNode, useState, useEffect } from 'react'
 import { Link, useLocation } from '@tanstack/react-router'
 import { ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
 import {
   Collapsible,
   CollapsibleContent,
@@ -123,6 +124,10 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
+        className={cn(
+          item.attention === 'value-packages' &&
+            'yunbay-sidebar-value-package-pulse'
+        )}
         isActive={checkIsActive(href, item)}
         tooltip={item.title}
         render={<Link to={item.url} onClick={() => setOpenMobile(false)} />}

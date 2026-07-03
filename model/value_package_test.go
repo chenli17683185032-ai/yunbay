@@ -365,6 +365,131 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	require.EqualValues(t, 1800, used7d)
 }
 
+func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3400, UserGroupVIP)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 100
+	day.Limit5hAmount = 50
+	day.Limit7dAmount = 75
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(25)).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "activate-summary-recent", Quota: 10, CreatedAt: now}))
+
+	state, err := ActivateValuePackage(user.Id, sub.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.True(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
+	require.NotNil(t, state.Usage)
+	require.EqualValues(t, 25, state.Usage.TotalUsed)
+	require.EqualValues(t, 100, state.Usage.TotalLimit)
+	require.EqualValues(t, 10, state.Usage.Used5h)
+	require.EqualValues(t, 50, state.Usage.Limit5h)
+}
+
+func TestGetValuePackageStateIncludesUsageSummary(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3401, UserGroupVIP)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 200
+	day.Limit5hAmount = 100
+	day.Limit7dAmount = 150
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(80)).Error)
+	_, err := upsertValuePackagePreferenceTx(DB, user.Id, true, sub.Id)
+	require.NoError(t, err)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "summary-recent", Quota: 40, CreatedAt: now}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "summary-older", Quota: 30, CreatedAt: now - 6*3600}))
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.Usage)
+	require.EqualValues(t, 80, state.Usage.TotalUsed)
+	require.EqualValues(t, 200, state.Usage.TotalLimit)
+	require.EqualValues(t, 120, state.Usage.TotalRemaining)
+	require.InDelta(t, 40.0, state.Usage.TotalPercent, 0.001)
+	require.EqualValues(t, 40, state.Usage.Used5h)
+	require.EqualValues(t, 100, state.Usage.Limit5h)
+	require.InDelta(t, 40.0, state.Usage.Percent5h, 0.001)
+	require.EqualValues(t, 70, state.Usage.Used7d)
+	require.EqualValues(t, 150, state.Usage.Limit7d)
+	require.InDelta(t, 46.666, state.Usage.Percent7d, 0.01)
+	require.False(t, state.Usage.Exhausted)
+	require.Empty(t, state.Usage.ExhaustedReason)
+
+	var reloaded User
+	require.NoError(t, DB.First(&reloaded, user.Id).Error)
+	require.Equal(t, UserGroupVIP, reloaded.Group)
+}
+
+func TestGetActiveValuePackageForRelayOmitsUsageSummary(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3403, UserGroupVIP)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 200
+	day.Limit5hAmount = 100
+	day.Limit7dAmount = 150
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(80)).Error)
+	_, err := upsertValuePackagePreferenceTx(DB, user.Id, true, sub.Id)
+	require.NoError(t, err)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "relay-summary-recent", Quota: 40, CreatedAt: now}))
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.Usage)
+
+	relayState, err := GetActiveValuePackageForRelay(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, relayState)
+	require.NotNil(t, relayState.Subscription)
+	require.Equal(t, sub.Id, relayState.Subscription.Id)
+	require.NotNil(t, relayState.Plan)
+	require.Equal(t, day.Id, relayState.Plan.Id)
+	require.NotEmpty(t, relayState.Plan.ModelGroup)
+	require.Nil(t, relayState.Usage)
+}
+
+func TestGetValuePackageStateMarksExhaustedUsageSummary(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3402, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 100
+	day.Limit5hAmount = 1000
+	day.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(100)).Error)
+	_, err := upsertValuePackagePreferenceTx(DB, user.Id, true, sub.Id)
+	require.NoError(t, err)
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state.Usage)
+	require.True(t, state.Usage.Exhausted)
+	require.Equal(t, ValuePackageExhaustedReasonTotal, state.Usage.ExhaustedReason)
+	require.Equal(t, ValuePackageQuotaExhaustedUserMessage, state.Usage.ExhaustedMessage)
+}
+
 func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3101, UserGroupTiyan)
@@ -808,4 +933,21 @@ func TestPreConsumeValuePackageSubscriptionOnlyAcceptsValuePackageAndIsIdempoten
 	_, err = PreConsumeValuePackageSubscription("regular-specific-preconsume", user.Id, regularSub.Id, 1)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not value package")
+}
+
+func TestPreConsumeValuePackageSubscriptionUsesUserFacingExhaustedMessage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3403, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 10
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(10)).Error)
+
+	_, err := PreConsumeValuePackageSubscription("vp-exhausted-message", user.Id, sub.Id, 1)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "subscription quota insufficient")
+	require.Contains(t, err.Error(), ValuePackageQuotaExhaustedUserMessage)
 }

@@ -3105,6 +3105,7 @@
     "Overrode user quota from {{from}} to {{to}}": "Quota de l'utilisateur remplacé de {{from}} à {{to}}",
     "Overview": "Vue d'ensemble",
     "Overwritten": "Écrasé",
+    "Package total limit": "Limite totale du forfait",
     "Package usage closed": "Utilisation du forfait fermée",
     "Page": "Page",
     "Page {{current}} of {{total}}": "Page {{current}} sur {{total}}",

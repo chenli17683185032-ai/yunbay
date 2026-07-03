@@ -52,6 +52,14 @@ const (
 )
 
 const (
+	ValuePackageExhaustedReasonTotal = "total_quota_exhausted"
+	ValuePackageExhaustedReason5h    = "limit_5h_exhausted"
+	ValuePackageExhaustedReason7d    = "limit_7d_exhausted"
+)
+
+const ValuePackageQuotaExhaustedUserMessage = "当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用"
+
+const (
 	UserSubscriptionStatusActive    = "active"
 	UserSubscriptionStatusExpired   = "expired"
 	UserSubscriptionStatusCancelled = "cancelled"
@@ -1173,10 +1181,27 @@ func CheckValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *Subscripti
 	return checkValuePackagePurchaseIntentTx(tx, userId, plan, confirmedCover)
 }
 
+type ValuePackageUsageSummary struct {
+	TotalUsed        int64   `json:"total_used"`
+	TotalLimit       int64   `json:"total_limit"`
+	TotalRemaining   int64   `json:"total_remaining"`
+	TotalPercent     float64 `json:"total_percent"`
+	Used5h           int64   `json:"used_5h"`
+	Limit5h          int64   `json:"limit_5h"`
+	Percent5h        float64 `json:"percent_5h"`
+	Used7d           int64   `json:"used_7d"`
+	Limit7d          int64   `json:"limit_7d"`
+	Percent7d        float64 `json:"percent_7d"`
+	Exhausted        bool    `json:"exhausted"`
+	ExhaustedReason  string  `json:"exhausted_reason"`
+	ExhaustedMessage string  `json:"exhausted_message"`
+}
+
 type ValuePackageState struct {
 	Preference   UserValuePackagePreference `json:"preference"`
 	Subscription *UserSubscription          `json:"subscription,omitempty"`
 	Plan         *SubscriptionPlan          `json:"plan,omitempty"`
+	Usage        *ValuePackageUsageSummary  `json:"usage,omitempty"`
 }
 
 func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
@@ -1198,7 +1223,7 @@ func GetValuePackageState(userId int) (*ValuePackageState, error) {
 }
 
 func GetActiveValuePackageForRelay(userId int) (*ValuePackageState, error) {
-	state, err := GetValuePackageState(userId)
+	state, err := loadValuePackageStateTx(DB, userId, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1212,6 +1237,10 @@ func GetActiveValuePackageForRelay(userId int) (*ValuePackageState, error) {
 }
 
 func getValuePackageStateTx(tx *gorm.DB, userId int) (*ValuePackageState, error) {
+	return loadValuePackageStateTx(tx, userId, true)
+}
+
+func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*ValuePackageState, error) {
 	if userId <= 0 {
 		return &ValuePackageState{}, nil
 	}
@@ -1250,7 +1279,76 @@ func getValuePackageStateTx(tx *gorm.DB, userId int) (*ValuePackageState, error)
 	}
 	state.Subscription = &sub
 	state.Plan = plan
+	if !includeUsage {
+		return state, nil
+	}
+	usage, err := buildValuePackageUsageSummaryTx(tx, userId, &sub, plan, now)
+	if err != nil {
+		return nil, err
+	}
+	state.Usage = usage
 	return state, nil
+}
+
+func valuePackagePercent(used int64, limit int64) float64 {
+	if limit <= 0 || used <= 0 {
+		return 0
+	}
+	percent := float64(used) * 100 / float64(limit)
+	if percent > 100 {
+		return 100
+	}
+	if percent < 0 {
+		return 0
+	}
+	return percent
+}
+
+func buildValuePackageUsageSummaryTx(tx *gorm.DB, userId int, sub *UserSubscription, plan *SubscriptionPlan, now int64) (*ValuePackageUsageSummary, error) {
+	if tx == nil {
+		tx = DB
+	}
+	if sub == nil || plan == nil || sub.Id <= 0 {
+		return nil, nil
+	}
+	if now <= 0 {
+		now = getDBTimestampTx(tx)
+	}
+	used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
+	if err != nil {
+		return nil, err
+	}
+	totalRemaining := int64(0)
+	if sub.AmountTotal > 0 && sub.AmountTotal > sub.AmountUsed {
+		totalRemaining = sub.AmountTotal - sub.AmountUsed
+	}
+	summary := &ValuePackageUsageSummary{
+		TotalUsed:      sub.AmountUsed,
+		TotalLimit:     sub.AmountTotal,
+		TotalRemaining: totalRemaining,
+		TotalPercent:   valuePackagePercent(sub.AmountUsed, sub.AmountTotal),
+		Used5h:         used5h,
+		Limit5h:        plan.Limit5hAmount,
+		Percent5h:      valuePackagePercent(used5h, plan.Limit5hAmount),
+		Used7d:         used7d,
+		Limit7d:        plan.Limit7dAmount,
+		Percent7d:      valuePackagePercent(used7d, plan.Limit7dAmount),
+	}
+	switch {
+	case sub.AmountTotal > 0 && sub.AmountUsed >= sub.AmountTotal:
+		summary.Exhausted = true
+		summary.ExhaustedReason = ValuePackageExhaustedReasonTotal
+	case plan.Limit5hAmount > 0 && used5h >= plan.Limit5hAmount:
+		summary.Exhausted = true
+		summary.ExhaustedReason = ValuePackageExhaustedReason5h
+	case plan.Limit7dAmount > 0 && used7d >= plan.Limit7dAmount:
+		summary.Exhausted = true
+		summary.ExhaustedReason = ValuePackageExhaustedReason7d
+	}
+	if summary.Exhausted {
+		summary.ExhaustedMessage = ValuePackageQuotaExhaustedUserMessage
+	}
+	return summary, nil
 }
 
 func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string, confirmedCover bool) (*UserSubscription, error) {
@@ -1476,7 +1574,11 @@ func ActivateValuePackage(userId int, userSubscriptionId int) (*ValuePackageStat
 		if err != nil {
 			return err
 		}
-		state = &ValuePackageState{Preference: *pref, Subscription: &sub, Plan: plan}
+		usage, err := buildValuePackageUsageSummaryTx(tx, userId, &sub, plan, now)
+		if err != nil {
+			return err
+		}
+		state = &ValuePackageState{Preference: *pref, Subscription: &sub, Plan: plan, Usage: usage}
 		return nil
 	})
 	return state, err
@@ -1998,17 +2100,17 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 		}
 		usedBefore := sub.AmountUsed
 		if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < amount {
-			return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+			return fmt.Errorf("subscription quota insufficient: %s, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 		used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
 		if err != nil {
 			return err
 		}
 		if plan.Limit5hAmount > 0 && used5h+amount > plan.Limit5hAmount {
-			return fmt.Errorf("subscription quota insufficient, 5h rolling limit exceeded, need=%d", amount)
+			return fmt.Errorf("subscription quota insufficient: %s, 5h rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 		if plan.Limit7dAmount > 0 && used7d+amount > plan.Limit7dAmount {
-			return fmt.Errorf("subscription quota insufficient, 7d rolling limit exceeded, need=%d", amount)
+			return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 
 		record := &SubscriptionPreConsumeRecord{

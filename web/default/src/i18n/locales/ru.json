@@ -3105,6 +3105,7 @@
     "Overrode user quota from {{from}} to {{to}}": "Квота пользователя изменена с {{from}} на {{to}}",
     "Overview": "Обзор",
     "Overwritten": "Перезаписано",
+    "Package total limit": "Общий лимит пакета",
     "Package usage closed": "Использование пакета отключено",
     "Page": "Страница",
     "Page {{current}} of {{total}}": "Страница {{current}} из {{total}}",

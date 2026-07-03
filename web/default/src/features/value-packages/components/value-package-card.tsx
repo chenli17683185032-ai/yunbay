@@ -16,7 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Clock, Gauge, Loader2, PauseCircle, Play, Shield } from 'lucide-react'
+import {
+  AlertTriangle,
+  Clock,
+  Gauge,
+  Loader2,
+  PauseCircle,
+  Play,
+  Shield,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -29,6 +37,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import {
   getPackageCardState,
@@ -63,6 +72,69 @@ function formatLimitAmount(amount: number, t: (key: string) => string): string {
   }
 
   return new Intl.NumberFormat().format(amount)
+}
+
+function clampPercent(percent: number): number {
+  if (!Number.isFinite(percent)) {
+    return 0
+  }
+
+  return Math.min(Math.max(percent, 0), 100)
+}
+
+function formatUsageAmount(amount: number): string {
+  if (!Number.isFinite(amount)) {
+    return '0'
+  }
+
+  return new Intl.NumberFormat().format(Math.max(0, Math.round(amount || 0)))
+}
+
+function getProgressToneClass(percent: number): string {
+  const clampedPercent = clampPercent(percent)
+
+  if (clampedPercent >= 90) {
+    return '[&_[data-slot=progress-indicator]]:bg-destructive'
+  }
+
+  if (clampedPercent >= 70) {
+    return '[&_[data-slot=progress-indicator]]:bg-amber-500'
+  }
+
+  return '[&_[data-slot=progress-indicator]]:bg-primary'
+}
+
+function LimitProgressRow({
+  label,
+  used,
+  limit,
+  percent,
+}: {
+  label: string
+  used: number
+  limit: number
+  percent: number
+}) {
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return null
+  }
+
+  const progressPercent = clampPercent(percent)
+
+  return (
+    <div className='flex flex-col gap-1.5'>
+      <div className='flex items-center justify-between gap-3 text-xs'>
+        <span className='text-muted-foreground font-medium'>{label}</span>
+        <span className='text-muted-foreground tabular-nums'>
+          {formatUsageAmount(used)} / {formatUsageAmount(limit)}
+        </span>
+      </div>
+      <Progress
+        value={progressPercent}
+        className={cn('h-1.5', getProgressToneClass(progressPercent))}
+      />
+    </div>
+  )
 }
 
 function getPlanDurationLabel(
@@ -157,6 +229,13 @@ export function ValuePackageCard({
   const displayPrice = Number(
     plan.ldxp_product_amount || plan.price_amount || 0
   )
+  const usage = state?.subscription?.plan_id === plan.id ? state.usage : null
+  const hasUsageProgress =
+    usage &&
+    (usage.total_limit > 0 || usage.limit_5h > 0 || usage.limit_7d > 0)
+  const exhaustedMessage =
+    usage?.exhausted_message ||
+    '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
 
   const handleAction = () => {
     if (disabled) {
@@ -262,6 +341,29 @@ export function ValuePackageCard({
           </div>
         </div>
 
+        {hasUsageProgress ? (
+          <div className='flex flex-col gap-3 rounded-lg border p-3'>
+            <LimitProgressRow
+              label={t('Package total limit')}
+              used={usage.total_used}
+              limit={usage.total_limit}
+              percent={usage.total_percent}
+            />
+            <LimitProgressRow
+              label={t('5-hour limit')}
+              used={usage.used_5h}
+              limit={usage.limit_5h}
+              percent={usage.percent_5h}
+            />
+            <LimitProgressRow
+              label={t('7-day limit')}
+              used={usage.used_7d}
+              limit={usage.limit_7d}
+              percent={usage.percent_7d}
+            />
+          </div>
+        ) : null}
+
         <Separator />
 
         <ul className='flex flex-col gap-2 text-sm'>
@@ -279,6 +381,13 @@ export function ValuePackageCard({
             <AlertDescription>
               {t('Closing package usage does not pause its countdown.')}
             </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {cardState.kind === 'running' && usage?.exhausted ? (
+          <Alert variant='destructive'>
+            <AlertTriangle className='size-4' />
+            <AlertDescription>{exhaustedMessage}</AlertDescription>
           </Alert>
         ) : null}
       </CardContent>

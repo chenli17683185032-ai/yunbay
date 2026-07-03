@@ -124,6 +124,22 @@ export interface UserValuePackagePreference {
   updated_at: number
 }
 
+export interface ValuePackageUsageSummary {
+  total_used: number
+  total_limit: number
+  total_remaining: number
+  total_percent: number
+  used_5h: number
+  limit_5h: number
+  percent_5h: number
+  used_7d: number
+  limit_7d: number
+  percent_7d: number
+  exhausted: boolean
+  exhausted_reason: string
+  exhausted_message: string
+}
+
 export interface ValuePackagePlan extends SubscriptionPlanLike {
   plan_kind: 'value_package'
   package_type: ValuePackageType
@@ -136,6 +152,7 @@ export interface ValuePackageState {
   preference: UserValuePackagePreference
   subscription?: UserSubscription | null
   plan?: ValuePackagePlan | null
+  usage?: ValuePackageUsageSummary | null
 }
 
 export type ValuePackagePlanRecord = ValuePackagePlan

@@ -29,6 +29,18 @@ test('value package card source keeps required user controls and limit copy', as
   assert.match(source, /Close package usage|关闭使用/)
   assert.match(source, /5-hour limit|5 小时限额/)
   assert.match(source, /7-day limit|7 天限额/)
+  assert.match(source, /Progress/)
+  assert.match(source, /Package total limit/)
+  assert.match(source, /formatUsageAmount/)
+  assert.match(source, /getProgressToneClass/)
+  assert.match(source, /!Number\.isFinite\(limit\) \|\| limit <= 0/)
+  assert.match(source, /hasUsageProgress/)
+  assert.match(source, /Math\.round\(amount \|\| 0\)/)
+  assert.doesNotMatch(source, /t=\{t\}/)
+  assert.match(
+    source,
+    /当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用/
+  )
   assert.match(
     source,
     /Closing package usage does not pause its countdown|停止使用.*继续计时|关闭.*不会暂停/
