@@ -404,6 +404,39 @@ func TestGetValuePackageStateIncludesUsageSummary(t *testing.T) {
 	require.Equal(t, UserGroupVIP, reloaded.Group)
 }
 
+func TestGetActiveValuePackageForRelayOmitsUsageSummary(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3403, UserGroupVIP)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 200
+	day.Limit5hAmount = 100
+	day.Limit7dAmount = 150
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(80)).Error)
+	_, err := upsertValuePackagePreferenceTx(DB, user.Id, true, sub.Id)
+	require.NoError(t, err)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "relay-summary-recent", Quota: 40, CreatedAt: now}))
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.Usage)
+
+	relayState, err := GetActiveValuePackageForRelay(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, relayState)
+	require.NotNil(t, relayState.Subscription)
+	require.Equal(t, sub.Id, relayState.Subscription.Id)
+	require.NotNil(t, relayState.Plan)
+	require.Equal(t, day.Id, relayState.Plan.Id)
+	require.NotEmpty(t, relayState.Plan.ModelGroup)
+	require.Nil(t, relayState.Usage)
+}
+
 func TestGetValuePackageStateMarksExhaustedUsageSummary(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3402, UserGroupTiyan)

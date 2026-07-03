@@ -1223,7 +1223,7 @@ func GetValuePackageState(userId int) (*ValuePackageState, error) {
 }
 
 func GetActiveValuePackageForRelay(userId int) (*ValuePackageState, error) {
-	state, err := GetValuePackageState(userId)
+	state, err := loadValuePackageStateTx(DB, userId, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1237,6 +1237,10 @@ func GetActiveValuePackageForRelay(userId int) (*ValuePackageState, error) {
 }
 
 func getValuePackageStateTx(tx *gorm.DB, userId int) (*ValuePackageState, error) {
+	return loadValuePackageStateTx(tx, userId, true)
+}
+
+func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*ValuePackageState, error) {
 	if userId <= 0 {
 		return &ValuePackageState{}, nil
 	}
@@ -1275,6 +1279,9 @@ func getValuePackageStateTx(tx *gorm.DB, userId int) (*ValuePackageState, error)
 	}
 	state.Subscription = &sub
 	state.Plan = plan
+	if !includeUsage {
+		return state, nil
+	}
 	usage, err := buildValuePackageUsageSummaryTx(tx, userId, &sub, plan, now)
 	if err != nil {
 		return nil, err
