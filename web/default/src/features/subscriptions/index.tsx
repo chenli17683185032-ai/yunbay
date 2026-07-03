@@ -27,6 +27,7 @@ import {
   useSubscriptions,
 } from './components/subscriptions-provider'
 import { SubscriptionsTable } from './components/subscriptions-table'
+import { ValuePackageAdminCards } from './components/value-package-admin-cards'
 
 function SubscriptionsContent() {
   const { t } = useTranslation()
@@ -70,6 +71,7 @@ function SubscriptionsContent() {
                 </AlertDescription>
               </Alert>
             ) : null}
+            <ValuePackageAdminCards />
             <div className='min-h-0 flex-1'>
               <SubscriptionsTable />
             </div>

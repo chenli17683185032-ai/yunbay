@@ -16,27 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Plus } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
-import { Button } from '@/components/ui/button'
-import { useSubscriptions } from './subscriptions-provider'
+import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
+import test from 'node:test'
 
-export function SubscriptionsPrimaryButtons() {
-  const { t } = useTranslation()
-  const { setOpen, setCurrentRow, complianceConfirmed } = useSubscriptions()
-  return (
-    <div className='flex gap-2'>
-      <Button
-        size='sm'
-        onClick={() => {
-          setCurrentRow(null)
-          setOpen('create')
-        }}
-        disabled={!complianceConfirmed}
-      >
-        <Plus className='h-4 w-4' />
-        {t('Create Plan')}
-      </Button>
-    </div>
-  )
-}
+const sourcePath = new URL('./value-package-admin-cards.tsx', import.meta.url)
+
+test('value package admin cards source contains all fixed package config fields', async () => {
+  const source = await readFile(sourcePath, 'utf8')
+
+  assert.match(source, /day/)
+  assert.match(source, /week/)
+  assert.match(source, /month/)
+  assert.match(source, /ldxp_product_url/)
+  assert.match(source, /plan\.currency/)
+  assert.match(source, /concurrency_limit/)
+  assert.match(source, /limit_5h_amount/)
+  assert.match(source, /limit_7d_amount/)
+  assert.match(source, /付款未配置|Payment not configured/)
+})

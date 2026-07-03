@@ -35,13 +35,29 @@ export const subscriptionPlanSchema = z.object({
   quota_reset_custom_seconds: z.number().optional(),
   enabled: z.boolean(),
   sort_order: z.number(),
-  allow_balance_pay: z.boolean().optional().default(true),
+  allow_balance_pay: z.boolean().nullable().optional().default(true),
   max_purchase_per_user: z.number(),
   total_amount: z.number(),
   upgrade_group: z.string().optional(),
   stripe_price_id: z.string().optional(),
   creem_product_id: z.string().optional(),
   waffo_pancake_product_id: z.string().optional(),
+  plan_kind: z
+    .enum(['subscription', 'value_package'])
+    .optional()
+    .default('subscription'),
+  package_type: z.enum(['day', 'week', 'month']).optional(),
+  package_level: z.number().optional(),
+  model_group: z.string().optional(),
+  concurrency_limit: z.number().optional(),
+  limit_5h_amount: z.number().optional(),
+  limit_7d_amount: z.number().optional(),
+  benefits: z.string().optional(),
+  ldxp_product_url: z.string().optional(),
+  ldxp_product_name: z.string().optional(),
+  ldxp_product_amount: z.number().optional(),
+  ldxp_product_ref: z.string().optional(),
+  ldxp_session_ttl_seconds: z.number().optional(),
 })
 
 export type SubscriptionPlan = z.infer<typeof subscriptionPlanSchema>

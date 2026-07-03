@@ -46,6 +46,21 @@ export function getPlanFormSchema(t: TFunction) {
     stripe_price_id: z.string().optional(),
     creem_product_id: z.string().optional(),
     waffo_pancake_product_id: z.string().optional(),
+    plan_kind: z
+      .enum(['subscription', 'value_package'])
+      .default('subscription'),
+    package_type: z.enum(['day', 'week', 'month']).optional(),
+    package_level: z.coerce.number().min(0).optional(),
+    model_group: z.string().optional(),
+    concurrency_limit: z.coerce.number().min(1).max(2).optional(),
+    limit_5h_amount: z.coerce.number().min(0).optional(),
+    limit_7d_amount: z.coerce.number().min(0).optional(),
+    benefits: z.string().optional(),
+    ldxp_product_url: z.string().optional(),
+    ldxp_product_name: z.string().optional(),
+    ldxp_product_amount: z.coerce.number().min(0).optional(),
+    ldxp_product_ref: z.string().optional(),
+    ldxp_session_ttl_seconds: z.coerce.number().min(0).optional(),
   })
 }
 
@@ -69,6 +84,19 @@ export const PLAN_FORM_DEFAULTS: PlanFormValues = {
   stripe_price_id: '',
   creem_product_id: '',
   waffo_pancake_product_id: '',
+  plan_kind: 'subscription',
+  package_type: undefined,
+  package_level: 0,
+  model_group: '',
+  concurrency_limit: 1,
+  limit_5h_amount: 0,
+  limit_7d_amount: 0,
+  benefits: '',
+  ldxp_product_url: '',
+  ldxp_product_name: '',
+  ldxp_product_amount: 0,
+  ldxp_product_ref: '',
+  ldxp_session_ttl_seconds: 0,
 }
 
 export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
@@ -90,10 +118,41 @@ export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
     stripe_price_id: plan.stripe_price_id || '',
     creem_product_id: plan.creem_product_id || '',
     waffo_pancake_product_id: plan.waffo_pancake_product_id || '',
+    plan_kind: plan.plan_kind || 'subscription',
+    package_type: plan.package_type,
+    package_level: Number(plan.package_level || 0),
+    model_group: plan.model_group || '',
+    concurrency_limit: Number(plan.concurrency_limit || 1),
+    limit_5h_amount: quotaUnitsToDollars(Number(plan.limit_5h_amount || 0)),
+    limit_7d_amount: quotaUnitsToDollars(Number(plan.limit_7d_amount || 0)),
+    benefits: plan.benefits || '',
+    ldxp_product_url: plan.ldxp_product_url || '',
+    ldxp_product_name: plan.ldxp_product_name || '',
+    ldxp_product_amount: Number(plan.ldxp_product_amount || 0),
+    ldxp_product_ref: plan.ldxp_product_ref || '',
+    ldxp_session_ttl_seconds: Number(plan.ldxp_session_ttl_seconds || 0),
+  }
+}
+
+function getValuePackageLevel(packageType?: string): number {
+  switch (packageType) {
+    case 'day':
+      return 1
+    case 'week':
+      return 2
+    case 'month':
+      return 3
+    default:
+      return 0
   }
 }
 
 export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
+  const isValuePackage = values.plan_kind === 'value_package'
+  const packageLevel = isValuePackage
+    ? getValuePackageLevel(values.package_type)
+    : Number(values.package_level || 0)
+
   return {
     plan: {
       ...values,
@@ -109,7 +168,25 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
       sort_order: Number(values.sort_order || 0),
       max_purchase_per_user: Number(values.max_purchase_per_user || 0),
       total_amount: parseQuotaFromDollars(Number(values.total_amount || 0)),
-      upgrade_group: values.upgrade_group || '',
+      plan_kind: values.plan_kind || 'subscription',
+      package_type: isValuePackage ? values.package_type : undefined,
+      package_level: packageLevel,
+      model_group: values.model_group || '',
+      concurrency_limit: Number(values.concurrency_limit || 1),
+      limit_5h_amount: parseQuotaFromDollars(
+        Number(values.limit_5h_amount || 0)
+      ),
+      limit_7d_amount: parseQuotaFromDollars(
+        Number(values.limit_7d_amount || 0)
+      ),
+      benefits: values.benefits || '',
+      ldxp_product_url: values.ldxp_product_url || '',
+      ldxp_product_name: values.ldxp_product_name || '',
+      ldxp_product_amount: Number(values.ldxp_product_amount || 0),
+      ldxp_product_ref: values.ldxp_product_ref || '',
+      ldxp_session_ttl_seconds: Number(values.ldxp_session_ttl_seconds || 0),
+      allow_balance_pay: isValuePackage ? false : values.allow_balance_pay,
+      upgrade_group: isValuePackage ? '' : values.upgrade_group || '',
     },
   }
 }

@@ -29,7 +29,7 @@ export function SubscriptionsDialogs() {
       <SubscriptionsMutateDrawer
         open={open === 'create' || isUpdate}
         onOpenChange={(isOpen) => !isOpen && setOpen(null)}
-        currentRow={isUpdate ? currentRow || undefined : undefined}
+        currentRow={currentRow || undefined}
       />
       <ToggleStatusDialog />
     </>

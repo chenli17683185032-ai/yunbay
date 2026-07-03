@@ -45,3 +45,39 @@ export function getDurationUnitOptions(t: TFunction) {
 export function getResetPeriodOptions(t: TFunction) {
   return RESET_PERIODS.map((p) => ({ value: p.value, label: t(p.labelKey) }))
 }
+
+export const VALUE_PACKAGE_TYPES = [
+  {
+    value: 'day',
+    labelKey: 'Day Card',
+    level: 1,
+    durationUnit: 'day',
+    durationValue: 1,
+  },
+  {
+    value: 'week',
+    labelKey: 'Week Card',
+    level: 2,
+    durationUnit: 'day',
+    durationValue: 7,
+  },
+  {
+    value: 'month',
+    labelKey: 'Month Card',
+    level: 3,
+    durationUnit: 'month',
+    durationValue: 1,
+  },
+] as const
+
+export function getValuePackageTypeOptions(t: TFunction) {
+  return VALUE_PACKAGE_TYPES.map((p) => ({
+    value: p.value,
+    label: t(p.labelKey),
+    level: p.level,
+  }))
+}
+
+export function getValuePackageLevel(packageType?: string): number {
+  return VALUE_PACKAGE_TYPES.find((p) => p.value === packageType)?.level || 0
+}
