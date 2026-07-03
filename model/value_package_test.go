@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -336,6 +337,31 @@ func TestCompleteValuePackageOrderRejectsExistingBalanceTopUpTradeNo(t *testing.
 	var topup TopUp
 	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&topup).Error)
 	require.EqualValues(t, 100, topup.Amount)
+}
+
+func TestCompleteValuePackageOrderPreservesOrderLookupDBError(t *testing.T) {
+	setupValuePackageTestDB(t)
+	forcedErr := errors.New("forced subscription order lookup failure")
+	callbackName := "test:force_subscription_order_lookup_error:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "SubscriptionOrder" {
+			return
+		}
+		where := fmt.Sprintf("%#v", tx.Statement.Clauses["WHERE"].Expression)
+		if strings.Contains(where, "trade_no = ?") {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, DB.Callback().Query().Remove(callbackName))
+	})
+
+	completed, err := CompleteValuePackageOrder("vp-order-db-error", "payload", PaymentProviderLDXP, PaymentMethodLDXP, true)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, forcedErr)
+	require.False(t, errors.Is(err, ErrSubscriptionOrderNotFound), "infrastructure lookup errors must not be converted to order-not-found business errors")
+	require.Nil(t, completed)
 }
 
 func TestCompleteValuePackageOrderUsesActualPaymentMethodForOrderAndTopUp(t *testing.T) {

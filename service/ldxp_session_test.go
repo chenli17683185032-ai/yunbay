@@ -1131,6 +1131,66 @@ func TestCreateLdxpValuePackageSessionRejectsActiveSessionMissingOrder(t *testin
 	assert.Nil(t, order)
 }
 
+func TestCreateLdxpValuePackageSessionPreservesActiveOrderLookupDBError(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1014)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡 active db error",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day-db-error",
+		LdxpProductName:       "日卡商品 db error",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	require.NoError(t, model.InsertLdxpTopupSession(&model.LdxpTopupSession{
+		SessionId:           "ldxp_value_package_active_order_db_error",
+		UserId:              1014,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusCreated,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: 424243,
+		SubscriptionPlanId:  plan.Id,
+		CreatedTime:         now,
+		UpdatedTime:         now,
+		ExpiredTime:         now + 900,
+	}))
+	forcedErr := errors.New("forced active linked order lookup failure")
+	callbackName := "test:force_active_linked_order_lookup_error:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, model.DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "SubscriptionOrder" {
+			return
+		}
+		where := fmt.Sprintf("%#v", tx.Statement.Clauses["WHERE"].Expression)
+		if strings.Contains(where, "id = ?") {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	})
+
+	view, order, err := CreateLdxpValuePackageSession(1014, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, forcedErr)
+	require.False(t, errors.Is(err, ErrLdxpInvalidSessionRequest), "infrastructure lookup errors must not be converted to invalid session request")
+	assert.Nil(t, view)
+	assert.Nil(t, order)
+}
+
 func TestCreateLdxpValuePackageSessionRejectsActiveSessionForDifferentPlan(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	insertLdxpUserForServiceTest(t, 1005)

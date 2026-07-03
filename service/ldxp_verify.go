@@ -434,6 +434,9 @@ func settleLdxpValuePackageSession(session *model.LdxpTopupSession) (*LdxpVerify
 	}
 	if _, settleErr := model.CompleteValuePackageOrder(linkedOrder.TradeNo, "ldxp session verified", model.PaymentProviderLDXP, model.PaymentMethodLDXP, session.ConfirmedCover); settleErr != nil {
 		message := strings.TrimSpace(settleErr.Error())
+		if !isLdxpValuePackageSettlementBusinessError(settleErr) {
+			return nil, settleErr
+		}
 		if updateErr := model.DB.Transaction(func(tx *gorm.DB) error {
 			return persistLdxpRedeemFailureTx(tx, session, message)
 		}); updateErr != nil {
@@ -447,6 +450,35 @@ func settleLdxpValuePackageSession(session *model.LdxpTopupSession) (*LdxpVerify
 		return nil, updateErr
 	}
 	return &LdxpVerifyResult{Verified: true, Redeemed: true, Status: model.LdxpStatusSuccess}, nil
+}
+
+func isLdxpValuePackageSettlementBusinessError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, model.ErrSubscriptionOrderNotFound) ||
+		errors.Is(err, model.ErrPaymentMethodMismatch) ||
+		errors.Is(err, model.ErrSubscriptionOrderStatusInvalid) {
+		return true
+	}
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		return false
+	}
+	businessMessages := []string{
+		"tradeNo is empty",
+		"order plan is not value package",
+		"购买高级套餐需要确认覆盖当前低级套餐",
+		"当前已有更高等级套餐未过期，暂不能购买低等级套餐",
+		"completed order missing user subscription id",
+		"completed subscription not found",
+	}
+	for _, businessMessage := range businessMessages {
+		if strings.Contains(message, businessMessage) {
+			return true
+		}
+	}
+	return false
 }
 
 var errLdxpLinkedValuePackageOrderMismatch = errors.New("linked value package order mismatch")

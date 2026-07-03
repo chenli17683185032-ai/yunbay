@@ -1,7 +1,9 @@
 package service
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	_ "unsafe"
 
@@ -1114,4 +1116,45 @@ func TestVerifyValuePackageLdxpSessionRejectsLinkedOrderPlanAndMoneyMismatch(t *
 	var subCount int64
 	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", 7204).Count(&subCount).Error)
 	assert.Zero(t, subCount)
+}
+
+func TestVerifyValuePackageLdxpSessionKeepsSettlementDBErrorRetryable(t *testing.T) {
+	setupLdxpVerifyValuePackageServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 7205, 12345)
+	plan := createLdxpVerifyValuePackagePlan(t, "日卡 settlement db error", 9.9)
+	now := common.GetTimestamp()
+	order := model.SubscriptionOrder{UserId: 7205, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: "ldxp-vp-settlement-db-error-order", PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, CreateTime: now, Status: common.TopUpStatusPending}
+	require.NoError(t, model.DB.Create(&order).Error)
+	insertPaidLdxpValuePackageVerifySession(t, "ldxp_verify_value_package_settlement_db_error", 7205, plan, order.Id)
+	forcedErr := errors.New("forced value package settlement order lookup failure")
+	callbackName := "test:force_value_package_settlement_lookup_error:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, model.DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "SubscriptionOrder" {
+			return
+		}
+		where := fmt.Sprintf("%#v", tx.Statement.Clauses["WHERE"].Expression)
+		if strings.Contains(where, "trade_no = ?") {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	})
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_value_package_settlement_db_error")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, forcedErr)
+	assert.Nil(t, result)
+	persisted, loadErr := model.GetLdxpTopupSessionBySessionId("ldxp_verify_value_package_settlement_db_error")
+	require.NoError(t, loadErr)
+	assert.Equal(t, model.LdxpStatusVerified, persisted.Status)
+	assert.NotEqual(t, model.LdxpStatusRedeemFailed, persisted.Status)
+	assert.Empty(t, persisted.ErrorCode)
+	assert.Empty(t, persisted.ErrorMessage)
+	var reloadedOrder model.SubscriptionOrder
+	require.NoError(t, model.DB.First(&reloadedOrder, order.Id).Error)
+	assert.Equal(t, common.TopUpStatusPending, reloadedOrder.Status)
+	assert.Zero(t, reloadedOrder.UserSubscriptionId)
 }
