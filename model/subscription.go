@@ -196,8 +196,8 @@ type SubscriptionPlan struct {
 
 	ModelGroup       string `json:"model_group" gorm:"type:varchar(64);default:''"`
 	ConcurrencyLimit int    `json:"concurrency_limit" gorm:"type:int;default:1"`
-	Limit5hAmount    int64  `json:"limit_5h_amount" gorm:"type:bigint;not null;default:0"`
-	Limit7dAmount    int64  `json:"limit_7d_amount" gorm:"type:bigint;not null;default:0"`
+	Limit5hAmount    int64  `json:"limit_5h_amount" gorm:"column:limit_5h_amount;type:bigint;not null;default:0"`
+	Limit7dAmount    int64  `json:"limit_7d_amount" gorm:"column:limit_7d_amount;type:bigint;not null;default:0"`
 	Benefits         string `json:"benefits" gorm:"type:text"`
 
 	LdxpProductUrl        string  `json:"ldxp_product_url" gorm:"type:text"`
@@ -230,6 +230,9 @@ type SubscriptionPlan struct {
 }
 
 func (p *SubscriptionPlan) BeforeCreate(tx *gorm.DB) error {
+	if err := ensureSubscriptionPlanValuePackageColumnsTx(tx); err != nil {
+		return err
+	}
 	now := common.GetTimestamp()
 	p.CreatedAt = now
 	p.UpdatedAt = now
@@ -237,7 +240,41 @@ func (p *SubscriptionPlan) BeforeCreate(tx *gorm.DB) error {
 }
 
 func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
+	if err := ensureSubscriptionPlanValuePackageColumnsTx(tx); err != nil {
+		return err
+	}
 	p.UpdatedAt = common.GetTimestamp()
+	return nil
+}
+
+func ensureSubscriptionPlanValuePackageColumnsTx(tx *gorm.DB) error {
+	if tx == nil || !common.UsingSQLite {
+		return nil
+	}
+	var cols []struct {
+		Name string `gorm:"column:name"`
+	}
+	if err := tx.Raw("PRAGMA table_info(`subscription_plans`)").Scan(&cols).Error; err != nil {
+		return err
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	existing := make(map[string]struct{}, len(cols))
+	for _, c := range cols {
+		existing[c.Name] = struct{}{}
+	}
+	for _, col := range []sqliteColumnDef{
+		{Name: "limit_5h_amount", DDL: "`limit_5h_amount` bigint NOT NULL DEFAULT 0"},
+		{Name: "limit_7d_amount", DDL: "`limit_7d_amount` bigint NOT NULL DEFAULT 0"},
+	} {
+		if _, ok := existing[col.Name]; ok {
+			continue
+		}
+		if err := tx.Exec("ALTER TABLE `subscription_plans` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1088,6 +1125,59 @@ type ValuePackageState struct {
 	Preference   UserValuePackagePreference `json:"preference"`
 	Subscription *UserSubscription          `json:"subscription,omitempty"`
 	Plan         *SubscriptionPlan          `json:"plan,omitempty"`
+}
+
+func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
+	var plans []SubscriptionPlan
+	if err := DB.Where("plan_kind = ?", SubscriptionPlanKindValuePackage).
+		Order("package_level asc, sort_order desc, id desc").
+		Find(&plans).Error; err != nil {
+		return nil, err
+	}
+	for i := range plans {
+		plans[i].NormalizeDefaults()
+		normalizeValuePackagePlan(&plans[i])
+	}
+	return plans, nil
+}
+
+func GetValuePackageState(userId int) (*ValuePackageState, error) {
+	if userId <= 0 {
+		return &ValuePackageState{}, nil
+	}
+	var pref UserValuePackagePreference
+	if err := DB.Where("user_id = ?", userId).First(&pref).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return &ValuePackageState{Preference: UserValuePackagePreference{UserId: userId}}, nil
+		}
+		return nil, err
+	}
+	state := &ValuePackageState{Preference: pref}
+	if !pref.Enabled || pref.ActiveUserSubscriptionId <= 0 {
+		return state, nil
+	}
+	now := GetDBTimestamp()
+	var sub UserSubscription
+	if err := DB.Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", pref.ActiveUserSubscriptionId, userId, UserSubscriptionStatusActive, now).First(&sub).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return state, nil
+		}
+		return nil, err
+	}
+	plan, err := GetSubscriptionPlanById(sub.PlanId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return state, nil
+		}
+		return nil, err
+	}
+	normalizeValuePackagePlan(plan)
+	if !plan.IsValuePackage() || !plan.Enabled {
+		return state, nil
+	}
+	state.Subscription = &sub
+	state.Plan = plan
+	return state, nil
 }
 
 func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string, confirmedCover bool) (*UserSubscription, error) {

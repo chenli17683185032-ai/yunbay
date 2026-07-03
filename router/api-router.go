@@ -187,6 +187,17 @@ func SetApiRouter(router *gin.Engine) {
 			subscriptionRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestCreemPay)
 			subscriptionRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.SubscriptionRequestWaffoPancakePay)
 		}
+
+		valuePackageRoute := apiRouter.Group("/value-packages")
+		valuePackageRoute.Use(middleware.UserAuth())
+		{
+			valuePackageRoute.GET("/plans", controller.GetValuePackagePlans)
+			valuePackageRoute.GET("/self", controller.GetValuePackageSelf)
+			valuePackageRoute.GET("/plans/:plan_id/purchase-intent", controller.GetValuePackagePurchaseIntent)
+			valuePackageRoute.POST("/plans/:plan_id/ldxp/session", middleware.CriticalRateLimit(), controller.CreateValuePackageLdxpSession)
+			valuePackageRoute.POST("/activate", controller.ActivateValuePackageSelf)
+			valuePackageRoute.POST("/deactivate", controller.DeactivateValuePackageSelf)
+		}
 		subscriptionAdminRoute := apiRouter.Group("/subscription/admin")
 		subscriptionAdminRoute.Use(middleware.AdminAuth())
 		{

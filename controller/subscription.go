@@ -138,6 +138,59 @@ type AdminUpsertSubscriptionPlanRequest struct {
 	Plan model.SubscriptionPlan `json:"plan"`
 }
 
+func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) string {
+	if plan == nil {
+		return "参数错误"
+	}
+	plan.PlanKind = strings.TrimSpace(plan.PlanKind)
+	plan.PackageType = strings.TrimSpace(plan.PackageType)
+	plan.ModelGroup = strings.TrimSpace(plan.ModelGroup)
+	plan.Benefits = strings.TrimSpace(plan.Benefits)
+	plan.LdxpProductUrl = strings.TrimSpace(plan.LdxpProductUrl)
+	plan.LdxpProductName = strings.TrimSpace(plan.LdxpProductName)
+	plan.LdxpProductRef = strings.TrimSpace(plan.LdxpProductRef)
+	plan.NormalizeDefaults()
+	if plan.PlanKind != model.SubscriptionPlanKindValuePackage {
+		return ""
+	}
+
+	plan.UpgradeGroup = ""
+	switch plan.PackageType {
+	case model.ValuePackageTypeDay:
+		if plan.PackageLevel <= 0 {
+			plan.PackageLevel = model.ValuePackageLevelDay
+		}
+	case model.ValuePackageTypeWeek:
+		if plan.PackageLevel <= 0 {
+			plan.PackageLevel = model.ValuePackageLevelWeek
+		}
+	case model.ValuePackageTypeMonth:
+		if plan.PackageLevel <= 0 {
+			plan.PackageLevel = model.ValuePackageLevelMonth
+		}
+	default:
+		return "套餐类型必须是 day、week 或 month"
+	}
+	if plan.ModelGroup == "" {
+		return "套餐模型分组不能为空"
+	}
+	if plan.ConcurrencyLimit != 1 && plan.ConcurrencyLimit != 2 {
+		return "并发限制必须为1或2"
+	}
+	if plan.Limit5hAmount < 0 || plan.Limit7dAmount < 0 {
+		return "套餐额度不能为负数"
+	}
+	if plan.Limit5hAmount > 0 && plan.Limit7dAmount > 0 && plan.Limit7dAmount < plan.Limit5hAmount {
+		return "7天额度不能小于5小时额度"
+	}
+	if plan.Enabled {
+		if plan.LdxpProductUrl == "" || plan.LdxpProductName == "" || plan.LdxpProductAmount <= 0 || plan.LdxpSessionTTLSeconds <= 0 {
+			return "启用超值套餐时必须配置 LDXP 商品链接、名称、金额和会话有效期"
+		}
+	}
+	return ""
+}
+
 func AdminCreateSubscriptionPlan(c *gin.Context) {
 	if !requirePaymentCompliance(c) {
 		return
@@ -183,7 +236,7 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup != "" {
+	if req.Plan.PlanKind != model.SubscriptionPlanKindValuePackage && req.Plan.UpgradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
 			common.ApiErrorMsg(c, "升级分组不存在")
 			return
@@ -192,6 +245,10 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
 	if req.Plan.QuotaResetPeriod == model.SubscriptionResetCustom && req.Plan.QuotaResetCustomSeconds <= 0 {
 		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
+		return
+	}
+	if msg := normalizeAndValidateSubscriptionPlanRequest(&req.Plan); msg != "" {
+		common.ApiErrorMsg(c, msg)
 		return
 	}
 	err := model.DB.Create(&req.Plan).Error
@@ -250,7 +307,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
-	if req.Plan.UpgradeGroup != "" {
+	if req.Plan.PlanKind != model.SubscriptionPlanKindValuePackage && req.Plan.UpgradeGroup != "" {
 		if _, ok := ratio_setting.GetGroupRatioCopy()[req.Plan.UpgradeGroup]; !ok {
 			common.ApiErrorMsg(c, "升级分组不存在")
 			return
@@ -259,6 +316,10 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	req.Plan.QuotaResetPeriod = model.NormalizeResetPeriod(req.Plan.QuotaResetPeriod)
 	if req.Plan.QuotaResetPeriod == model.SubscriptionResetCustom && req.Plan.QuotaResetCustomSeconds <= 0 {
 		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
+		return
+	}
+	if msg := normalizeAndValidateSubscriptionPlanRequest(&req.Plan); msg != "" {
+		common.ApiErrorMsg(c, msg)
 		return
 	}
 
@@ -274,6 +335,19 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"custom_seconds":             req.Plan.CustomSeconds,
 			"enabled":                    req.Plan.Enabled,
 			"sort_order":                 req.Plan.SortOrder,
+			"plan_kind":                  req.Plan.PlanKind,
+			"package_type":               req.Plan.PackageType,
+			"package_level":              req.Plan.PackageLevel,
+			"model_group":                req.Plan.ModelGroup,
+			"concurrency_limit":          req.Plan.ConcurrencyLimit,
+			"limit_5h_amount":            req.Plan.Limit5hAmount,
+			"limit_7d_amount":            req.Plan.Limit7dAmount,
+			"benefits":                   req.Plan.Benefits,
+			"ldxp_product_url":           req.Plan.LdxpProductUrl,
+			"ldxp_product_name":          req.Plan.LdxpProductName,
+			"ldxp_product_amount":        req.Plan.LdxpProductAmount,
+			"ldxp_product_ref":           req.Plan.LdxpProductRef,
+			"ldxp_session_ttl_seconds":   req.Plan.LdxpSessionTTLSeconds,
 			"stripe_price_id":            req.Plan.StripePriceId,
 			"creem_product_id":           req.Plan.CreemProductId,
 			"waffo_pancake_product_id":   req.Plan.WaffoPancakeProductId,
