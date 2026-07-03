@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -60,4 +62,38 @@ func TestMarkVIPUpgradeModalSeen(t *testing.T) {
 		require.NoError(t, err)
 		assert.False(t, setting.VipUpgradeModalSeen)
 	})
+}
+
+func TestUpdateUserSettingPreservesVIPUpgradeModalSeen(t *testing.T) {
+	setupValuePackageControllerTest(t)
+
+	user := createVIPModalTestUser(t, "vip-modal-setting-preserve", model.UserGroupVIP)
+	setting := user.GetSetting()
+	setting.VipUpgradeModalSeen = true
+	setting.UpstreamModelUpdateNotifyEnabled = true
+	user.SetSetting(setting)
+	require.NoError(t, user.Update(false))
+
+	recorder := valuePackageControllerRequest(UpdateUserSetting, http.MethodPut, "/user/setting", gin.H{
+		"notify_type":                           dto.NotifyTypeEmail,
+		"quota_warning_threshold":              12.5,
+		"notification_email":                   "vip-modal-setting-preserve@example.test",
+		"accept_unset_model_ratio_model":       true,
+		"record_ip_log":                        true,
+		"upstream_model_update_notify_enabled": false,
+	}, user.Id)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	body := decodeTestResponse(t, recorder)
+	assert.Equal(t, true, body["success"])
+
+	savedSetting, err := model.GetUserSetting(user.Id, true)
+	require.NoError(t, err)
+	assert.True(t, savedSetting.VipUpgradeModalSeen)
+	assert.Equal(t, dto.NotifyTypeEmail, savedSetting.NotifyType)
+	assert.Equal(t, 12.5, savedSetting.QuotaWarningThreshold)
+	assert.Equal(t, "vip-modal-setting-preserve@example.test", savedSetting.NotificationEmail)
+	assert.True(t, savedSetting.AcceptUnsetRatioModel)
+	assert.True(t, savedSetting.RecordIpLog)
+	assert.True(t, savedSetting.UpstreamModelUpdateNotifyEnabled)
 }
