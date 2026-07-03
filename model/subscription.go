@@ -592,6 +592,10 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
+	normalizeValuePackagePlan(plan)
+	if plan.IsValuePackage() {
+		return nil, errors.New("超值套餐不能通过普通订阅创建，请使用超值套餐专用流程")
+	}
 	if plan.MaxPurchasePerUser > 0 {
 		var count int64
 		if err := tx.Model(&UserSubscription{}).
@@ -972,23 +976,17 @@ func HasActiveUserSubscription(userId int) (bool, error) {
 		return false, errors.New("invalid userId")
 	}
 	now := common.GetTimestamp()
-	var subs []UserSubscription
-	if err := DB.Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-		Order("end_time desc, id desc").
-		Find(&subs).Error; err != nil {
+	var count int64
+	err := DB.Table("user_subscriptions").
+		Joins("JOIN subscription_plans ON subscription_plans.id = user_subscriptions.plan_id").
+		Where("user_subscriptions.user_id = ? AND user_subscriptions.status = ? AND user_subscriptions.end_time > ?", userId, UserSubscriptionStatusActive, now).
+		Where("(subscription_plans.plan_kind = ? OR subscription_plans.plan_kind = '' OR subscription_plans.plan_kind IS NULL)", SubscriptionPlanKindSubscription).
+		Limit(1).
+		Count(&count).Error
+	if err != nil {
 		return false, err
 	}
-	for _, sub := range subs {
-		plan, err := getSubscriptionPlanByIdTx(nil, sub.PlanId)
-		if err != nil {
-			return false, err
-		}
-		normalizeValuePackagePlan(plan)
-		if !plan.IsValuePackage() {
-			return true, nil
-		}
-	}
-	return false, nil
+	return count > 0, nil
 }
 
 // GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.

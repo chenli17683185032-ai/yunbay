@@ -143,12 +143,36 @@ func TestValuePackagePurchaseIntentSameLevelExtends(t *testing.T) {
 	require.False(t, intent.RequiresConfirmation)
 }
 
+func TestCreateUserSubscriptionFromPlanTxRejectsValuePackagePlan(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3200, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+
+	var createdSub *UserSubscription
+	var createErr error
+	txErr := DB.Transaction(func(tx *gorm.DB) error {
+		createdSub, createErr = CreateUserSubscriptionFromPlanTx(tx, user.Id, &day, "test")
+		return createErr
+	})
+
+	require.Error(t, createErr)
+	require.Error(t, txErr)
+	require.Nil(t, createdSub)
+	require.Contains(t, createErr.Error(), "超值套餐不能通过普通订阅创建")
+
+	var count int64
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ? AND plan_id = ?", user.Id, day.Id).Count(&count).Error)
+	require.Zero(t, count)
+}
+
 func TestHasActiveUserSubscriptionIgnoresOnlyValuePackage(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3201, UserGroupTiyan)
 	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
 	now := common.GetTimestamp()
 	createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	orphan := UserSubscription{UserId: user.Id, PlanId: 999999, AmountTotal: 100, StartTime: now - 10, EndTime: now + 3600, Status: UserSubscriptionStatusActive, Source: "test-orphan"}
+	require.NoError(t, DB.Create(&orphan).Error)
 
 	hasActive, err := HasActiveUserSubscription(user.Id)
 
