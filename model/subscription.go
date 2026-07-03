@@ -2076,23 +2076,36 @@ func RefundSubscriptionPreConsume(requestId string) error {
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var record SubscriptionPreConsumeRecord
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
+		if err := withUpdateLock(tx).
 			Where("request_id = ?", requestId).First(&record).Error; err != nil {
 			return err
 		}
 		if record.Status == "refunded" {
-			return nil
+			return revokeValuePackageUsageReservationTx(tx, record.UserSubscriptionId, record.RequestId)
 		}
-		if record.PreConsumed <= 0 {
-			record.Status = "refunded"
-			return tx.Save(&record).Error
+		if record.PreConsumed > 0 {
+			if err := postConsumeUserSubscriptionDeltaTx(tx, record.UserSubscriptionId, -record.PreConsumed); err != nil {
+				return err
+			}
 		}
-		if err := PostConsumeUserSubscriptionDelta(record.UserSubscriptionId, -record.PreConsumed); err != nil {
+		if err := revokeValuePackageUsageReservationTx(tx, record.UserSubscriptionId, record.RequestId); err != nil {
 			return err
 		}
 		record.Status = "refunded"
 		return tx.Save(&record).Error
 	})
+}
+
+func revokeValuePackageUsageReservationTx(tx *gorm.DB, userSubscriptionId int, requestId string) error {
+	if tx == nil {
+		return errors.New("db is nil")
+	}
+	if userSubscriptionId <= 0 || strings.TrimSpace(requestId) == "" {
+		return nil
+	}
+	return tx.Model(&ValuePackageUsageRecord{}).
+		Where("user_subscription_id = ? AND request_id = ?", userSubscriptionId, requestId).
+		Update("quota", 0).Error
 }
 
 // ResetDueSubscriptions resets subscriptions whose next_reset_time has passed.
@@ -2179,27 +2192,34 @@ func GetSubscriptionPlanInfoByUserSubscriptionId(userSubscriptionId int) (*Subsc
 
 // Update subscription used amount by delta (positive consume more, negative refund).
 func PostConsumeUserSubscriptionDelta(userSubscriptionId int, delta int64) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		return postConsumeUserSubscriptionDeltaTx(tx, userSubscriptionId, delta)
+	})
+}
+
+func postConsumeUserSubscriptionDeltaTx(tx *gorm.DB, userSubscriptionId int, delta int64) error {
+	if tx == nil {
+		return errors.New("db is nil")
+	}
 	if userSubscriptionId <= 0 {
 		return errors.New("invalid userSubscriptionId")
 	}
 	if delta == 0 {
 		return nil
 	}
-	return DB.Transaction(func(tx *gorm.DB) error {
-		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").
-			Where("id = ?", userSubscriptionId).
-			First(&sub).Error; err != nil {
-			return err
-		}
-		newUsed := sub.AmountUsed + delta
-		if newUsed < 0 {
-			newUsed = 0
-		}
-		if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
-			return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
-		}
-		sub.AmountUsed = newUsed
-		return tx.Save(&sub).Error
-	})
+	var sub UserSubscription
+	if err := withUpdateLock(tx).
+		Where("id = ?", userSubscriptionId).
+		First(&sub).Error; err != nil {
+		return err
+	}
+	newUsed := sub.AmountUsed + delta
+	if newUsed < 0 {
+		newUsed = 0
+	}
+	if sub.AmountTotal > 0 && newUsed > sub.AmountTotal {
+		return fmt.Errorf("subscription used exceeds total, used=%d total=%d", newUsed, sub.AmountTotal)
+	}
+	sub.AmountUsed = newUsed
+	return tx.Save(&sub).Error
 }

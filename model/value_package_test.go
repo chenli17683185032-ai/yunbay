@@ -742,6 +742,40 @@ func TestRecordValuePackageUsageUpsertsBySubscriptionAndRequest(t *testing.T) {
 	require.EqualValues(t, 45, used7d)
 }
 
+func TestRefundSubscriptionPreConsumeRevokesValuePackageUsageReservation(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3312, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 1000
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+
+	_, err := PreConsumeValuePackageSubscription("vp-refund-reservation", user.Id, sub.Id, 100)
+	require.NoError(t, err)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 100, used5h)
+	require.EqualValues(t, 100, used7d)
+
+	require.NoError(t, RefundSubscriptionPreConsume("vp-refund-reservation"))
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
+	require.EqualValues(t, 0, reloaded.AmountUsed)
+	used5h, used7d, err = GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, used5h)
+	require.EqualValues(t, 0, used7d)
+
+	require.NoError(t, RefundSubscriptionPreConsume("vp-refund-reservation"))
+	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
+	require.EqualValues(t, 0, reloaded.AmountUsed)
+	used5h, used7d, err = GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, used5h)
+	require.EqualValues(t, 0, used7d)
+}
+
 func TestPreConsumeValuePackageSubscriptionOnlyAcceptsValuePackageAndIsIdempotent(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3301, UserGroupTiyan)

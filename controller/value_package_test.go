@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -18,6 +21,50 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type failingTaskSettleBilling struct {
+	settleCalls int
+}
+
+func (b *failingTaskSettleBilling) Settle(actualQuota int) error {
+	b.settleCalls++
+	return errors.New("usage reservation write failed")
+}
+
+func (b *failingTaskSettleBilling) Refund(c *gin.Context)         {}
+func (b *failingTaskSettleBilling) NeedsRefund() bool             { return false }
+func (b *failingTaskSettleBilling) GetPreConsumedQuota() int      { return 100 }
+func (b *failingTaskSettleBilling) Reserve(targetQuota int) error { return nil }
+
+func TestRelayTaskSuccessSettleErrorDoesNotInsertSuccessTask(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Log{}))
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	billing := &failingTaskSettleBilling{}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          42,
+		UsingGroup:      "day-card",
+		OriginModelName: "video-test",
+		Billing:         billing,
+		BillingSource:   "subscription",
+		SubscriptionId:  7,
+		TokenId:         11,
+	}
+	result := &relay.TaskSubmitResult{Platform: "test-platform", UpstreamTaskID: "upstream-task", Quota: 100, TaskData: []byte(`{"id":"upstream-task"}`)}
+
+	taskErr := finalizeSuccessfulRelayTask(ctx, relayInfo, result)
+
+	require.NotNil(t, taskErr)
+	require.Equal(t, http.StatusInternalServerError, taskErr.StatusCode)
+	require.Equal(t, "settle_task_billing_failed", taskErr.Code)
+	require.Equal(t, 1, billing.settleCalls)
+	var taskCount int64
+	require.NoError(t, model.DB.Model(&model.Task{}).Count(&taskCount).Error)
+	require.EqualValues(t, 0, taskCount)
+	var logCount int64
+	require.NoError(t, model.DB.Model(&model.Log{}).Count(&logCount).Error)
+	require.EqualValues(t, 0, logCount)
+}
 
 func setupValuePackageControllerTest(t *testing.T) *gorm.DB {
 	t.Helper()
