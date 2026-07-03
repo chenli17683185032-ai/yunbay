@@ -404,14 +404,35 @@ func RedeemLdxpSessionCardTx(tx *gorm.DB, session *model.LdxpTopupSession) (*mod
 }
 
 func settleLdxpValuePackageSession(session *model.LdxpTopupSession) (*LdxpVerifyResult, error) {
-	var tradeNo string
+	var linkedOrder *model.SubscriptionOrder
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		tradeNo = ldxpValuePackageTradeNoTx(tx, session)
+		order, err := ldxpLinkedValuePackageOrderTx(tx, session)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				message := "linked value package order missing"
+				if updateErr := persistLdxpRedeemFailureTx(tx, session, message); updateErr != nil {
+					return updateErr
+				}
+				return nil
+			}
+			if errors.Is(err, errLdxpLinkedValuePackageOrderMismatch) {
+				message := "linked value package order mismatch"
+				if updateErr := persistLdxpRedeemFailureTx(tx, session, message); updateErr != nil {
+					return updateErr
+				}
+				return nil
+			}
+			return err
+		}
+		linkedOrder = order
 		return nil
 	}); err != nil {
 		return nil, err
 	}
-	if _, settleErr := model.CompleteValuePackageOrder(tradeNo, "ldxp session verified", model.PaymentProviderLDXP, model.PaymentMethodLDXP, session.ConfirmedCover); settleErr != nil {
+	if linkedOrder == nil {
+		return &LdxpVerifyResult{Verified: true, Redeemed: false, Status: model.LdxpStatusRedeemFailed, ErrorCode: ldxpVerifyCodeRedeemFailed, ErrorMessage: strings.TrimSpace(session.ErrorMessage)}, nil
+	}
+	if _, settleErr := model.CompleteValuePackageOrder(linkedOrder.TradeNo, "ldxp session verified", model.PaymentProviderLDXP, model.PaymentMethodLDXP, session.ConfirmedCover); settleErr != nil {
 		message := strings.TrimSpace(settleErr.Error())
 		if updateErr := model.DB.Transaction(func(tx *gorm.DB) error {
 			return persistLdxpRedeemFailureTx(tx, session, message)
@@ -428,19 +449,42 @@ func settleLdxpValuePackageSession(session *model.LdxpTopupSession) (*LdxpVerify
 	return &LdxpVerifyResult{Verified: true, Redeemed: true, Status: model.LdxpStatusSuccess}, nil
 }
 
-func ldxpValuePackageTradeNoTx(tx *gorm.DB, session *model.LdxpTopupSession) string {
-	return ldxpValuePackageTradeNo(tx, session)
+var errLdxpLinkedValuePackageOrderMismatch = errors.New("linked value package order mismatch")
+
+func ldxpLinkedValuePackageOrderTx(tx *gorm.DB, session *model.LdxpTopupSession) (*model.SubscriptionOrder, error) {
+	return ldxpLinkedValuePackageOrder(tx, session)
 }
 
-func ldxpValuePackageTradeNo(db *gorm.DB, session *model.LdxpTopupSession) string {
-	if db == nil || session == nil || session.SubscriptionOrderId <= 0 {
-		return ""
+func ldxpLinkedValuePackageOrder(db *gorm.DB, session *model.LdxpTopupSession) (*model.SubscriptionOrder, error) {
+	if db == nil || session == nil {
+		return nil, gorm.ErrInvalidData
+	}
+	if session.Purpose != model.LdxpPurposeValuePackage || session.SubscriptionOrderId <= 0 {
+		return nil, gorm.ErrRecordNotFound
 	}
 	var order model.SubscriptionOrder
 	if err := db.Where("id = ?", session.SubscriptionOrderId).First(&order).Error; err != nil {
-		return ""
+		return nil, err
 	}
-	return order.TradeNo
+	if !isLdxpLinkedValuePackageOrderMatch(session, &order) {
+		return nil, errLdxpLinkedValuePackageOrderMismatch
+	}
+	return &order, nil
+}
+
+func isLdxpLinkedValuePackageOrderMatch(session *model.LdxpTopupSession, order *model.SubscriptionOrder) bool {
+	if session == nil || order == nil {
+		return false
+	}
+	return session.Purpose == model.LdxpPurposeValuePackage &&
+		session.SubscriptionOrderId > 0 &&
+		order.Id == session.SubscriptionOrderId &&
+		order.UserId == session.UserId &&
+		order.PlanId == session.SubscriptionPlanId &&
+		order.Money == session.Money &&
+		order.PaymentProvider == model.PaymentProviderLDXP &&
+		order.PaymentMethod == model.PaymentMethodLDXP &&
+		strings.TrimSpace(order.TradeNo) != ""
 }
 
 func directTopUpLdxpSessionTx(tx *gorm.DB, session *model.LdxpTopupSession) (bool, error) {

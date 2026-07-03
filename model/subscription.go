@@ -1066,6 +1066,23 @@ func CheckValuePackagePurchaseIntent(userId int, planId int, confirmedCover bool
 	return checkValuePackagePurchaseIntentTx(nil, userId, plan, confirmedCover)
 }
 
+func CheckValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, confirmedCover bool) (*ValuePackagePurchaseIntent, error) {
+	if tx == nil {
+		return nil, errors.New("tx is nil")
+	}
+	if userId <= 0 || plan == nil || plan.Id <= 0 {
+		return nil, errors.New("invalid userId or plan")
+	}
+	normalizeValuePackagePlan(plan)
+	if !plan.IsValuePackage() {
+		return nil, errors.New("目标套餐不是超值套餐")
+	}
+	if !plan.Enabled {
+		return nil, errors.New("套餐未启用")
+	}
+	return checkValuePackagePurchaseIntentTx(tx, userId, plan, confirmedCover)
+}
+
 type ValuePackageState struct {
 	Preference   UserValuePackagePreference `json:"preference"`
 	Subscription *UserSubscription          `json:"subscription,omitempty"`
@@ -1205,7 +1222,7 @@ func checkValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *Subscripti
 	if tx == nil {
 		tx = DB
 	}
-	now := GetDBTimestamp()
+	now := getDBTimestampTx(tx)
 	currentSub, currentPlan, err := getHighestActiveValuePackageTx(tx, userId, now)
 	if err != nil {
 		return nil, err
@@ -1229,6 +1246,26 @@ func checkValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *Subscripti
 		intent.Message = fmt.Sprintf("购买 %s 将直接覆盖当前 %s，剩余时间不会折算或顺延", plan.Title, currentPlan.Title)
 	}
 	return intent, nil
+}
+
+func getDBTimestampTx(tx *gorm.DB) int64 {
+	if tx == nil {
+		return GetDBTimestamp()
+	}
+	var ts int64
+	var err error
+	switch {
+	case common.UsingPostgreSQL:
+		err = tx.Raw("SELECT EXTRACT(EPOCH FROM NOW())::bigint").Scan(&ts).Error
+	case common.UsingSQLite:
+		err = tx.Raw("SELECT strftime('%s','now')").Scan(&ts).Error
+	default:
+		err = tx.Raw("SELECT UNIX_TIMESTAMP()").Scan(&ts).Error
+	}
+	if err != nil || ts <= 0 {
+		return common.GetTimestamp()
+	}
+	return ts
 }
 
 func ActivateValuePackage(userId int, userSubscriptionId int) (*ValuePackageState, error) {

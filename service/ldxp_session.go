@@ -182,6 +182,9 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 		if err := lockLdxpUserRowIfPossible(tx, userID); err != nil {
 			return err
 		}
+		if _, err := model.CheckValuePackagePurchaseIntentTx(tx, userID, plan, confirmedCover); err != nil {
+			return err
+		}
 		if activeSession, err := findActiveLdxpValuePackageSessionForUserTx(tx, userID, now); err == nil {
 			if activeSession.SubscriptionOrderId <= 0 {
 				return fmt.Errorf("%w: active value package session mismatch", ErrLdxpInvalidSessionRequest)
@@ -222,12 +225,21 @@ func isLdxpValuePackageSessionRequestMatch(session *model.LdxpTopupSession, orde
 	if session == nil || order == nil || plan == nil {
 		return false
 	}
-	return session.SubscriptionPlanId == plan.Id &&
+	return session.Purpose == model.LdxpPurposeValuePackage &&
+		session.SubscriptionOrderId > 0 &&
+		order.Id == session.SubscriptionOrderId &&
+		order.UserId == session.UserId &&
+		order.UserId > 0 &&
+		order.PlanId == session.SubscriptionPlanId &&
+		session.SubscriptionPlanId == plan.Id &&
 		order.PlanId == plan.Id &&
 		session.ConfirmedCover == confirmedCover &&
 		order.Status == common.TopUpStatusPending &&
 		order.Money == plan.LdxpProductAmount &&
 		session.Money == plan.LdxpProductAmount &&
+		order.PaymentProvider == model.PaymentProviderLDXP &&
+		order.PaymentMethod == model.PaymentMethodLDXP &&
+		strings.TrimSpace(order.TradeNo) != "" &&
 		strings.TrimSpace(session.ProductUrl) == strings.TrimSpace(plan.LdxpProductUrl) &&
 		strings.TrimSpace(session.ProductName) == strings.TrimSpace(plan.LdxpProductName)
 }

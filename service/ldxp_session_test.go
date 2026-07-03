@@ -1264,3 +1264,126 @@ func TestCreateLdxpValuePackageSessionRejectsActiveSessionForDifferentConfirmedC
 	assert.Nil(t, view)
 	assert.Nil(t, reusedOrder)
 }
+
+func TestCreateLdxpValuePackageSessionRejectsActiveSessionLinkedOrderWrongUser(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1007)
+	insertLdxpUserForServiceTest(t, 2007)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡 active wrong user",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day-wrong-user",
+		LdxpProductName:       "日卡商品 wrong user",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	order := model.SubscriptionOrder{
+		UserId:          2007,
+		PlanId:          plan.Id,
+		Money:           plan.LdxpProductAmount,
+		TradeNo:         "LDXP_VP-active-wrong-user",
+		PaymentMethod:   model.PaymentMethodLDXP,
+		PaymentProvider: model.PaymentProviderLDXP,
+		CreateTime:      now,
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, model.DB.Create(&order).Error)
+	require.NoError(t, model.InsertLdxpTopupSession(&model.LdxpTopupSession{
+		SessionId:           "ldxp_value_package_active_wrong_user",
+		UserId:              1007,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusCreated,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		ConfirmedCover:      true,
+		CreatedTime:         now,
+		UpdatedTime:         now,
+		ExpiredTime:         now + 900,
+	}))
+
+	view, reusedOrder, err := CreateLdxpValuePackageSession(1007, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
+	assert.Contains(t, err.Error(), "active value package session mismatch")
+	assert.Nil(t, view)
+	assert.Nil(t, reusedOrder)
+}
+
+func TestCreateLdxpValuePackageSessionReusesExactMatchingActiveSessionAndOrder(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1008)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡 exact reuse",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day-exact-reuse",
+		LdxpProductName:       "日卡商品 exact reuse",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	order := model.SubscriptionOrder{
+		UserId:          1008,
+		PlanId:          plan.Id,
+		Money:           plan.LdxpProductAmount,
+		TradeNo:         "LDXP_VP-exact-reuse",
+		PaymentMethod:   model.PaymentMethodLDXP,
+		PaymentProvider: model.PaymentProviderLDXP,
+		CreateTime:      now,
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, model.DB.Create(&order).Error)
+	require.NoError(t, model.InsertLdxpTopupSession(&model.LdxpTopupSession{
+		SessionId:           "ldxp_value_package_exact_reuse",
+		UserId:              1008,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusCreated,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		ConfirmedCover:      true,
+		CreatedTime:         now,
+		UpdatedTime:         now,
+		ExpiredTime:         now + 900,
+	}))
+
+	view, reusedOrder, err := CreateLdxpValuePackageSession(1008, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.NoError(t, err)
+	require.NotNil(t, view)
+	require.NotNil(t, reusedOrder)
+	assert.Equal(t, "ldxp_value_package_exact_reuse", view.SessionID)
+	assert.Equal(t, order.Id, reusedOrder.Id)
+	var sessionCount int64
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("user_id = ?", 1008).Count(&sessionCount).Error)
+	assert.EqualValues(t, 1, sessionCount)
+	var orderCount int64
+	require.NoError(t, model.DB.Model(&model.SubscriptionOrder{}).Where("user_id = ?", 1008).Count(&orderCount).Error)
+	assert.EqualValues(t, 1, orderCount)
+}

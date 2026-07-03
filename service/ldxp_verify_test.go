@@ -972,3 +972,146 @@ func TestVerifyValuePackageLdxpSessionCreatesSubscriptionWithoutQuotaTopup(t *te
 	require.NoError(t, model.DB.First(&reloaded, user.Id).Error)
 	require.Equal(t, originalQuota, reloaded.Quota)
 }
+
+func createLdxpVerifyValuePackagePlan(t *testing.T, title string, amount float64) model.SubscriptionPlan {
+	t.Helper()
+	plan := model.SubscriptionPlan{
+		Title:             title,
+		PriceAmount:       amount,
+		Currency:          "USD",
+		DurationUnit:      model.SubscriptionDurationDay,
+		DurationValue:     1,
+		Enabled:           true,
+		PlanKind:          model.SubscriptionPlanKindValuePackage,
+		PackageType:       model.ValuePackageTypeDay,
+		PackageLevel:      model.ValuePackageLevelDay,
+		ModelGroup:        "day-card",
+		ConcurrencyLimit:  1,
+		TotalAmount:       1000,
+		LdxpProductUrl:    "https://ldxp.example.test/" + title,
+		LdxpProductName:   title + " 商品",
+		LdxpProductAmount: amount,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	return plan
+}
+
+func insertPaidLdxpValuePackageVerifySession(t *testing.T, sessionID string, userID int, plan model.SubscriptionPlan, orderID int) {
+	t.Helper()
+	insertLdxpVerifySession(t, &model.LdxpTopupSession{
+		SessionId:           sessionID,
+		UserId:              userID,
+		Amount:              0,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusWorkerPaid,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: orderID,
+		SubscriptionPlanId:  plan.Id,
+		ConfirmedCover:      true,
+		WorkerId:            "worker-a",
+		WorkerOrderNo:       "LDVERIFYVP-" + sessionID,
+		WorkerAmount:        plan.LdxpProductAmount,
+		WorkerProductName:   plan.LdxpProductName,
+		WorkerStatusText:    "已付款",
+		WorkerSuccessUrl:    "https://pay.ldxp.cn/order/result/" + sessionID,
+	})
+}
+
+func TestVerifyValuePackageLdxpSessionRejectsLinkedOrderWrongUser(t *testing.T) {
+	setupLdxpVerifyValuePackageServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 7201, 12345)
+	insertLdxpVerifyUser(t, 7202, 12345)
+	plan := createLdxpVerifyValuePackagePlan(t, "日卡 wrong user", 9.9)
+	now := common.GetTimestamp()
+	wrongUserOrder := model.SubscriptionOrder{UserId: 7202, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: "ldxp-vp-wrong-user-order", PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, CreateTime: now, Status: common.TopUpStatusPending}
+	require.NoError(t, model.DB.Create(&wrongUserOrder).Error)
+	insertPaidLdxpValuePackageVerifySession(t, "ldxp_verify_value_package_wrong_user", 7201, plan, wrongUserOrder.Id)
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_value_package_wrong_user")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, result.Status)
+	assert.Equal(t, "redeem_failed", result.ErrorCode)
+	assert.Contains(t, result.ErrorMessage, "linked value package order mismatch")
+
+	var reloadedOrder model.SubscriptionOrder
+	require.NoError(t, model.DB.First(&reloadedOrder, wrongUserOrder.Id).Error)
+	assert.Equal(t, common.TopUpStatusPending, reloadedOrder.Status)
+	assert.Zero(t, reloadedOrder.UserSubscriptionId)
+
+	var wrongUserSubs int64
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", 7202).Count(&wrongUserSubs).Error)
+	assert.Zero(t, wrongUserSubs)
+	var sessionUserSubs int64
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", 7201).Count(&sessionUserSubs).Error)
+	assert.Zero(t, sessionUserSubs)
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_value_package_wrong_user")
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, persisted.Status)
+	assert.Equal(t, "redeem_failed", persisted.ErrorCode)
+	assert.Contains(t, persisted.ErrorMessage, "linked value package order mismatch")
+}
+
+func TestVerifyValuePackageLdxpSessionRejectsLinkedOrderPaymentMismatch(t *testing.T) {
+	setupLdxpVerifyValuePackageServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 7203, 12345)
+	plan := createLdxpVerifyValuePackagePlan(t, "日卡 payment mismatch", 9.9)
+	now := common.GetTimestamp()
+	mismatchOrder := model.SubscriptionOrder{UserId: 7203, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: "ldxp-vp-payment-mismatch-order", PaymentMethod: model.PaymentMethodRedemptionCode, PaymentProvider: model.PaymentProviderRedemptionCode, CreateTime: now, Status: common.TopUpStatusPending}
+	require.NoError(t, model.DB.Create(&mismatchOrder).Error)
+	insertPaidLdxpValuePackageVerifySession(t, "ldxp_verify_value_package_payment_mismatch", 7203, plan, mismatchOrder.Id)
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_value_package_payment_mismatch")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, result.Status)
+	assert.Contains(t, result.ErrorMessage, "linked value package order mismatch")
+
+	var reloadedOrder model.SubscriptionOrder
+	require.NoError(t, model.DB.First(&reloadedOrder, mismatchOrder.Id).Error)
+	assert.Equal(t, common.TopUpStatusPending, reloadedOrder.Status)
+	assert.Zero(t, reloadedOrder.UserSubscriptionId)
+	var subCount int64
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", 7203).Count(&subCount).Error)
+	assert.Zero(t, subCount)
+}
+
+func TestVerifyValuePackageLdxpSessionRejectsLinkedOrderPlanAndMoneyMismatch(t *testing.T) {
+	setupLdxpVerifyValuePackageServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 7204, 12345)
+	plan := createLdxpVerifyValuePackagePlan(t, "日卡 plan money mismatch", 9.9)
+	otherPlan := createLdxpVerifyValuePackagePlan(t, "月卡 plan money mismatch", 19.9)
+	now := common.GetTimestamp()
+	mismatchOrder := model.SubscriptionOrder{UserId: 7204, PlanId: otherPlan.Id, Money: otherPlan.LdxpProductAmount, TradeNo: "ldxp-vp-plan-money-mismatch-order", PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, CreateTime: now, Status: common.TopUpStatusPending}
+	require.NoError(t, model.DB.Create(&mismatchOrder).Error)
+	insertPaidLdxpValuePackageVerifySession(t, "ldxp_verify_value_package_plan_money_mismatch", 7204, plan, mismatchOrder.Id)
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_value_package_plan_money_mismatch")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, result.Status)
+	assert.Contains(t, result.ErrorMessage, "linked value package order mismatch")
+
+	var reloadedOrder model.SubscriptionOrder
+	require.NoError(t, model.DB.First(&reloadedOrder, mismatchOrder.Id).Error)
+	assert.Equal(t, common.TopUpStatusPending, reloadedOrder.Status)
+	assert.Zero(t, reloadedOrder.UserSubscriptionId)
+	var subCount int64
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", 7204).Count(&subCount).Error)
+	assert.Zero(t, subCount)
+}
