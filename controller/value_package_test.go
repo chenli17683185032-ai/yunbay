@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -26,6 +27,10 @@ type failingTaskSettleBilling struct {
 	settleCalls int
 }
 
+type successfulTaskSettleBilling struct {
+	settleCalls int
+}
+
 func (b *failingTaskSettleBilling) Settle(actualQuota int) error {
 	b.settleCalls++
 	return errors.New("usage reservation write failed")
@@ -35,6 +40,16 @@ func (b *failingTaskSettleBilling) Refund(c *gin.Context)         {}
 func (b *failingTaskSettleBilling) NeedsRefund() bool             { return false }
 func (b *failingTaskSettleBilling) GetPreConsumedQuota() int      { return 100 }
 func (b *failingTaskSettleBilling) Reserve(targetQuota int) error { return nil }
+
+func (b *successfulTaskSettleBilling) Settle(actualQuota int) error {
+	b.settleCalls++
+	return nil
+}
+
+func (b *successfulTaskSettleBilling) Refund(c *gin.Context)         {}
+func (b *successfulTaskSettleBilling) NeedsRefund() bool             { return false }
+func (b *successfulTaskSettleBilling) GetPreConsumedQuota() int      { return 100 }
+func (b *successfulTaskSettleBilling) Reserve(targetQuota int) error { return nil }
 
 func TestRelayTaskSuccessSettleErrorStillInsertsTaskWithAuditMarker(t *testing.T) {
 	setupValuePackageControllerTest(t)
@@ -72,6 +87,88 @@ func TestRelayTaskSuccessSettleErrorStillInsertsTaskWithAuditMarker(t *testing.T
 	var logCount int64
 	require.NoError(t, model.DB.Model(&model.Log{}).Count(&logCount).Error)
 	require.EqualValues(t, 0, logCount)
+}
+
+func TestRelayTaskSuccessInsertErrorReturnsTaskError(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Log{}))
+
+	const callbackName = "test_fail_task_insert"
+	require.NoError(t, model.DB.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement != nil && tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Task" {
+			tx.AddError(errors.New("task insert failed for test"))
+		}
+	}))
+	t.Cleanup(func() {
+		_ = model.DB.Callback().Create().Remove(callbackName)
+	})
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	billing := &successfulTaskSettleBilling{}
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          42,
+		UsingGroup:      "day-card",
+		OriginModelName: "video-test",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 3},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "submit"},
+		Billing:         billing,
+	}
+	result := &relay.TaskSubmitResult{Platform: "test-platform", UpstreamTaskID: "upstream-task", Quota: 100, TaskData: []byte(`{"id":"upstream-task"}`)}
+
+	taskErr := finalizeSuccessfulRelayTask(ctx, relayInfo, result)
+
+	require.NotNil(t, taskErr)
+	require.Equal(t, http.StatusInternalServerError, taskErr.StatusCode)
+	require.Equal(t, "insert_task_failed", taskErr.Code)
+	require.Equal(t, 1, billing.settleCalls)
+	var taskCount int64
+	require.NoError(t, model.DB.Model(&model.Task{}).Count(&taskCount).Error)
+	require.EqualValues(t, 0, taskCount)
+	var logCount int64
+	require.NoError(t, model.DB.Model(&model.Log{}).Count(&logCount).Error)
+	require.EqualValues(t, 0, logCount)
+}
+
+func TestTaskSubmitResponseBufferDiscardsBufferedSuccess(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	originalWriter := ctx.Writer
+	buffer := newTaskSubmitResponseBuffer(originalWriter)
+	ctx.Writer = buffer
+
+	ctx.Header("X-Task", "buffered")
+	ctx.JSON(http.StatusAccepted, gin.H{"task_id": "upstream-task"})
+
+	require.Empty(t, recorder.Body.String())
+	require.Empty(t, recorder.Header().Get("X-Task"))
+
+	ctx.Writer = originalWriter
+	respondTaskError(ctx, &dto.TaskError{
+		Code:       "insert_task_failed",
+		Message:    "persist failed",
+		StatusCode: http.StatusInternalServerError,
+	})
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), "upstream-task")
+	require.Contains(t, recorder.Body.String(), "insert_task_failed")
+}
+
+func TestTaskSubmitResponseBufferFlushesBufferedSuccess(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	originalWriter := ctx.Writer
+	buffer := newTaskSubmitResponseBuffer(originalWriter)
+	ctx.Writer = buffer
+
+	ctx.Header("X-Task", "buffered")
+	ctx.JSON(http.StatusAccepted, gin.H{"task_id": "upstream-task"})
+
+	require.NoError(t, buffer.FlushToOriginal())
+
+	require.Equal(t, http.StatusAccepted, recorder.Code)
+	require.Equal(t, "buffered", recorder.Header().Get("X-Task"))
+	require.Contains(t, recorder.Body.String(), "upstream-task")
 }
 
 func setupValuePackageControllerTest(t *testing.T) *gorm.DB {

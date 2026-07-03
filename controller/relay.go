@@ -498,6 +498,13 @@ func RelayTask(c *gin.Context) {
 		return
 	}
 
+	originalWriter := c.Writer
+	submitResponseBuffer := newTaskSubmitResponseBuffer(originalWriter)
+	c.Writer = submitResponseBuffer
+	defer func() {
+		c.Writer = originalWriter
+	}()
+
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
 	defer func() {
@@ -514,6 +521,8 @@ func RelayTask(c *gin.Context) {
 	}
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+		submitResponseBuffer.Reset()
+
 		var channel *model.Channel
 
 		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
@@ -574,8 +583,14 @@ func RelayTask(c *gin.Context) {
 		taskErr = finalizeSuccessfulRelayTask(c, relayInfo, result)
 	}
 
+	c.Writer = originalWriter
 	if taskErr != nil {
 		respondTaskError(c, taskErr)
+		return
+	}
+
+	if flushErr := submitResponseBuffer.FlushToOriginal(); flushErr != nil {
+		common.SysError("flush task submit response error: " + flushErr.Error())
 	}
 }
 
@@ -601,12 +616,15 @@ func finalizeSuccessfulRelayTask(c *gin.Context, relayInfo *relaycommon.RelayInf
 		common.SysError("settle task billing error: " + settleErr.Error())
 		task.PrivateData.BillingSettleFailed = true
 		task.PrivateData.BillingSettleError = settleErr.Error()
-	} else {
-		service.LogTaskConsumption(c, relayInfo)
 	}
 
 	if insertErr := task.Insert(); insertErr != nil {
 		common.SysError("insert task error: " + insertErr.Error())
+		return service.TaskErrorWrapperLocal(insertErr, "insert_task_failed", http.StatusInternalServerError)
+	}
+
+	if !task.PrivateData.BillingSettleFailed {
+		service.LogTaskConsumption(c, relayInfo)
 	}
 	return nil
 }
