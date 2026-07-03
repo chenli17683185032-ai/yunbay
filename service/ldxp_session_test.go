@@ -1000,3 +1000,132 @@ func TestCreateLdxpValuePackageSessionUsesPlanProductConfig(t *testing.T) {
 	assert.Equal(t, "日卡商品", persisted.ProductName)
 	assert.EqualValues(t, persisted.CreatedTime+900, persisted.ExpiredTime)
 }
+
+func TestCreateLdxpValuePackageSessionRejectsMissingPlanTTL(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1002)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡 TTL 缺失",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day-ttl-missing",
+		LdxpProductName:       "日卡商品 TTL 缺失",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 0,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+
+	view, order, err := CreateLdxpValuePackageSession(1002, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
+	assert.Contains(t, err.Error(), "ldxp product incomplete")
+	assert.Nil(t, view)
+	assert.Nil(t, order)
+
+	var sessionCount int64
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("user_id = ?", 1002).Count(&sessionCount).Error)
+	assert.Zero(t, sessionCount)
+	var orderCount int64
+	require.NoError(t, model.DB.Model(&model.SubscriptionOrder{}).Where("user_id = ?", 1002).Count(&orderCount).Error)
+	assert.Zero(t, orderCount)
+}
+
+func TestCreateLdxpValuePackageSessionRejectsActiveSessionWithoutOrderID(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1003)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡 active corrupt",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day-corrupt",
+		LdxpProductName:       "日卡商品 corrupt",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	require.NoError(t, model.InsertLdxpTopupSession(&model.LdxpTopupSession{
+		SessionId:           "ldxp_value_package_corrupt_no_order",
+		UserId:              1003,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusCreated,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: 0,
+		SubscriptionPlanId:  plan.Id,
+		CreatedTime:         now,
+		UpdatedTime:         now,
+		ExpiredTime:         now + 900,
+	}))
+
+	view, order, err := CreateLdxpValuePackageSession(1003, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
+	assert.Contains(t, err.Error(), "invalid active value package session")
+	assert.Nil(t, view)
+	assert.Nil(t, order)
+}
+
+func TestCreateLdxpValuePackageSessionRejectsActiveSessionMissingOrder(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1004)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡 active missing order",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day-missing-order",
+		LdxpProductName:       "日卡商品 missing order",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	require.NoError(t, model.InsertLdxpTopupSession(&model.LdxpTopupSession{
+		SessionId:           "ldxp_value_package_corrupt_missing_order",
+		UserId:              1004,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusCreated,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: 424242,
+		SubscriptionPlanId:  plan.Id,
+		CreatedTime:         now,
+		UpdatedTime:         now,
+		ExpiredTime:         now + 900,
+	}))
+
+	view, order, err := CreateLdxpValuePackageSession(1004, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+	assert.Nil(t, view)
+	assert.Nil(t, order)
+}

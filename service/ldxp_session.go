@@ -165,7 +165,7 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 	if !plan.IsValuePackage() {
 		return nil, nil, fmt.Errorf("%w: not value package", ErrLdxpInvalidSessionRequest)
 	}
-	if strings.TrimSpace(plan.LdxpProductUrl) == "" || strings.TrimSpace(plan.LdxpProductName) == "" || plan.LdxpProductAmount <= 0 {
+	if strings.TrimSpace(plan.LdxpProductUrl) == "" || strings.TrimSpace(plan.LdxpProductName) == "" || plan.LdxpProductAmount <= 0 || plan.LdxpSessionTTLSeconds <= 0 {
 		return nil, nil, fmt.Errorf("%w: ldxp product incomplete", ErrLdxpInvalidSessionRequest)
 	}
 	if _, err := model.CheckValuePackagePurchaseIntent(userID, planID, confirmedCover); err != nil {
@@ -183,12 +183,18 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 			return err
 		}
 		if activeSession, err := findActiveLdxpValuePackageSessionForUserTx(tx, userID, now); err == nil {
-			session = activeSession
-			var existingOrder model.SubscriptionOrder
-			if activeSession.SubscriptionOrderId > 0 {
-				_ = tx.Where("id = ?", activeSession.SubscriptionOrderId).First(&existingOrder).Error
-				order = &existingOrder
+			if activeSession.SubscriptionOrderId <= 0 {
+				return fmt.Errorf("%w: invalid active value package session missing order", ErrLdxpInvalidSessionRequest)
 			}
+			var existingOrder model.SubscriptionOrder
+			if err := tx.Where("id = ?", activeSession.SubscriptionOrderId).First(&existingOrder).Error; err != nil {
+				return err
+			}
+			if existingOrder.Status != common.TopUpStatusPending {
+				return fmt.Errorf("%w: invalid active value package session order status %s", ErrLdxpInvalidSessionRequest, existingOrder.Status)
+			}
+			session = activeSession
+			order = &existingOrder
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
@@ -203,11 +209,7 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 		if err != nil {
 			return err
 		}
-		ttl := cfg.SessionTTLSeconds
-		if plan.LdxpSessionTTLSeconds > 0 {
-			ttl = plan.LdxpSessionTTLSeconds
-		}
-		session = &model.LdxpTopupSession{SessionId: sessionID, UserId: userID, Amount: 0, Money: plan.LdxpProductAmount, ProductUrl: plan.LdxpProductUrl, ProductName: plan.LdxpProductName, ContactEmail: cfg.ContactEmail, Status: model.LdxpStatusCreated, Purpose: model.LdxpPurposeValuePackage, SubscriptionOrderId: order.Id, SubscriptionPlanId: plan.Id, ConfirmedCover: confirmedCover, CreatedTime: now, UpdatedTime: now, ExpiredTime: now + ttl}
+		session = &model.LdxpTopupSession{SessionId: sessionID, UserId: userID, Amount: 0, Money: plan.LdxpProductAmount, ProductUrl: plan.LdxpProductUrl, ProductName: plan.LdxpProductName, ContactEmail: cfg.ContactEmail, Status: model.LdxpStatusCreated, Purpose: model.LdxpPurposeValuePackage, SubscriptionOrderId: order.Id, SubscriptionPlanId: plan.Id, ConfirmedCover: confirmedCover, CreatedTime: now, UpdatedTime: now, ExpiredTime: now + plan.LdxpSessionTTLSeconds}
 		return tx.Create(session).Error
 	})
 	if err != nil {

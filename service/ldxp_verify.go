@@ -261,17 +261,7 @@ func tryVerifyAndRedeemLdxpSession(sessionID string, preferredEvent *model.LdxpM
 		return nil, err
 	}
 	if valuePackageSessionToSettle != nil {
-		if _, settleErr := model.CompleteValuePackageOrder(ldxpValuePackageTradeNo(model.DB, valuePackageSessionToSettle), "ldxp session verified", model.PaymentProviderLDXP, model.PaymentMethodLDXP, valuePackageSessionToSettle.ConfirmedCover); settleErr != nil {
-			message := strings.TrimSpace(settleErr.Error())
-			if updateErr := persistLdxpRedeemFailure(valuePackageSessionToSettle, message); updateErr != nil {
-				return nil, updateErr
-			}
-			return &LdxpVerifyResult{Verified: true, Redeemed: false, Status: model.LdxpStatusRedeemFailed, ErrorCode: ldxpVerifyCodeRedeemFailed, ErrorMessage: message}, nil
-		}
-		if updateErr := persistLdxpRedeemSuccess(valuePackageSessionToSettle); updateErr != nil {
-			return nil, updateErr
-		}
-		return &LdxpVerifyResult{Verified: true, Redeemed: true, Status: model.LdxpStatusSuccess}, nil
+		return settleLdxpValuePackageSession(valuePackageSessionToSettle)
 	}
 	if result != nil && result.Redeemed && redeemResult != nil {
 		model.RecordRedeemLog(redeemLogUserID, redeemResult)
@@ -411,6 +401,31 @@ func RedeemLdxpSessionCardTx(tx *gorm.DB, session *model.LdxpTopupSession) (*mod
 	}
 	session.TopupId = 0
 	return result, nil
+}
+
+func settleLdxpValuePackageSession(session *model.LdxpTopupSession) (*LdxpVerifyResult, error) {
+	var tradeNo string
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		tradeNo = ldxpValuePackageTradeNoTx(tx, session)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if _, settleErr := model.CompleteValuePackageOrder(tradeNo, "ldxp session verified", model.PaymentProviderLDXP, model.PaymentMethodLDXP, session.ConfirmedCover); settleErr != nil {
+		message := strings.TrimSpace(settleErr.Error())
+		if updateErr := model.DB.Transaction(func(tx *gorm.DB) error {
+			return persistLdxpRedeemFailureTx(tx, session, message)
+		}); updateErr != nil {
+			return nil, updateErr
+		}
+		return &LdxpVerifyResult{Verified: true, Redeemed: false, Status: model.LdxpStatusRedeemFailed, ErrorCode: ldxpVerifyCodeRedeemFailed, ErrorMessage: message}, nil
+	}
+	if updateErr := model.DB.Transaction(func(tx *gorm.DB) error {
+		return persistLdxpRedeemSuccessTx(tx, session)
+	}); updateErr != nil {
+		return nil, updateErr
+	}
+	return &LdxpVerifyResult{Verified: true, Redeemed: true, Status: model.LdxpStatusSuccess}, nil
 }
 
 func ldxpValuePackageTradeNoTx(tx *gorm.DB, session *model.LdxpTopupSession) string {

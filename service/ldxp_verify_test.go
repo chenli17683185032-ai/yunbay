@@ -835,6 +835,64 @@ func redemptionStatusByKey(t *testing.T, key string) int {
 	return redemption.Status
 }
 
+func TestVerifyValuePackageLdxpSessionMarksRedeemFailedWhenOrderMissing(t *testing.T) {
+	setupLdxpVerifyValuePackageServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 7102, 12345)
+	plan := model.SubscriptionPlan{
+		Title:             "日卡 missing order",
+		PriceAmount:       9.9,
+		Currency:          "USD",
+		DurationUnit:      model.SubscriptionDurationDay,
+		DurationValue:     1,
+		Enabled:           true,
+		PlanKind:          model.SubscriptionPlanKindValuePackage,
+		PackageType:       model.ValuePackageTypeDay,
+		PackageLevel:      model.ValuePackageLevelDay,
+		ModelGroup:        "day-card",
+		ConcurrencyLimit:  1,
+		TotalAmount:       1000,
+		LdxpProductUrl:    "https://ldxp.example.test/day-missing-order",
+		LdxpProductName:   "日卡商品 missing order",
+		LdxpProductAmount: 9.9,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	session := &model.LdxpTopupSession{
+		SessionId:           "ldxp_verify_value_package_missing_order",
+		UserId:              7102,
+		Amount:              0,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusWorkerPaid,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: 0,
+		SubscriptionPlanId:  plan.Id,
+		ConfirmedCover:      true,
+		WorkerId:            "worker-a",
+		WorkerOrderNo:       "LDVERIFYVPMISSINGORDER",
+		WorkerAmount:        plan.LdxpProductAmount,
+		WorkerProductName:   plan.LdxpProductName,
+		WorkerStatusText:    "已付款",
+		WorkerSuccessUrl:    "https://pay.ldxp.cn/order/result/LDVERIFYVPMISSINGORDER",
+	}
+	insertLdxpVerifySession(t, session)
+
+	result, err := TryVerifyAndRedeemLdxpSession(session.SessionId)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.True(t, result.Verified)
+	assert.False(t, result.Redeemed)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, result.Status)
+	assert.Equal(t, "redeem_failed", result.ErrorCode)
+
+	persisted, err := model.GetLdxpTopupSessionBySessionId(session.SessionId)
+	require.NoError(t, err)
+	assert.Equal(t, model.LdxpStatusRedeemFailed, persisted.Status)
+	assert.Equal(t, "redeem_failed", persisted.ErrorCode)
+}
+
 func TestLdxpVerifyTask6Suite(t *testing.T) {
 	t.Run("RequiresWorkerAndMailOrderMatch", TestVerifyLdxpSessionRequiresWorkerAndMailOrderMatch)
 	t.Run("RequiresCardMatch", TestVerifyLdxpSessionRequiresCardMatch)
