@@ -32,6 +32,7 @@ import {
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { API_KEY_STATUSES } from '../constants'
+import { getApiKeyDisplayGroup } from '../lib/api-key-display'
 import { type ApiKey } from '../types'
 import {
   ApiKeyCell,
@@ -193,8 +194,9 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
       header: t('Group'),
       cell: ({ row }) => {
         const apiKey = row.original
-        const group = row.getValue('group') as string
-        const ratio = group && group !== 'auto' ? groupRatios[group] : undefined
+        const displayGroup = getApiKeyDisplayGroup(apiKey, groupRatios)
+        const group = displayGroup.group
+        const ratio = displayGroup.ratio
 
         if (group === 'auto') {
           return (

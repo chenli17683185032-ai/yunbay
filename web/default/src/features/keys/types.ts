@@ -34,6 +34,8 @@ export const apiKeySchema = z.object({
   created_time: z.number(),
   accessed_time: z.number(),
   group: z.string().nullish().default(''),
+  effective_group: z.string().nullish().default(''),
+  effective_group_ratio: z.number().nullish().optional(),
   cross_group_retry: z
     .preprocess((v) => {
       if (v === 1) return true
