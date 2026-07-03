@@ -3105,6 +3105,7 @@
     "Overrode user quota from {{from}} to {{to}}": "Đã ghi đè hạn mức người dùng từ {{from}} thành {{to}}",
     "Overview": "Tổng quan",
     "Overwritten": "Đã ghi đè",
+    "Package total limit": "Giới hạn tổng của gói",
     "Package usage closed": "Đã đóng sử dụng gói",
     "Page": "Trang",
     "Page {{current}} of {{total}}": "Trang {{current}} / {{total}}",

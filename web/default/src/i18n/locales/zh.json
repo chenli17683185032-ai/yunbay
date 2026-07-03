@@ -3105,6 +3105,7 @@
     "Overrode user quota from {{from}} to {{to}}": "覆盖用户额度，从 {{from}} 改为 {{to}}",
     "Overview": "概览",
     "Overwritten": "已覆盖",
+    "Package total limit": "套餐总额度",
     "Package usage closed": "套餐使用已关闭",
     "Page": "页面",
     "Page {{current}} of {{total}}": "第 {{current}} 页，共 {{total}} 页",

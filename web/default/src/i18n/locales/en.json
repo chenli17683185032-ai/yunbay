@@ -3105,6 +3105,7 @@
     "Overrode user quota from {{from}} to {{to}}": "Overrode user quota from {{from}} to {{to}}",
     "Overview": "Overview",
     "Overwritten": "Overwritten",
+    "Package total limit": "Package total limit",
     "Package usage closed": "Package usage closed",
     "Page": "Page",
     "Page {{current}} of {{total}}": "Page {{current}} of {{total}}",

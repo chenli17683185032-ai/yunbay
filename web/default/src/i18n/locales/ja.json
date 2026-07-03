@@ -3105,6 +3105,7 @@
     "Overrode user quota from {{from}} to {{to}}": "ユーザーのクォータを {{from}} から {{to}} に上書きしました",
     "Overview": "概要",
     "Overwritten": "上書き済み",
+    "Package total limit": "パッケージ総上限",
     "Package usage closed": "パッケージ使用を閉じました",
     "Page": "ページ",
     "Page {{current}} of {{total}}": "{{total}} ページ中 {{current}} ページ目",
