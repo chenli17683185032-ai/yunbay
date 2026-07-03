@@ -95,9 +95,7 @@ func (w *taskSubmitResponseBuffer) Pusher() http.Pusher {
 func (w *taskSubmitResponseBuffer) FlushToOriginal() error {
 	dst := w.original.Header()
 	for key, values := range w.header {
-		for _, value := range values {
-			dst.Add(key, value)
-		}
+		dst[key] = append([]string(nil), values...)
 	}
 
 	if w.Written() {

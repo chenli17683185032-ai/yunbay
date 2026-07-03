@@ -578,7 +578,7 @@ func RelayTask(c *gin.Context) {
 		logger.LogInfo(c, retryLogStr)
 	}
 
-	// ── 成功：结算 + 日志 + 插入任务 ──
+	// ── 成功：插入任务 + 结算 + 日志 ──
 	if taskErr == nil {
 		taskErr = finalizeSuccessfulRelayTask(c, relayInfo, result)
 	}
@@ -612,20 +612,22 @@ func finalizeSuccessfulRelayTask(c *gin.Context, relayInfo *relaycommon.RelayInf
 	task.Data = result.TaskData
 	task.Action = relayInfo.Action
 
-	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-		common.SysError("settle task billing error: " + settleErr.Error())
-		task.PrivateData.BillingSettleFailed = true
-		task.PrivateData.BillingSettleError = settleErr.Error()
-	}
-
 	if insertErr := task.Insert(); insertErr != nil {
 		common.SysError("insert task error: " + insertErr.Error())
 		return service.TaskErrorWrapperLocal(insertErr, "insert_task_failed", http.StatusInternalServerError)
 	}
 
-	if !task.PrivateData.BillingSettleFailed {
-		service.LogTaskConsumption(c, relayInfo)
+	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+		common.SysError("settle task billing error: " + settleErr.Error())
+		task.PrivateData.BillingSettleFailed = true
+		task.PrivateData.BillingSettleError = settleErr.Error()
+		if updateErr := task.Update(); updateErr != nil {
+			common.SysError("update task settle audit error: " + updateErr.Error())
+		}
+		return nil
 	}
+
+	service.LogTaskConsumption(c, relayInfo)
 	return nil
 }
 

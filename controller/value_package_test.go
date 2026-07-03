@@ -120,7 +120,7 @@ func TestRelayTaskSuccessInsertErrorReturnsTaskError(t *testing.T) {
 	require.NotNil(t, taskErr)
 	require.Equal(t, http.StatusInternalServerError, taskErr.StatusCode)
 	require.Equal(t, "insert_task_failed", taskErr.Code)
-	require.Equal(t, 1, billing.settleCalls)
+	require.Equal(t, 0, billing.settleCalls)
 	var taskCount int64
 	require.NoError(t, model.DB.Model(&model.Task{}).Count(&taskCount).Error)
 	require.EqualValues(t, 0, taskCount)
@@ -169,6 +169,22 @@ func TestTaskSubmitResponseBufferFlushesBufferedSuccess(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, recorder.Code)
 	require.Equal(t, "buffered", recorder.Header().Get("X-Task"))
 	require.Contains(t, recorder.Body.String(), "upstream-task")
+}
+
+func TestTaskSubmitResponseBufferFlushOverridesExistingHeader(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	recorder.Header().Set("X-Task", "old-value")
+	ctx, _ := gin.CreateTestContext(recorder)
+	originalWriter := ctx.Writer
+	buffer := newTaskSubmitResponseBuffer(originalWriter)
+	ctx.Writer = buffer
+
+	ctx.Header("X-Task", "buffered")
+	ctx.JSON(http.StatusAccepted, gin.H{"task_id": "upstream-task"})
+
+	require.NoError(t, buffer.FlushToOriginal())
+
+	require.Equal(t, []string{"buffered"}, recorder.Result().Header.Values("X-Task"))
 }
 
 func setupValuePackageControllerTest(t *testing.T) *gorm.DB {
