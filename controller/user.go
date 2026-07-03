@@ -1422,3 +1422,26 @@ func UpdateUserSetting(c *gin.Context) {
 
 	common.ApiSuccessI18n(c, i18n.MsgSettingSaved, nil)
 }
+
+func MarkVIPUpgradeModalSeen(c *gin.Context) {
+	userId := c.GetInt("id")
+	user, err := model.GetUserById(userId, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if user.Group != model.UserGroupVIP {
+		common.ApiErrorMsg(c, "仅 VIP 用户可操作")
+		return
+	}
+
+	setting := user.GetSetting()
+	setting.VipUpgradeModalSeen = true
+	user.SetSetting(setting)
+	if err := user.Update(false); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{"vip_upgrade_modal_seen": true})
+}
