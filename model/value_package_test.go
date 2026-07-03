@@ -688,3 +688,37 @@ func TestCompleteSubscriptionOrderRejectsAlreadySuccessfulValuePackageOrder(t *t
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "超值套餐仅支持联动小铺购买")
 }
+
+func TestPreConsumeValuePackageSubscriptionOnlyAcceptsValuePackageAndIsIdempotent(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3301, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 10
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	valueSub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+
+	result, err := PreConsumeValuePackageSubscription("vp-specific-preconsume", user.Id, valueSub.Id, 4)
+	require.NoError(t, err)
+	require.Equal(t, valueSub.Id, result.UserSubscriptionId)
+	require.EqualValues(t, 4, result.PreConsumed)
+	require.EqualValues(t, 0, result.AmountUsedBefore)
+	require.EqualValues(t, 4, result.AmountUsedAfter)
+
+	result, err = PreConsumeValuePackageSubscription("vp-specific-preconsume", user.Id, valueSub.Id, 4)
+	require.NoError(t, err)
+	require.Equal(t, valueSub.Id, result.UserSubscriptionId)
+	require.EqualValues(t, 4, result.PreConsumed)
+	require.NoError(t, DB.First(&valueSub, valueSub.Id).Error)
+	require.EqualValues(t, 4, valueSub.AmountUsed)
+
+	_, err = PreConsumeValuePackageSubscription("vp-specific-insufficient", user.Id, valueSub.Id, 7)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "subscription quota insufficient")
+
+	regular := createRegularSubscriptionPlanForValuePackageTest(t, "regular specific", 100)
+	regularSub := createActiveValuePackageSub(t, user.Id, regular, now-10, now+3600)
+	_, err = PreConsumeValuePackageSubscription("regular-specific-preconsume", user.Id, regularSub.Id, 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not value package")
+}

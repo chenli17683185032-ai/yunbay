@@ -47,6 +47,7 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
 		s.settled = true
+		s.recordValuePackageUsage(actualQuota)
 		return nil
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
@@ -75,7 +76,27 @@ func (s *BillingSession) Settle(actualQuota int) error {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
 	s.settled = true
+	s.recordValuePackageUsage(actualQuota)
 	return tokenErr
+}
+
+func (s *BillingSession) recordValuePackageUsage(actualQuota int) {
+	if s == nil || s.relayInfo == nil || actualQuota <= 0 || s.relayInfo.ValuePackageSubscriptionId <= 0 {
+		return
+	}
+	record := &model.ValuePackageUsageRecord{
+		UserId:             s.relayInfo.UserId,
+		UserSubscriptionId: s.relayInfo.ValuePackageSubscriptionId,
+		PlanId:             s.relayInfo.ValuePackagePlanId,
+		PackageType:        s.relayInfo.ValuePackagePackageType,
+		ModelGroup:         s.relayInfo.ValuePackageModelGroup,
+		RequestId:          s.relayInfo.RequestId,
+		Quota:              int64(actualQuota),
+	}
+	if err := model.RecordValuePackageUsage(record); err != nil {
+		common.SysLog(fmt.Sprintf("error recording value package usage (userId=%d, subscriptionId=%d, requestId=%s): %s",
+			s.relayInfo.UserId, s.relayInfo.ValuePackageSubscriptionId, s.relayInfo.RequestId, err.Error()))
+	}
 }
 
 // Refund 退还所有预扣费，幂等安全，异步执行。
@@ -342,6 +363,27 @@ func (s *BillingSession) syncRelayInfo() {
 func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preConsumedQuota int) (*BillingSession, *types.NewAPIError) {
 	if relayInfo == nil {
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	}
+
+	if relayInfo.ValuePackageSubscriptionId > 0 {
+		subConsume := int64(preConsumedQuota)
+		if subConsume <= 0 {
+			subConsume = 1
+		}
+		session := &BillingSession{
+			relayInfo: relayInfo,
+			funding: &SubscriptionFunding{
+				requestId:                  relayInfo.RequestId,
+				userId:                     relayInfo.UserId,
+				modelName:                  relayInfo.OriginModelName,
+				amount:                     subConsume,
+				valuePackageSubscriptionId: relayInfo.ValuePackageSubscriptionId,
+			},
+		}
+		if apiErr := session.preConsume(c, int(subConsume)); apiErr != nil {
+			return nil, apiErr
+		}
+		return session, nil
 	}
 
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)

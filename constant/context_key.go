@@ -52,6 +52,12 @@ const (
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
 
+	/* value package related keys */
+	ContextKeyValuePackageSubscriptionId ContextKey = "value_package_subscription_id"
+	ContextKeyValuePackagePlanId         ContextKey = "value_package_plan_id"
+	ContextKeyValuePackageModelGroup     ContextKey = "value_package_model_group"
+	ContextKeyValuePackagePackageType    ContextKey = "value_package_package_type"
+
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
