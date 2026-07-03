@@ -40,7 +40,7 @@ func setupValuePackageTestDB(t *testing.T) *gorm.DB {
 	if subscriptionPlanInfoCache != nil {
 		_ = subscriptionPlanInfoCache.Purge()
 	}
-	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &UserValuePackagePreference{}, &ValuePackageUsageRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &UserValuePackagePreference{}, &ValuePackageUsageRecord{}, &SubscriptionPreConsumeRecord{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -106,6 +106,22 @@ func createValuePackagePlan(t *testing.T, packageType string, level int, duratio
 	return plan
 }
 
+func createRegularSubscriptionPlanForValuePackageTest(t *testing.T, title string, totalAmount int64) SubscriptionPlan {
+	t.Helper()
+	plan := SubscriptionPlan{
+		Title:         title,
+		PriceAmount:   9.9,
+		Currency:      "USD",
+		DurationUnit:  SubscriptionDurationDay,
+		DurationValue: 1,
+		Enabled:       true,
+		PlanKind:      SubscriptionPlanKindSubscription,
+		TotalAmount:   totalAmount,
+	}
+	require.NoError(t, DB.Create(&plan).Error)
+	return plan
+}
+
 func createActiveValuePackageSub(t *testing.T, userID int, plan SubscriptionPlan, start int64, end int64) UserSubscription {
 	t.Helper()
 	sub := UserSubscription{UserId: userID, PlanId: plan.Id, AmountTotal: plan.TotalAmount, StartTime: start, EndTime: end, Status: UserSubscriptionStatusActive, Source: "test"}
@@ -125,6 +141,60 @@ func TestValuePackagePurchaseIntentSameLevelExtends(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ValuePackagePurchaseActionExtend, intent.Action)
 	require.False(t, intent.RequiresConfirmation)
+}
+
+func TestHasActiveUserSubscriptionIgnoresOnlyValuePackage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3201, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+
+	hasActive, err := HasActiveUserSubscription(user.Id)
+
+	require.NoError(t, err)
+	require.False(t, hasActive)
+
+	regular := createRegularSubscriptionPlanForValuePackageTest(t, "regular sub", 100)
+	createActiveValuePackageSub(t, user.Id, regular, now-10, now+3600)
+
+	hasActive, err = HasActiveUserSubscription(user.Id)
+	require.NoError(t, err)
+	require.True(t, hasActive)
+}
+
+func TestPreConsumeUserSubscriptionSkipsValuePackage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3202, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	valuePackageSub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+
+	result, err := PreConsumeUserSubscription("vp-only-preconsume", user.Id, "gpt-test", 0, 1)
+
+	require.Error(t, err)
+	require.Nil(t, result)
+	var recordCount int64
+	require.NoError(t, DB.Model(&SubscriptionPreConsumeRecord{}).Where("user_id = ?", user.Id).Count(&recordCount).Error)
+	require.Zero(t, recordCount)
+
+	regular := createRegularSubscriptionPlanForValuePackageTest(t, "metered regular sub", 10)
+	regularSub := createActiveValuePackageSub(t, user.Id, regular, now-10, now+3600)
+
+	result, err = PreConsumeUserSubscription("regular-with-vp-preconsume", user.Id, "gpt-test", 0, 4)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, regularSub.Id, result.UserSubscriptionId)
+	require.EqualValues(t, 4, result.PreConsumed)
+	require.EqualValues(t, 0, result.AmountUsedBefore)
+	require.EqualValues(t, 4, result.AmountUsedAfter)
+
+	var reloadedValuePackage UserSubscription
+	require.NoError(t, DB.First(&reloadedValuePackage, valuePackageSub.Id).Error)
+	require.Zero(t, reloadedValuePackage.AmountUsed)
+	var reloadedRegular UserSubscription
+	require.NoError(t, DB.First(&reloadedRegular, regularSub.Id).Error)
+	require.EqualValues(t, 4, reloadedRegular.AmountUsed)
 }
 
 func TestValuePackagePurchaseIntentUpgradeRequiresConfirmation(t *testing.T) {

@@ -954,23 +954,36 @@ func GetAllActiveUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	if err != nil {
 		return nil, err
 	}
+	subs, err = filterRegularUserSubscriptionsTx(nil, subs)
+	if err != nil {
+		return nil, err
+	}
 	return buildSubscriptionSummaries(subs), nil
 }
 
-// HasActiveUserSubscription returns whether the user has any active subscription.
-// This is a lightweight existence check to avoid heavy pre-consume transactions.
+// HasActiveUserSubscription returns whether the user has any active regular subscription.
 func HasActiveUserSubscription(userId int) (bool, error) {
 	if userId <= 0 {
 		return false, errors.New("invalid userId")
 	}
 	now := common.GetTimestamp()
-	var count int64
-	if err := DB.Model(&UserSubscription{}).
-		Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
-		Count(&count).Error; err != nil {
+	var subs []UserSubscription
+	if err := DB.Where("user_id = ? AND status = ? AND end_time > ?", userId, "active", now).
+		Order("end_time desc, id desc").
+		Find(&subs).Error; err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	for _, sub := range subs {
+		plan, err := getSubscriptionPlanByIdTx(nil, sub.PlanId)
+		if err != nil {
+			return false, err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // GetAllUserSubscriptions returns all subscriptions (active and expired) for a user.
@@ -982,6 +995,10 @@ func GetAllUserSubscriptions(userId int) ([]SubscriptionSummary, error) {
 	err := DB.Where("user_id = ?", userId).
 		Order("end_time desc, id desc").
 		Find(&subs).Error
+	if err != nil {
+		return nil, err
+	}
+	subs, err = filterRegularUserSubscriptionsTx(nil, subs)
 	if err != nil {
 		return nil, err
 	}
@@ -1000,6 +1017,25 @@ func buildSubscriptionSummaries(subs []UserSubscription) []SubscriptionSummary {
 		})
 	}
 	return result
+}
+
+func filterRegularUserSubscriptionsTx(tx *gorm.DB, subs []UserSubscription) ([]UserSubscription, error) {
+	if len(subs) == 0 {
+		return []UserSubscription{}, nil
+	}
+	out := make([]UserSubscription, 0, len(subs))
+	for _, sub := range subs {
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			return nil, err
+		}
+		normalizeValuePackagePlan(plan)
+		if plan.IsValuePackage() {
+			continue
+		}
+		out = append(out, sub)
+	}
+	return out, nil
 }
 
 const (
@@ -1767,6 +1803,10 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
 			if err != nil {
 				return err
+			}
+			normalizeValuePackagePlan(plan)
+			if plan.IsValuePackage() {
+				continue
 			}
 			if err := maybeResetUserSubscriptionWithPlanTx(tx, &sub, plan, now); err != nil {
 				return err

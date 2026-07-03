@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -160,6 +161,11 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	plan.LdxpProductName = strings.TrimSpace(plan.LdxpProductName)
 	plan.LdxpProductRef = strings.TrimSpace(plan.LdxpProductRef)
 	plan.NormalizeDefaults()
+	switch plan.PlanKind {
+	case model.SubscriptionPlanKindSubscription, model.SubscriptionPlanKindValuePackage:
+	default:
+		return "套餐类型无效"
+	}
 	if plan.PlanKind != model.SubscriptionPlanKindValuePackage {
 		return ""
 	}
@@ -365,8 +371,18 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		if req.Plan.AllowBalancePay != nil {
 			updateMap["allow_balance_pay"] = *req.Plan.AllowBalancePay
 		}
-		if err := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Updates(updateMap).Error; err != nil {
-			return err
+		result := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Updates(updateMap)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			var count int64
+			if err := tx.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return errors.New("套餐不存在")
+			}
 		}
 		return nil
 	})
@@ -396,6 +412,18 @@ func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
 		common.ApiErrorMsg(c, "参数错误")
 		return
+	}
+	var plan model.SubscriptionPlan
+	if err := model.DB.Where("id = ?", id).First(&plan).Error; err != nil {
+		common.ApiErrorMsg(c, "套餐不存在")
+		return
+	}
+	plan.Enabled = *req.Enabled
+	if plan.Enabled {
+		if msg := normalizeAndValidateSubscriptionPlanRequest(&plan); msg != "" {
+			common.ApiErrorMsg(c, msg)
+			return
+		}
 	}
 	if err := model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Update("enabled", *req.Enabled).Error; err != nil {
 		common.ApiError(c, err)
