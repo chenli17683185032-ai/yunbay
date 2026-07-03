@@ -689,6 +689,59 @@ func TestCompleteSubscriptionOrderRejectsAlreadySuccessfulValuePackageOrder(t *t
 	require.Contains(t, err.Error(), "超值套餐仅支持联动小铺购买")
 }
 
+func TestPreConsumeValuePackageSubscriptionChecksRollingReservationWindows(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3310, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 1000
+	day.Limit5hAmount = 100
+	day.Limit7dAmount = 0
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "existing-90", Quota: 90, CreatedAt: now}))
+
+	_, err := PreConsumeValuePackageSubscription("rolling-reserve-too-large", user.Id, sub.Id, 20)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "subscription quota insufficient")
+
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
+	require.EqualValues(t, 0, reloaded.AmountUsed)
+	var failedCount int64
+	require.NoError(t, DB.Model(&ValuePackageUsageRecord{}).Where("request_id = ?", "rolling-reserve-too-large").Count(&failedCount).Error)
+	require.EqualValues(t, 0, failedCount)
+
+	result, err := PreConsumeValuePackageSubscription("rolling-reserve-fits", user.Id, sub.Id, 10)
+	require.NoError(t, err)
+	require.Equal(t, sub.Id, result.UserSubscriptionId)
+	require.EqualValues(t, 10, result.PreConsumed)
+
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 100, used5h)
+	require.EqualValues(t, 100, used7d)
+}
+
+func TestRecordValuePackageUsageUpsertsBySubscriptionAndRequest(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3311, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "same-request", Quota: 20, CreatedAt: now}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "same-request", Quota: 45, CreatedAt: now}))
+
+	var count int64
+	require.NoError(t, DB.Model(&ValuePackageUsageRecord{}).Where("user_subscription_id = ? AND request_id = ?", sub.Id, "same-request").Count(&count).Error)
+	require.EqualValues(t, 1, count)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 45, used5h)
+	require.EqualValues(t, 45, used7d)
+}
+
 func TestPreConsumeValuePackageSubscriptionOnlyAcceptsValuePackageAndIsIdempotent(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3301, UserGroupTiyan)

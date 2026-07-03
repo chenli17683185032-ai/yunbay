@@ -103,7 +103,7 @@ func runValuePackageMiddlewareRequest(t *testing.T, userID int, initialGroup str
 		c.Next()
 	})
 	router.Use(ValuePackageEntitlement())
-	router.GET("/relay", func(c *gin.Context) {
+	router.POST("/relay", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"using_group":                   common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
 			"token_group":                   common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
@@ -112,9 +112,85 @@ func runValuePackageMiddlewareRequest(t *testing.T, userID int, initialGroup str
 		})
 	})
 	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/relay", nil)
+	req := httptest.NewRequest(http.MethodPost, "/relay", nil)
 	router.ServeHTTP(recorder, req)
 	return recorder
+}
+
+func runValuePackageMiddlewareRequestWithMethod(t *testing.T, userID int, initialGroup string, method string, path string, hold bool) *httptest.ResponseRecorder {
+	t.Helper()
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		if userID > 0 {
+			common.SetContextKey(c, constant.ContextKeyUserId, userID)
+		}
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, initialGroup)
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, initialGroup)
+		c.Next()
+	})
+	router.Use(ValuePackageEntitlement())
+	router.Handle(method, path, func(c *gin.Context) {
+		if hold {
+			c.Writer.WriteHeader(http.StatusOK)
+			c.Writer.Flush()
+			<-c.Request.Context().Done()
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"using_group":                   common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+			"token_group":                   common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+			"value_package_subscription_id": common.GetContextKeyInt(c, constant.ContextKeyValuePackageSubscriptionId),
+		})
+	})
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, nil)
+	router.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func TestValuePackageReadOnlyRequestsOnlyApplyPackageGroup(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	now := common.GetTimestamp()
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "exhausted", Quota: 100, CreatedAt: now}))
+
+	readOnly := runValuePackageMiddlewareRequestWithMethod(t, user.Id, "gpt-plus", http.MethodGet, "/v1/models", false)
+	require.Equal(t, http.StatusOK, readOnly.Code, readOnly.Body.String())
+	require.Contains(t, readOnly.Body.String(), `"using_group":"day-card"`)
+
+	fetchPost := runValuePackageMiddlewareRequestWithMethod(t, user.Id, "gpt-plus", http.MethodPost, "/suno/fetch", false)
+	require.Equal(t, http.StatusOK, fetchPost.Code, fetchPost.Body.String())
+	require.Contains(t, fetchPost.Body.String(), `"using_group":"day-card"`)
+
+	consume := runValuePackageMiddlewareRequestWithMethod(t, user.Id, "gpt-plus", http.MethodPost, "/v1/chat/completions", false)
+	require.Equal(t, http.StatusForbidden, consume.Code, consume.Body.String())
+}
+
+func TestValuePackageGroupScopeSkipsConcurrencyLimit(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, _, _ := seedValuePackageMiddlewareState(t, true, 1000, 5000, 1)
+	release, ok := acquireValuePackageSlot(1, 1)
+	require.True(t, ok)
+	defer release()
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyUserId, user.Id)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "gpt-plus")
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, "gpt-plus")
+		c.Next()
+	})
+	router.Use(ValuePackageGroupScope())
+	router.GET("/v1/models", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"using_group": common.GetContextKeyString(c, constant.ContextKeyUsingGroup)})
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"using_group":"day-card"`)
 }
 
 func TestValuePackageMiddlewareForcesPackageGroup(t *testing.T) {
@@ -150,6 +226,8 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 }
 
 func TestValuePackageConcurrencyLimiter(t *testing.T) {
+	valuePackageConcurrencyCounters.Delete(9001)
+	valuePackageConcurrencyCounters.Delete(9002)
 	release1, ok := acquireValuePackageSlot(9001, 1)
 	require.True(t, ok)
 	defer release1()
@@ -159,10 +237,18 @@ func TestValuePackageConcurrencyLimiter(t *testing.T) {
 	require.Nil(t, release2)
 
 	release1()
+	_, exists := valuePackageConcurrencyCounters.Load(9001)
+	require.False(t, exists)
+	release1()
+	_, exists = valuePackageConcurrencyCounters.Load(9001)
+	require.False(t, exists)
+
 	release3, ok := acquireValuePackageSlot(9001, 1)
 	require.True(t, ok)
 	require.NotNil(t, release3)
 	release3()
+	_, exists = valuePackageConcurrencyCounters.Load(9001)
+	require.False(t, exists)
 
 	releaseA, ok := acquireValuePackageSlot(9002, 9)
 	require.True(t, ok)
@@ -172,7 +258,11 @@ func TestValuePackageConcurrencyLimiter(t *testing.T) {
 	require.False(t, ok)
 	require.Nil(t, releaseC)
 	releaseA()
+	_, exists = valuePackageConcurrencyCounters.Load(9002)
+	require.True(t, exists)
 	releaseB()
+	_, exists = valuePackageConcurrencyCounters.Load(9002)
+	require.False(t, exists)
 }
 
 func TestValuePackageMiddlewareDisabledPreferenceDoesNotForceGroup(t *testing.T) {

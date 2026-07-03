@@ -401,11 +401,11 @@ func (p *UserValuePackagePreference) BeforeUpdate(tx *gorm.DB) error {
 type ValuePackageUsageRecord struct {
 	Id                 int    `json:"id"`
 	UserId             int    `json:"user_id" gorm:"index:idx_vp_usage_user_time,priority:1"`
-	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index"`
+	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index;uniqueIndex:idx_vp_usage_sub_request,priority:1"`
 	PlanId             int    `json:"plan_id" gorm:"index"`
 	PackageType        string `json:"package_type" gorm:"type:varchar(16);index"`
 	ModelGroup         string `json:"model_group" gorm:"type:varchar(64);index"`
-	RequestId          string `json:"request_id" gorm:"type:varchar(64);index"`
+	RequestId          string `json:"request_id" gorm:"type:varchar(64);index;uniqueIndex:idx_vp_usage_sub_request,priority:2"`
 	Quota              int64  `json:"quota" gorm:"type:bigint;not null;default:0"`
 	CreatedAt          int64  `json:"created_at" gorm:"bigint;index:idx_vp_usage_user_time,priority:2"`
 }
@@ -1544,24 +1544,44 @@ func upsertValuePackagePreferenceTx(tx *gorm.DB, userId int, enabled bool, activ
 }
 
 func RecordValuePackageUsage(record *ValuePackageUsageRecord) error {
-	if record == nil || record.UserId <= 0 || record.UserSubscriptionId <= 0 || record.Quota <= 0 {
-		return errors.New("invalid value package usage record")
+	return recordValuePackageUsageTx(DB, record)
+}
+
+func recordValuePackageUsageTx(tx *gorm.DB, record *ValuePackageUsageRecord) error {
+	if tx == nil {
+		return errors.New("db is nil")
 	}
-	return DB.Create(record).Error
+	if record == nil || record.UserId <= 0 || record.UserSubscriptionId <= 0 || record.Quota <= 0 || strings.TrimSpace(record.RequestId) == "" {
+		return errors.New("invalid value package usage record: requestId, userId, userSubscriptionId and quota are required")
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_subscription_id"}, {Name: "request_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"user_id",
+			"plan_id",
+			"package_type",
+			"model_group",
+			"quota",
+		}),
+	}).Create(record).Error
 }
 
 func GetValuePackageWindowUsage(userId int, userSubscriptionId int, now int64) (int64, int64, error) {
+	return getValuePackageWindowUsageTx(DB, userId, userSubscriptionId, now)
+}
+
+func getValuePackageWindowUsageTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (int64, int64, error) {
 	if now <= 0 {
 		now = GetDBTimestamp()
 	}
 	var used5h int64
-	if err := DB.Model(&ValuePackageUsageRecord{}).
+	if err := tx.Model(&ValuePackageUsageRecord{}).
 		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-5*3600).
 		Select("COALESCE(SUM(quota), 0)").Scan(&used5h).Error; err != nil {
 		return 0, 0, err
 	}
 	var used7d int64
-	if err := DB.Model(&ValuePackageUsageRecord{}).
+	if err := tx.Model(&ValuePackageUsageRecord{}).
 		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-7*24*3600).
 		Select("COALESCE(SUM(quota), 0)").Scan(&used7d).Error; err != nil {
 		return 0, 0, err
@@ -1980,6 +2000,17 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 		if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < amount {
 			return fmt.Errorf("subscription quota insufficient, need=%d", amount)
 		}
+		used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
+		if err != nil {
+			return err
+		}
+		if plan.Limit5hAmount > 0 && used5h+amount > plan.Limit5hAmount {
+			return fmt.Errorf("subscription quota insufficient, 5h rolling limit exceeded, need=%d", amount)
+		}
+		if plan.Limit7dAmount > 0 && used7d+amount > plan.Limit7dAmount {
+			return fmt.Errorf("subscription quota insufficient, 7d rolling limit exceeded, need=%d", amount)
+		}
+
 		record := &SubscriptionPreConsumeRecord{
 			RequestId:          requestId,
 			UserId:             userId,
@@ -1987,19 +2018,38 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 			PreConsumed:        amount,
 			Status:             "consumed",
 		}
-		if err := tx.Create(record).Error; err != nil {
+		createPreConsume := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "request_id"}}, DoNothing: true}).Create(record)
+		if createPreConsume.Error != nil {
+			return createPreConsume.Error
+		}
+		if createPreConsume.RowsAffected == 0 {
 			var dup SubscriptionPreConsumeRecord
-			if err2 := tx.Where("request_id = ?", requestId).First(&dup).Error; err2 == nil {
-				if dup.Status == "refunded" {
-					return errors.New("subscription pre-consume already refunded")
-				}
-				returnValue.UserSubscriptionId = dup.UserSubscriptionId
-				returnValue.PreConsumed = dup.PreConsumed
-				returnValue.AmountTotal = sub.AmountTotal
-				returnValue.AmountUsedBefore = sub.AmountUsed
-				returnValue.AmountUsedAfter = sub.AmountUsed
-				return nil
+			if err := tx.Where("request_id = ?", requestId).First(&dup).Error; err != nil {
+				return err
 			}
+			if dup.Status == "refunded" {
+				return errors.New("subscription pre-consume already refunded")
+			}
+			if dup.UserId != userId || dup.UserSubscriptionId != sub.Id {
+				return errors.New("subscription pre-consume request mismatch")
+			}
+			returnValue.UserSubscriptionId = dup.UserSubscriptionId
+			returnValue.PreConsumed = dup.PreConsumed
+			returnValue.AmountTotal = sub.AmountTotal
+			returnValue.AmountUsedBefore = sub.AmountUsed
+			returnValue.AmountUsedAfter = sub.AmountUsed
+			return nil
+		}
+		if err := recordValuePackageUsageTx(tx, &ValuePackageUsageRecord{
+			UserId:             userId,
+			UserSubscriptionId: sub.Id,
+			PlanId:             plan.Id,
+			PackageType:        plan.PackageType,
+			ModelGroup:         plan.ModelGroup,
+			RequestId:          requestId,
+			Quota:              amount,
+			CreatedAt:          now,
+		}); err != nil {
 			return err
 		}
 		sub.AmountUsed += amount

@@ -100,3 +100,22 @@ func TestValuePackageBillingIgnoresWalletOnlyPreference(t *testing.T) {
 	require.EqualValues(t, 150, used5h)
 	require.EqualValues(t, 150, used7d)
 }
+
+func TestValuePackageBillingSettleReturnsUsageRecordError(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	session := &BillingSession{
+		relayInfo: &relaycommon.RelayInfo{
+			UserId:                     1,
+			ValuePackageSubscriptionId: 1,
+			ValuePackagePlanId:         1,
+			ValuePackageModelGroup:     "day-card",
+			ValuePackagePackageType:    model.ValuePackageTypeDay,
+		},
+		preConsumedQuota: 10,
+	}
+
+	err := session.Settle(10)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requestId")
+}

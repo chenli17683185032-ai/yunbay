@@ -47,8 +47,7 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
 		s.settled = true
-		s.recordValuePackageUsage(actualQuota)
-		return nil
+		return s.recordValuePackageUsage(actualQuota)
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
@@ -76,13 +75,19 @@ func (s *BillingSession) Settle(actualQuota int) error {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
 	s.settled = true
-	s.recordValuePackageUsage(actualQuota)
-	return tokenErr
+	usageErr := s.recordValuePackageUsage(actualQuota)
+	if tokenErr != nil && usageErr != nil {
+		return fmt.Errorf("%w; value package usage record failed: %v", tokenErr, usageErr)
+	}
+	if tokenErr != nil {
+		return tokenErr
+	}
+	return usageErr
 }
 
-func (s *BillingSession) recordValuePackageUsage(actualQuota int) {
+func (s *BillingSession) recordValuePackageUsage(actualQuota int) error {
 	if s == nil || s.relayInfo == nil || actualQuota <= 0 || s.relayInfo.ValuePackageSubscriptionId <= 0 {
-		return
+		return nil
 	}
 	record := &model.ValuePackageUsageRecord{
 		UserId:             s.relayInfo.UserId,
@@ -96,7 +101,9 @@ func (s *BillingSession) recordValuePackageUsage(actualQuota int) {
 	if err := model.RecordValuePackageUsage(record); err != nil {
 		common.SysLog(fmt.Sprintf("error recording value package usage (userId=%d, subscriptionId=%d, requestId=%s): %s",
 			s.relayInfo.UserId, s.relayInfo.ValuePackageSubscriptionId, s.relayInfo.RequestId, err.Error()))
+		return err
 	}
+	return nil
 }
 
 // Refund 退还所有预扣费，幂等安全，异步执行。
