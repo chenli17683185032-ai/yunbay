@@ -86,7 +86,7 @@ func (s *BillingSession) Settle(actualQuota int) error {
 }
 
 func (s *BillingSession) recordValuePackageUsage(actualQuota int) error {
-	if s == nil || s.relayInfo == nil || actualQuota <= 0 || s.relayInfo.ValuePackageSubscriptionId <= 0 {
+	if s == nil || s.relayInfo == nil || actualQuota < 0 || s.relayInfo.ValuePackageSubscriptionId <= 0 {
 		return nil
 	}
 	record := &model.ValuePackageUsageRecord{

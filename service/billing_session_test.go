@@ -101,6 +101,47 @@ func TestValuePackageBillingIgnoresWalletOnlyPreference(t *testing.T) {
 	require.EqualValues(t, 150, used7d)
 }
 
+func TestValuePackageBillingSettleZeroActualQuotaClearsUsageReservation(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "vp-billing-zero-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, Quota: 1000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	plan := model.SubscriptionPlan{Title: "zero day card", PriceAmount: 3.9, Currency: "USD", DurationUnit: model.SubscriptionDurationDay, DurationValue: 1, Enabled: true, PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeDay, PackageLevel: model.ValuePackageLevelDay, ModelGroup: "day-card", ConcurrencyLimit: 1, TotalAmount: 10000}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, StartTime: now - 10, EndTime: now + int64(time.Hour/time.Second), Status: model.UserSubscriptionStatusActive, Source: "test"}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                     user.Id,
+		RequestId:                  "vp-billing-zero-request",
+		OriginModelName:            "gpt-test",
+		IsPlayground:               true,
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, 100)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+
+	used5h, used7d, err := model.GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 100, used5h)
+	require.EqualValues(t, 100, used7d)
+
+	require.NoError(t, session.Settle(0))
+	var reloadedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 0, reloadedSub.AmountUsed)
+	used5h, used7d, err = model.GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, used5h)
+	require.EqualValues(t, 0, used7d)
+}
+
 func TestValuePackageBillingSettleReturnsUsageRecordError(t *testing.T) {
 	setupValuePackageBillingSessionTestDB(t)
 	session := &BillingSession{

@@ -1551,8 +1551,8 @@ func recordValuePackageUsageTx(tx *gorm.DB, record *ValuePackageUsageRecord) err
 	if tx == nil {
 		return errors.New("db is nil")
 	}
-	if record == nil || record.UserId <= 0 || record.UserSubscriptionId <= 0 || record.Quota <= 0 || strings.TrimSpace(record.RequestId) == "" {
-		return errors.New("invalid value package usage record: requestId, userId, userSubscriptionId and quota are required")
+	if record == nil || record.UserId <= 0 || record.UserSubscriptionId <= 0 || record.Quota < 0 || strings.TrimSpace(record.RequestId) == "" {
+		return errors.New("invalid value package usage record: requestId, userId and userSubscriptionId are required; quota must be non-negative")
 	}
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "user_subscription_id"}, {Name: "request_id"}},
