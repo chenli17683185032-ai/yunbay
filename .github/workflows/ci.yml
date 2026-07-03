@@ -52,7 +52,6 @@ jobs:
   sub2api-backend-tests:
     name: sub2api backend tests
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('infra/sub2api/backend/go.mod') != '' }}
     defaults:
       run:
         working-directory: infra/sub2api/backend
@@ -60,20 +59,32 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check sub2api backend manifest
+        id: sub2api_backend
+        working-directory: .
+        run: |
+          if [ -f infra/sub2api/backend/go.mod ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "infra/sub2api/backend/go.mod is absent; skipping sub2api backend tests."
+          fi
+
       - name: Set up Go
+        if: ${{ steps.sub2api_backend.outputs.present == 'true' }}
         uses: actions/setup-go@v5
         with:
           go-version-file: infra/sub2api/backend/go.mod
           cache-dependency-path: infra/sub2api/backend/go.sum
 
       - name: Run sub2api Go tests
+        if: ${{ steps.sub2api_backend.outputs.present == 'true' }}
         run: go test ./...
 
 
   sub2api-frontend-checks:
     name: sub2api frontend checks
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('infra/sub2api/frontend/package.json') != '' }}
     defaults:
       run:
         working-directory: infra/sub2api/frontend
@@ -81,23 +92,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Check sub2api frontend manifest
+        id: sub2api_frontend
+        working-directory: .
+        run: |
+          if [ -f infra/sub2api/frontend/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "infra/sub2api/frontend/package.json is absent; skipping sub2api frontend checks."
+          fi
+
       - name: Set up Node.js
+        if: ${{ steps.sub2api_frontend.outputs.present == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Install pnpm dependencies
+        if: ${{ steps.sub2api_frontend.outputs.present == 'true' }}
         run: |
           corepack enable
           corepack pnpm install --frozen-lockfile --trust-lockfile
 
       - name: Typecheck sub2api frontend
+        if: ${{ steps.sub2api_frontend.outputs.present == 'true' }}
         run: corepack pnpm run typecheck
 
       - name: Run sub2api frontend tests
+        if: ${{ steps.sub2api_frontend.outputs.present == 'true' }}
         run: corepack pnpm run test:run
 
       - name: Build sub2api frontend
+        if: ${{ steps.sub2api_frontend.outputs.present == 'true' }}
         run: corepack pnpm run build
 
   web-default-typecheck:
