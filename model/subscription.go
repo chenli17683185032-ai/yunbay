@@ -76,6 +76,10 @@ var (
 	subscriptionPlanInfoCache *cachex.HybridCache[SubscriptionPlanInfo]
 )
 
+func withUpdateLock(tx *gorm.DB) *gorm.DB {
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
+}
+
 func subscriptionPlanCacheTTL() time.Duration {
 	ttlSeconds := common.GetEnvOrDefault("SUBSCRIPTION_PLAN_CACHE_TTL", 300)
 	if ttlSeconds <= 0 {
@@ -1077,7 +1081,7 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 	var userId int
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var order SubscriptionOrder
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
+		if err := withUpdateLock(tx).Where("trade_no = ?", tradeNo).First(&order).Error; err != nil {
 			return ErrSubscriptionOrderNotFound
 		}
 		if expectedPaymentProvider != "" && order.PaymentProvider != expectedPaymentProvider {
@@ -1098,7 +1102,7 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 			return ErrSubscriptionOrderStatusInvalid
 		}
 		var user User
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", order.UserId).First(&user).Error; err != nil {
+		if err := withUpdateLock(tx).Where("id = ?", order.UserId).First(&user).Error; err != nil {
 			return err
 		}
 		plan, err := getSubscriptionPlanByIdTx(tx, order.PlanId)
@@ -1125,7 +1129,7 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		switch intent.Action {
 		case ValuePackagePurchaseActionExtend:
 			var existing UserSubscription
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", intent.CurrentSubscription.Id).First(&existing).Error; err != nil {
+			if err := withUpdateLock(tx).Where("id = ?", intent.CurrentSubscription.Id).First(&existing).Error; err != nil {
 				return err
 			}
 			base := existing.EndTime
@@ -1235,7 +1239,7 @@ func ActivateValuePackage(userId int, userSubscriptionId int) (*ValuePackageStat
 	var state *ValuePackageState
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var sub UserSubscription
-		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", userSubscriptionId, userId, UserSubscriptionStatusActive, now).First(&sub).Error; err != nil {
+		if err := withUpdateLock(tx).Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", userSubscriptionId, userId, UserSubscriptionStatusActive, now).First(&sub).Error; err != nil {
 			return err
 		}
 		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)

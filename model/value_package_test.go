@@ -10,6 +10,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func setupValuePackageTestDB(t *testing.T) *gorm.DB {
@@ -60,6 +61,17 @@ func setupValuePackageTestDB(t *testing.T) *gorm.DB {
 		initCol()
 	})
 	return db
+}
+
+func TestValuePackageUpdateLockUsesGormClause(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{DryRun: true})
+	require.NoError(t, err)
+
+	stmt := withUpdateLock(db).Where("id = ?", 1).First(&User{}).Statement
+
+	locking, ok := stmt.Clauses["FOR"].Expression.(clause.Locking)
+	require.True(t, ok)
+	require.Equal(t, "UPDATE", locking.Strength)
 }
 
 func createValuePackageUser(t *testing.T, id int, group string) User {
