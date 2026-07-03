@@ -605,7 +605,13 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	pref, ok = data["preference"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, false, pref["enabled"])
-	assert.Equal(t, float64(0), pref["active_user_subscription_id"])
+	assert.Equal(t, float64(sub.Id), pref["active_user_subscription_id"])
+	subscription, ok := data["subscription"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(sub.Id), subscription["id"])
+	responsePlan, ok := data["plan"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, float64(plan.Id), responsePlan["id"])
 }
 
 func TestAdminCreateSubscriptionPlanNormalizesValuePackageLevelFromType(t *testing.T) {
@@ -623,6 +629,28 @@ func TestAdminCreateSubscriptionPlanNormalizesValuePackageLevelFromType(t *testi
 	var persisted model.SubscriptionPlan
 	require.NoError(t, model.DB.First(&persisted, int(data["id"].(float64))).Error)
 	assert.Equal(t, model.ValuePackageLevelDay, persisted.PackageLevel)
+}
+
+func TestAdminCreateSubscriptionPlanAllowsEnabledValuePackageWithoutCustomLdxpTTL(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+	plan.Title = "enabled value package with default ldxp ttl"
+	plan.Enabled = true
+	plan.LdxpSessionTTLSeconds = 0
+
+	rec := valuePackageControllerRequest(AdminCreateSubscriptionPlan, http.MethodPost, "/subscription/admin/plans", gin.H{"plan": plan}, 1)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	id := int(data["id"].(float64))
+	var persisted model.SubscriptionPlan
+	require.NoError(t, model.DB.First(&persisted, id).Error)
+	assert.True(t, persisted.Enabled)
+	assert.Equal(t, "https://ldxp.example.test/"+model.ValuePackageTypeDay, persisted.LdxpProductUrl)
+	assert.Equal(t, model.ValuePackageTypeDay+" product", persisted.LdxpProductName)
+	assert.Equal(t, 9.9, persisted.LdxpProductAmount)
+	assert.Zero(t, persisted.LdxpSessionTTLSeconds)
 }
 
 func TestAdminCreateSubscriptionPlanPersistsDisabledValuePackageWithoutLdxpConfig(t *testing.T) {
@@ -734,13 +762,6 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageValidationCases(t 
 				plan.Limit7dAmount = 999
 			},
 			message: "7天额度不能小于5小时额度",
-		},
-		{
-			name: "enabled ttl invalid",
-			mutate: func(plan *model.SubscriptionPlan) {
-				plan.LdxpSessionTTLSeconds = 0
-			},
-			message: "启用超值套餐时必须配置 LDXP 商品链接、名称、金额和会话有效期",
 		},
 	}
 
@@ -863,10 +884,29 @@ func TestAdminUpdateSubscriptionPlanStatusRejectsInvalidValuePackageEnable(t *te
 
 	body := decodeTestResponse(t, rec)
 	require.Equal(t, false, body["success"], rec.Body.String())
-	assert.Contains(t, body["message"], "启用超值套餐时必须配置 LDXP 商品链接、名称、金额和会话有效期")
+	assert.Contains(t, body["message"], "启用超值套餐时必须配置 LDXP 商品链接、名称和金额")
 	var persisted model.SubscriptionPlan
 	require.NoError(t, model.DB.First(&persisted, plan.Id).Error)
 	assert.False(t, persisted.Enabled)
+}
+
+func TestAdminUpdateSubscriptionPlanStatusAllowsEnabledValuePackageWithoutCustomLdxpTTL(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+	plan.Title = "status enable value package with default ldxp ttl"
+	plan.Enabled = false
+	plan.LdxpSessionTTLSeconds = 0
+	require.NoError(t, model.DB.Create(&plan).Error)
+	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Update("enabled", false).Error)
+
+	rec := valuePackageControllerRequest(AdminUpdateSubscriptionPlanStatus, http.MethodPatch, fmt.Sprintf("/subscription/admin/plans/%d", plan.Id), gin.H{"enabled": true}, 1)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	var persisted model.SubscriptionPlan
+	require.NoError(t, model.DB.First(&persisted, plan.Id).Error)
+	assert.True(t, persisted.Enabled)
+	assert.Zero(t, persisted.LdxpSessionTTLSeconds)
 }
 
 func TestAdminUpdateSubscriptionPlanStatusReturnsErrorForMissingPlan(t *testing.T) {

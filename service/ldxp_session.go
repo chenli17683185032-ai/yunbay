@@ -165,8 +165,12 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 	if !plan.IsValuePackage() {
 		return nil, nil, fmt.Errorf("%w: not value package", ErrLdxpInvalidSessionRequest)
 	}
-	if strings.TrimSpace(plan.LdxpProductUrl) == "" || strings.TrimSpace(plan.LdxpProductName) == "" || plan.LdxpProductAmount <= 0 || plan.LdxpSessionTTLSeconds <= 0 {
+	if strings.TrimSpace(plan.LdxpProductUrl) == "" || strings.TrimSpace(plan.LdxpProductName) == "" || plan.LdxpProductAmount <= 0 {
 		return nil, nil, fmt.Errorf("%w: ldxp product incomplete", ErrLdxpInvalidSessionRequest)
+	}
+	sessionTTLSeconds := plan.LdxpSessionTTLSeconds
+	if sessionTTLSeconds <= 0 {
+		sessionTTLSeconds = cfg.SessionTTLSeconds
 	}
 	if _, err := model.CheckValuePackagePurchaseIntent(userID, planID, confirmedCover); err != nil {
 		return nil, nil, err
@@ -215,7 +219,7 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 		if err != nil {
 			return err
 		}
-		session = &model.LdxpTopupSession{SessionId: sessionID, UserId: userID, Amount: 0, Money: plan.LdxpProductAmount, ProductUrl: plan.LdxpProductUrl, ProductName: plan.LdxpProductName, ContactEmail: cfg.ContactEmail, Status: model.LdxpStatusCreated, Purpose: model.LdxpPurposeValuePackage, SubscriptionOrderId: order.Id, SubscriptionPlanId: plan.Id, ConfirmedCover: confirmedCover, CreatedTime: now, UpdatedTime: now, ExpiredTime: now + plan.LdxpSessionTTLSeconds}
+		session = &model.LdxpTopupSession{SessionId: sessionID, UserId: userID, Amount: 0, Money: plan.LdxpProductAmount, ProductUrl: plan.LdxpProductUrl, ProductName: plan.LdxpProductName, ContactEmail: cfg.ContactEmail, Status: model.LdxpStatusCreated, Purpose: model.LdxpPurposeValuePackage, SubscriptionOrderId: order.Id, SubscriptionPlanId: plan.Id, ConfirmedCover: confirmedCover, CreatedTime: now, UpdatedTime: now, ExpiredTime: now + sessionTTLSeconds}
 		return tx.Create(session).Error
 	})
 	if err != nil {

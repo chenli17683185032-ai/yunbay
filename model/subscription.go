@@ -1189,11 +1189,18 @@ func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
 }
 
 func GetValuePackageState(userId int) (*ValuePackageState, error) {
+	return getValuePackageStateTx(DB, userId)
+}
+
+func getValuePackageStateTx(tx *gorm.DB, userId int) (*ValuePackageState, error) {
 	if userId <= 0 {
 		return &ValuePackageState{}, nil
 	}
+	if tx == nil {
+		tx = DB
+	}
 	var pref UserValuePackagePreference
-	if err := DB.Where("user_id = ?", userId).First(&pref).Error; err != nil {
+	if err := tx.Where("user_id = ?", userId).First(&pref).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return &ValuePackageState{Preference: UserValuePackagePreference{UserId: userId}}, nil
 		}
@@ -1203,15 +1210,15 @@ func GetValuePackageState(userId int) (*ValuePackageState, error) {
 	if pref.ActiveUserSubscriptionId <= 0 {
 		return state, nil
 	}
-	now := GetDBTimestamp()
+	now := getDBTimestampTx(tx)
 	var sub UserSubscription
-	if err := DB.Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", pref.ActiveUserSubscriptionId, userId, UserSubscriptionStatusActive, now).First(&sub).Error; err != nil {
+	if err := tx.Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", pref.ActiveUserSubscriptionId, userId, UserSubscriptionStatusActive, now).First(&sub).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return state, nil
 		}
 		return nil, err
 	}
-	plan, err := GetSubscriptionPlanById(sub.PlanId)
+	plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return state, nil
@@ -1257,9 +1264,6 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 				return err
 			}
 			completed = &sub
-			if err := ensureValuePackagePreferenceAfterPurchaseTx(tx, order.UserId, completed.Id); err != nil {
-				return err
-			}
 			userId = order.UserId
 			return nil
 		}
@@ -1376,34 +1380,7 @@ func ensureValuePackagePreferenceAfterPurchaseTx(tx *gorm.DB, userId int, comple
 	if userId <= 0 || completedSubId <= 0 {
 		return errors.New("invalid value package preference args")
 	}
-	var pref UserValuePackagePreference
-	if err := tx.Where("user_id = ?", userId).First(&pref).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			_, err = upsertValuePackagePreferenceTx(tx, userId, false, completedSubId)
-			return err
-		}
-		return err
-	}
-	if !pref.Enabled {
-		_, err := upsertValuePackagePreferenceTx(tx, userId, false, completedSubId)
-		return err
-	}
-	if pref.ActiveUserSubscriptionId == completedSubId {
-		return nil
-	}
-	if pref.ActiveUserSubscriptionId > 0 {
-		var activeSub UserSubscription
-		if err := tx.Where("id = ? AND user_id = ?", pref.ActiveUserSubscriptionId, userId).First(&activeSub).Error; err == nil {
-			if activeSub.CoveredBySubscriptionId == completedSubId {
-				_, err = upsertValuePackagePreferenceTx(tx, userId, true, completedSubId)
-				return err
-			}
-			return nil
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-	}
-	_, err := upsertValuePackagePreferenceTx(tx, userId, true, completedSubId)
+	_, err := upsertValuePackagePreferenceTx(tx, userId, false, completedSubId)
 	return err
 }
 
@@ -1492,11 +1469,24 @@ func DeactivateValuePackage(userId int) (*ValuePackageState, error) {
 	}
 	var state *ValuePackageState
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		pref, err := upsertValuePackagePreferenceTx(tx, userId, false, 0)
+		activeSubId := 0
+		var current UserValuePackagePreference
+		if err := tx.Where("user_id = ?", userId).First(&current).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		} else {
+			activeSubId = current.ActiveUserSubscriptionId
+		}
+		pref, err := upsertValuePackagePreferenceTx(tx, userId, false, activeSubId)
 		if err != nil {
 			return err
 		}
-		state = &ValuePackageState{Preference: *pref}
+		state, err = getValuePackageStateTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		state.Preference = *pref
 		return nil
 	})
 	return state, err

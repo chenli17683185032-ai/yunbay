@@ -1001,7 +1001,7 @@ func TestCreateLdxpValuePackageSessionUsesPlanProductConfig(t *testing.T) {
 	assert.EqualValues(t, persisted.CreatedTime+900, persisted.ExpiredTime)
 }
 
-func TestCreateLdxpValuePackageSessionRejectsMissingPlanTTL(t *testing.T) {
+func TestCreateLdxpValuePackageSessionUsesDefaultTTLWhenPlanTTLIsMissing(t *testing.T) {
 	setupLdxpSessionServiceTest(t)
 	insertLdxpUserForServiceTest(t, 1002)
 	plan := model.SubscriptionPlan{
@@ -1022,21 +1022,27 @@ func TestCreateLdxpValuePackageSessionRejectsMissingPlanTTL(t *testing.T) {
 		LdxpSessionTTLSeconds: 0,
 	}
 	require.NoError(t, model.DB.Create(&plan).Error)
+	cfg := testLdxpSessionConfig(true)
+	before := common.GetTimestamp()
 
-	view, order, err := CreateLdxpValuePackageSession(1002, plan.Id, true, testLdxpSessionConfig(true))
+	view, order, err := CreateLdxpValuePackageSession(1002, plan.Id, true, cfg)
+	after := common.GetTimestamp()
 
-	require.Error(t, err)
-	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
-	assert.Contains(t, err.Error(), "ldxp product incomplete")
-	assert.Nil(t, view)
-	assert.Nil(t, order)
+	require.NoError(t, err)
+	require.NotNil(t, view)
+	require.NotNil(t, order)
+	persisted, err := model.GetLdxpTopupSessionBySessionId(view.SessionID)
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, persisted.ExpiredTime, before+cfg.SessionTTLSeconds)
+	assert.LessOrEqual(t, persisted.ExpiredTime, after+cfg.SessionTTLSeconds)
+	assert.EqualValues(t, persisted.CreatedTime+cfg.SessionTTLSeconds, persisted.ExpiredTime)
 
 	var sessionCount int64
 	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("user_id = ?", 1002).Count(&sessionCount).Error)
-	assert.Zero(t, sessionCount)
+	assert.EqualValues(t, 1, sessionCount)
 	var orderCount int64
 	require.NoError(t, model.DB.Model(&model.SubscriptionOrder{}).Where("user_id = ?", 1002).Count(&orderCount).Error)
-	assert.Zero(t, orderCount)
+	assert.EqualValues(t, 1, orderCount)
 }
 
 func TestCreateLdxpValuePackageSessionRejectsActiveSessionWithoutOrderID(t *testing.T) {

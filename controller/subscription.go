@@ -194,8 +194,8 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 		return "7天额度不能小于5小时额度"
 	}
 	if plan.Enabled {
-		if plan.LdxpProductUrl == "" || plan.LdxpProductName == "" || plan.LdxpProductAmount <= 0 || plan.LdxpSessionTTLSeconds <= 0 {
-			return "启用超值套餐时必须配置 LDXP 商品链接、名称、金额和会话有效期"
+		if plan.LdxpProductUrl == "" || plan.LdxpProductName == "" || plan.LdxpProductAmount <= 0 {
+			return "启用超值套餐时必须配置 LDXP 商品链接、名称和金额"
 		}
 	}
 	return ""

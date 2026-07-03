@@ -237,6 +237,9 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
 	now := common.GetTimestamp()
 	existing := createActiveValuePackageSub(t, user.Id, month, now-100, now+20*86400)
+	activated, err := ActivateValuePackage(user.Id, existing.Id)
+	require.NoError(t, err)
+	require.True(t, activated.Preference.Enabled)
 	order := SubscriptionOrder{UserId: user.Id, PlanId: month.Id, Money: month.PriceAmount, TradeNo: "vp-extend-order", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
 	require.NoError(t, DB.Create(&order).Error)
 
@@ -248,6 +251,14 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 	var reloaded User
 	require.NoError(t, DB.First(&reloaded, user.Id).Error)
 	require.Equal(t, UserGroupTiyan, reloaded.Group)
+	state, err := GetValuePackageState(user.Id)
+	require.NoError(t, err)
+	require.False(t, state.Preference.Enabled)
+	require.Equal(t, completed.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, completed.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, month.Id, state.Plan.Id)
 }
 
 func TestCompleteValuePackagePurchaseCoversLowerPlanAndCountsVIPTopup(t *testing.T) {
@@ -257,6 +268,9 @@ func TestCompleteValuePackagePurchaseCoversLowerPlanAndCountsVIPTopup(t *testing
 	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 30)
 	now := common.GetTimestamp()
 	lower := createActiveValuePackageSub(t, user.Id, day, now-100, now+3600)
+	activated, err := ActivateValuePackage(user.Id, lower.Id)
+	require.NoError(t, err)
+	require.True(t, activated.Preference.Enabled)
 	order := SubscriptionOrder{UserId: user.Id, PlanId: month.Id, Money: month.PriceAmount, TradeNo: "vp-upgrade-order", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
 	require.NoError(t, DB.Create(&order).Error)
 
@@ -275,6 +289,14 @@ func TestCompleteValuePackagePurchaseCoversLowerPlanAndCountsVIPTopup(t *testing
 	require.NoError(t, DB.Where("trade_no = ?", "vp-upgrade-order").First(&topUp).Error)
 	require.EqualValues(t, 0, topUp.Amount, "value package payment must not add wallet balance")
 	require.Equal(t, 30.0, topUp.Money)
+	state, err := GetValuePackageState(user.Id)
+	require.NoError(t, err)
+	require.False(t, state.Preference.Enabled)
+	require.Equal(t, completed.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, completed.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, month.Id, state.Plan.Id)
 }
 
 func TestActivateAndDeactivateValuePackageDoesNotStopClock(t *testing.T) {
@@ -292,6 +314,11 @@ func TestActivateAndDeactivateValuePackageDoesNotStopClock(t *testing.T) {
 	state, err = DeactivateValuePackage(user.Id)
 	require.NoError(t, err)
 	require.False(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
 
 	var reloaded UserSubscription
 	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
@@ -325,6 +352,10 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	first, err := CompleteValuePackageOrder(order.TradeNo, "payload-1", PaymentProviderLDXP, PaymentMethodLDXP, true)
 	require.NoError(t, err)
 	require.NotNil(t, first)
+	activated, err := ActivateValuePackage(user.Id, first.Id)
+	require.NoError(t, err)
+	require.True(t, activated.Preference.Enabled)
+	require.Equal(t, first.Id, activated.Preference.ActiveUserSubscriptionId)
 
 	other := UserSubscription{UserId: user.Id, PlanId: month.Id, AmountTotal: month.TotalAmount, StartTime: now + 10, EndTime: first.EndTime + 90*86400, Status: UserSubscriptionStatusActive, Source: "test-other"}
 	require.NoError(t, DB.Create(&other).Error)
@@ -338,6 +369,10 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	var reloadedOrder SubscriptionOrder
 	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&reloadedOrder).Error)
 	require.Equal(t, first.Id, reloadedOrder.UserSubscriptionId)
+	state, err := GetValuePackageState(user.Id)
+	require.NoError(t, err)
+	require.True(t, state.Preference.Enabled)
+	require.Equal(t, first.Id, state.Preference.ActiveUserSubscriptionId)
 }
 
 func TestCompleteValuePackageOrderCreatesDisabledPreferenceForPaidButNotActivatedPackage(t *testing.T) {
