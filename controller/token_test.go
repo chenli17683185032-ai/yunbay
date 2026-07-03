@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -32,11 +33,13 @@ type tokenPageResponse struct {
 }
 
 type tokenResponseItem struct {
-	ID     int    `json:"id"`
-	Name   string `json:"name"`
-	Key    string `json:"key"`
-	Status int    `json:"status"`
-	Group  string `json:"group"`
+	ID                  int      `json:"id"`
+	Name                string   `json:"name"`
+	Key                 string   `json:"key"`
+	Status              int      `json:"status"`
+	Group               string   `json:"group"`
+	EffectiveGroup      string   `json:"effective_group"`
+	EffectiveGroupRatio *float64 `json:"effective_group_ratio"`
 }
 
 type tokenKeyResponse struct {
@@ -112,6 +115,9 @@ func setupTokenControllerTestDB(t *testing.T) *gorm.DB {
 
 	db := openTokenControllerTestDB(t)
 	migrateTokenControllerTestDB(t, db)
+	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.ValuePackageUsageRecord{}); err != nil {
+		t.Fatalf("failed to migrate token controller support tables: %v", err)
+	}
 	return db
 }
 
@@ -416,6 +422,76 @@ func TestGetAllTokensMasksKeyInResponse(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("list response leaked raw token key: %s", recorder.Body.String())
+	}
+}
+
+func TestGetAllTokensIncludesActiveValuePackageEffectiveGroup(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	userID := 1
+	token := seedToken(t, db, userID, "package-token", "vpkg1234token5678")
+	token.Group = "gpt-plus"
+	if err := db.Save(token).Error; err != nil {
+		t.Fatalf("failed to update token group: %v", err)
+	}
+
+	plan := model.SubscriptionPlan{
+		Title:            "month card",
+		PriceAmount:      30,
+		Currency:         "CNY",
+		DurationUnit:     model.SubscriptionDurationMonth,
+		DurationValue:    1,
+		Enabled:          true,
+		PlanKind:         model.SubscriptionPlanKindValuePackage,
+		PackageType:      model.ValuePackageTypeMonth,
+		PackageLevel:     model.ValuePackageLevelMonth,
+		ModelGroup:       "month-card",
+		ConcurrencyLimit: 1,
+		TotalAmount:      10000,
+	}
+	if err := db.Create(&plan).Error; err != nil {
+		t.Fatalf("failed to create value package plan: %v", err)
+	}
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{
+		UserId:      userID,
+		PlanId:      plan.Id,
+		AmountTotal: plan.TotalAmount,
+		StartTime:   now - 10,
+		EndTime:     now + int64(time.Hour/time.Second),
+		Status:      model.UserSubscriptionStatusActive,
+		Source:      "test",
+	}
+	if err := db.Create(&sub).Error; err != nil {
+		t.Fatalf("failed to create value package subscription: %v", err)
+	}
+	pref := model.UserValuePackagePreference{UserId: userID, Enabled: true, ActiveUserSubscriptionId: sub.Id}
+	if err := db.Create(&pref).Error; err != nil {
+		t.Fatalf("failed to create value package preference: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?p=1&size=10", nil, userID)
+	GetAllTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected success response, got message: %s", response.Message)
+	}
+
+	var page tokenPageResponse
+	if err := common.Unmarshal(response.Data, &page); err != nil {
+		t.Fatalf("failed to decode token page response: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected exactly one token, got %d", len(page.Items))
+	}
+	if page.Items[0].Group != "gpt-plus" {
+		t.Fatalf("stored token group should remain gpt-plus, got %q", page.Items[0].Group)
+	}
+	if page.Items[0].EffectiveGroup != "month-card" {
+		t.Fatalf("expected effective package group month-card, got %q", page.Items[0].EffectiveGroup)
+	}
+	if page.Items[0].EffectiveGroupRatio == nil || *page.Items[0].EffectiveGroupRatio != 1 {
+		t.Fatalf("expected effective package group ratio 1, got %#v", page.Items[0].EffectiveGroupRatio)
 	}
 }
 
