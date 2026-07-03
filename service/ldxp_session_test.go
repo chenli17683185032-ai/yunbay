@@ -1129,3 +1129,137 @@ func TestCreateLdxpValuePackageSessionRejectsActiveSessionMissingOrder(t *testin
 	assert.Nil(t, view)
 	assert.Nil(t, order)
 }
+
+func TestCreateLdxpValuePackageSessionRejectsActiveSessionForDifferentPlan(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1005)
+	dayPlan := model.SubscriptionPlan{
+		Title:                 "日卡 active mismatch",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/day-mismatch",
+		LdxpProductName:       "日卡商品 mismatch",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	monthPlan := model.SubscriptionPlan{
+		Title:                 "月卡 active mismatch",
+		PriceAmount:           39.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationMonth,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeMonth,
+		PackageLevel:          model.ValuePackageLevelMonth,
+		ModelGroup:            "month-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/month-mismatch",
+		LdxpProductName:       "月卡商品 mismatch",
+		LdxpProductAmount:     39.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&dayPlan).Error)
+	require.NoError(t, model.DB.Create(&monthPlan).Error)
+	now := common.GetTimestamp()
+	order := model.SubscriptionOrder{
+		UserId:          1005,
+		PlanId:          dayPlan.Id,
+		Money:           dayPlan.LdxpProductAmount,
+		TradeNo:         "LDXP_VP-day-active-mismatch",
+		PaymentMethod:   model.PaymentMethodLDXP,
+		PaymentProvider: model.PaymentProviderLDXP,
+		CreateTime:      now,
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, model.DB.Create(&order).Error)
+	require.NoError(t, model.InsertLdxpTopupSession(&model.LdxpTopupSession{
+		SessionId:           "ldxp_value_package_day_active_mismatch",
+		UserId:              1005,
+		Money:               dayPlan.LdxpProductAmount,
+		ProductUrl:          dayPlan.LdxpProductUrl,
+		ProductName:         dayPlan.LdxpProductName,
+		Status:              model.LdxpStatusCreated,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  dayPlan.Id,
+		ConfirmedCover:      true,
+		CreatedTime:         now,
+		UpdatedTime:         now,
+		ExpiredTime:         now + 900,
+	}))
+
+	view, reusedOrder, err := CreateLdxpValuePackageSession(1005, monthPlan.Id, true, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
+	assert.Contains(t, err.Error(), "active value package session mismatch")
+	assert.Nil(t, view)
+	assert.Nil(t, reusedOrder)
+}
+
+func TestCreateLdxpValuePackageSessionRejectsActiveSessionForDifferentConfirmedCover(t *testing.T) {
+	setupLdxpSessionServiceTest(t)
+	insertLdxpUserForServiceTest(t, 1006)
+	plan := model.SubscriptionPlan{
+		Title:                 "日卡 confirmed cover mismatch",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           model.ValuePackageTypeDay,
+		PackageLevel:          model.ValuePackageLevelDay,
+		ModelGroup:            "day-card",
+		ConcurrencyLimit:      1,
+		LdxpProductUrl:        "https://ldxp.example.test/confirmed-cover-mismatch",
+		LdxpProductName:       "日卡商品 confirmed cover mismatch",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	order := model.SubscriptionOrder{
+		UserId:          1006,
+		PlanId:          plan.Id,
+		Money:           plan.LdxpProductAmount,
+		TradeNo:         "LDXP_VP-confirmed-cover-mismatch",
+		PaymentMethod:   model.PaymentMethodLDXP,
+		PaymentProvider: model.PaymentProviderLDXP,
+		CreateTime:      now,
+		Status:          common.TopUpStatusPending,
+	}
+	require.NoError(t, model.DB.Create(&order).Error)
+	require.NoError(t, model.InsertLdxpTopupSession(&model.LdxpTopupSession{
+		SessionId:           "ldxp_value_package_confirmed_cover_mismatch",
+		UserId:              1006,
+		Money:               plan.LdxpProductAmount,
+		ProductUrl:          plan.LdxpProductUrl,
+		ProductName:         plan.LdxpProductName,
+		Status:              model.LdxpStatusCreated,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		ConfirmedCover:      false,
+		CreatedTime:         now,
+		UpdatedTime:         now,
+		ExpiredTime:         now + 900,
+	}))
+
+	view, reusedOrder, err := CreateLdxpValuePackageSession(1006, plan.Id, true, testLdxpSessionConfig(true))
+
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrLdxpInvalidSessionRequest))
+	assert.Contains(t, err.Error(), "active value package session mismatch")
+	assert.Nil(t, view)
+	assert.Nil(t, reusedOrder)
+}

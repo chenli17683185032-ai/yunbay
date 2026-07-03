@@ -190,8 +190,8 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 			if err := tx.Where("id = ?", activeSession.SubscriptionOrderId).First(&existingOrder).Error; err != nil {
 				return err
 			}
-			if existingOrder.Status != common.TopUpStatusPending {
-				return fmt.Errorf("%w: invalid active value package session order status %s", ErrLdxpInvalidSessionRequest, existingOrder.Status)
+			if !isLdxpValuePackageSessionRequestMatch(activeSession, &existingOrder, plan, confirmedCover) {
+				return fmt.Errorf("%w: active value package session mismatch", ErrLdxpInvalidSessionRequest)
 			}
 			session = activeSession
 			order = &existingOrder
@@ -216,6 +216,20 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 		return nil, nil, err
 	}
 	return publicLdxpSessionView(session), order, nil
+}
+
+func isLdxpValuePackageSessionRequestMatch(session *model.LdxpTopupSession, order *model.SubscriptionOrder, plan *model.SubscriptionPlan, confirmedCover bool) bool {
+	if session == nil || order == nil || plan == nil {
+		return false
+	}
+	return session.SubscriptionPlanId == plan.Id &&
+		order.PlanId == plan.Id &&
+		session.ConfirmedCover == confirmedCover &&
+		order.Status == common.TopUpStatusPending &&
+		order.Money == plan.LdxpProductAmount &&
+		session.Money == plan.LdxpProductAmount &&
+		strings.TrimSpace(session.ProductUrl) == strings.TrimSpace(plan.LdxpProductUrl) &&
+		strings.TrimSpace(session.ProductName) == strings.TrimSpace(plan.LdxpProductName)
 }
 
 func GetLdxpSessionPublicView(sessionID string, userID int) (*LdxpSessionPublicView, error) {
