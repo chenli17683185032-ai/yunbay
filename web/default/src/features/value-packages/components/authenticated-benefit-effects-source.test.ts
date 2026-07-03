@@ -36,6 +36,7 @@ test('authenticated benefit effects source wires package and vip global effects'
   assert.match(source, /shouldShowPackageGlow/)
   assert.match(source, /getBenefitGlowMode/)
   assert.match(source, /mode === 'package'/)
+  assert.match(source, /yunbay-viewport-benefit-glow--package/)
   assert.match(source, /mode === 'vip'/)
   assert.match(source, /markVipUpgradeModalSeen/)
   assert.match(source, /withVipUpgradeModalSeen/)

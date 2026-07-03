@@ -113,6 +113,7 @@ export function buildSidebarData(
             {
               title: t('Value Packages'),
               url: '/value-packages',
+              attention: 'value-packages',
               icon: icons.valuePackages,
             },
             {
@@ -190,6 +191,7 @@ export function buildSidebarData(
           {
             title: t('Value Packages'),
             url: '/value-packages',
+            attention: 'value-packages',
             icon: icons.valuePackages,
           },
           {
