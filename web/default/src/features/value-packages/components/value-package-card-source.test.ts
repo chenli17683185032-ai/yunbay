@@ -33,6 +33,10 @@ test('value package card source keeps required user controls and limit copy', as
   assert.match(source, /Package total limit/)
   assert.match(source, /formatUsageAmount/)
   assert.match(source, /getProgressToneClass/)
+  assert.match(source, /!Number\.isFinite\(limit\) \|\| limit <= 0/)
+  assert.match(source, /hasUsageProgress/)
+  assert.match(source, /Math\.round\(amount \|\| 0\)/)
+  assert.doesNotMatch(source, /t=\{t\}/)
   assert.match(
     source,
     /当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用/

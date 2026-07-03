@@ -87,7 +87,7 @@ function formatUsageAmount(amount: number): string {
     return '0'
   }
 
-  return new Intl.NumberFormat().format(Math.max(amount, 0))
+  return new Intl.NumberFormat().format(Math.max(0, Math.round(amount || 0)))
 }
 
 function getProgressToneClass(percent: number): string {
@@ -109,14 +109,16 @@ function LimitProgressRow({
   used,
   limit,
   percent,
-  t,
 }: {
   label: string
   used: number
   limit: number
   percent: number
-  t: (key: string) => string
 }) {
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return null
+  }
+
   const progressPercent = clampPercent(percent)
 
   return (
@@ -124,8 +126,7 @@ function LimitProgressRow({
       <div className='flex items-center justify-between gap-3 text-xs'>
         <span className='text-muted-foreground font-medium'>{label}</span>
         <span className='text-muted-foreground tabular-nums'>
-          {formatUsageAmount(used)} /{' '}
-          {limit > 0 ? formatUsageAmount(limit) : t('Unlimited')}
+          {formatUsageAmount(used)} / {formatUsageAmount(limit)}
         </span>
       </div>
       <Progress
@@ -229,6 +230,9 @@ export function ValuePackageCard({
     plan.ldxp_product_amount || plan.price_amount || 0
   )
   const usage = state?.subscription?.plan_id === plan.id ? state.usage : null
+  const hasUsageProgress =
+    usage &&
+    (usage.total_limit > 0 || usage.limit_5h > 0 || usage.limit_7d > 0)
   const exhaustedMessage =
     usage?.exhausted_message ||
     '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
@@ -337,28 +341,25 @@ export function ValuePackageCard({
           </div>
         </div>
 
-        {usage ? (
+        {hasUsageProgress ? (
           <div className='flex flex-col gap-3 rounded-lg border p-3'>
             <LimitProgressRow
               label={t('Package total limit')}
               used={usage.total_used}
               limit={usage.total_limit}
               percent={usage.total_percent}
-              t={t}
             />
             <LimitProgressRow
               label={t('5-hour limit')}
               used={usage.used_5h}
               limit={usage.limit_5h}
               percent={usage.percent_5h}
-              t={t}
             />
             <LimitProgressRow
               label={t('7-day limit')}
               used={usage.used_7d}
               limit={usage.limit_7d}
               percent={usage.percent_7d}
-              t={t}
             />
           </div>
         ) : null}
