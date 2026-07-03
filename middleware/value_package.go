@@ -151,14 +151,31 @@ func isValuePackageReadOnlyRequest(c *gin.Context) bool {
 	if c.Request == nil || c.Request.URL == nil {
 		return false
 	}
+	path := c.Request.URL.Path
 	if c.Request.Method == http.MethodGet {
-		return true
+		return isValuePackageReadOnlyGetPath(path)
 	}
 	if c.Request.Method != http.MethodPost {
 		return false
 	}
-	path := c.Request.URL.Path
 	return path == "/suno/fetch" ||
 		strings.HasSuffix(path, "/suno/fetch") ||
 		strings.Contains(path, "/mj/task/list-by-condition")
+}
+
+func isValuePackageReadOnlyGetPath(path string) bool {
+	if path == "/v1/models" ||
+		strings.HasPrefix(path, "/v1/models/") ||
+		path == "/v1beta/models" ||
+		strings.HasPrefix(path, "/v1beta/models/") ||
+		path == "/v1beta/openai/models" ||
+		strings.HasPrefix(path, "/v1beta/openai/models/") {
+		return true
+	}
+	return strings.HasPrefix(path, "/suno/fetch/") ||
+		(strings.Contains(path, "/mj/task/") && (strings.HasSuffix(path, "/fetch") || strings.HasSuffix(path, "/image-seed"))) ||
+		strings.HasPrefix(path, "/v1/video/generations/") ||
+		strings.HasPrefix(path, "/v1/videos/") ||
+		strings.HasPrefix(path, "/kling/v1/videos/text2video/") ||
+		strings.HasPrefix(path, "/kling/v1/videos/image2video/")
 }

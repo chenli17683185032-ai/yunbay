@@ -148,6 +148,29 @@ func runValuePackageMiddlewareRequestWithMethod(t *testing.T, userID int, initia
 	return recorder
 }
 
+func TestValuePackageRealtimeRejectsOverRollingWindows(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	now := common.GetTimestamp()
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "realtime-exhausted", Quota: 100, CreatedAt: now}))
+
+	recorder := runValuePackageMiddlewareRequestWithMethod(t, user.Id, "gpt-plus", http.MethodGet, "/v1/realtime", false)
+
+	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+}
+
+func TestValuePackageRealtimeHonorsConcurrencyLimit(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, _, sub := seedValuePackageMiddlewareState(t, true, 1000, 5000, 1)
+	release, ok := acquireValuePackageSlot(sub.Id, 1)
+	require.True(t, ok)
+	defer release()
+
+	recorder := runValuePackageMiddlewareRequestWithMethod(t, user.Id, "gpt-plus", http.MethodGet, "/v1/realtime", false)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
+}
+
 func TestValuePackageReadOnlyRequestsOnlyApplyPackageGroup(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
