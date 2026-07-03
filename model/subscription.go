@@ -1574,7 +1574,11 @@ func ActivateValuePackage(userId int, userSubscriptionId int) (*ValuePackageStat
 		if err != nil {
 			return err
 		}
-		state = &ValuePackageState{Preference: *pref, Subscription: &sub, Plan: plan}
+		usage, err := buildValuePackageUsageSummaryTx(tx, userId, &sub, plan, now)
+		if err != nil {
+			return err
+		}
+		state = &ValuePackageState{Preference: *pref, Subscription: &sub, Plan: plan, Usage: usage}
 		return nil
 	})
 	return state, err

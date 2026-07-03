@@ -365,6 +365,36 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	require.EqualValues(t, 1800, used7d)
 }
 
+func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3400, UserGroupVIP)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 100
+	day.Limit5hAmount = 50
+	day.Limit7dAmount = 75
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(25)).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "activate-summary-recent", Quota: 10, CreatedAt: now}))
+
+	state, err := ActivateValuePackage(user.Id, sub.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.True(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
+	require.NotNil(t, state.Usage)
+	require.EqualValues(t, 25, state.Usage.TotalUsed)
+	require.EqualValues(t, 100, state.Usage.TotalLimit)
+	require.EqualValues(t, 10, state.Usage.Used5h)
+	require.EqualValues(t, 50, state.Usage.Limit5h)
+}
+
 func TestGetValuePackageStateIncludesUsageSummary(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3401, UserGroupVIP)
