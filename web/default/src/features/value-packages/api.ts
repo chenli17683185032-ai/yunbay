@@ -25,7 +25,9 @@ import type {
   ValuePackageState,
 } from './types'
 
-export async function getValuePackagePlans(): Promise<ValuePackagePlansResponse> {
+export async function getValuePackagePlans(): Promise<
+  ApiResponse<ValuePackagePlansResponse>
+> {
   const res = await api.get('/api/value-packages/plans')
   return res.data
 }
@@ -54,7 +56,7 @@ export async function getValuePackagePurchaseIntent(
 export async function createValuePackageLdxpSession(
   planId: number,
   confirmedCover: boolean
-): Promise<ValuePackageLdxpSessionResponse> {
+): Promise<ApiResponse<ValuePackageLdxpSessionResponse>> {
   const res = await api.post(
     `/api/value-packages/plans/${planId}/ldxp/session`,
     { confirmed_cover: confirmedCover },

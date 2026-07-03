@@ -23,19 +23,54 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
+export type SubscriptionDurationUnit =
+  | 'year'
+  | 'month'
+  | 'day'
+  | 'hour'
+  | 'custom'
+  | (string & {})
+
+export type SubscriptionQuotaResetPeriod =
+  | 'never'
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'custom'
+  | (string & {})
+
+export type SubscriptionPlanKind =
+  | 'subscription'
+  | 'value_package'
+  | ''
+  | (string & {})
+
+export type ValuePackageType = 'day' | 'week' | 'month'
+
+export type UserSubscriptionStatus =
+  | 'active'
+  | 'expired'
+  | 'cancelled'
+  | 'covered'
+  | (string & {})
+
+export type ValuePackagePurchaseAction = 'create' | 'extend' | 'upgrade'
+export type ValuePackageLevel = 1 | 2 | 3 | (number & {})
+export type ValuePackageConcurrencyLimit = 1 | 2 | (number & {})
+
 export interface SubscriptionPlanLike {
   id: number
   title: string
   subtitle?: string
   price_amount: number
   currency: string
-  duration_unit: 'year' | 'month' | 'day' | 'hour' | 'custom' | string
+  duration_unit: SubscriptionDurationUnit
   duration_value: number
   custom_seconds: number
   enabled: boolean
   sort_order: number
-  plan_kind: string
-  package_type?: string
+  plan_kind: SubscriptionPlanKind
+  package_type?: ValuePackageType | '' | (string & {})
   package_level: number
   model_group?: string
   concurrency_limit: number
@@ -47,14 +82,14 @@ export interface SubscriptionPlanLike {
   ldxp_product_amount: number
   ldxp_product_ref?: string
   ldxp_session_ttl_seconds: number
-  allow_balance_pay?: boolean
+  allow_balance_pay?: boolean | null
   stripe_price_id?: string
   creem_product_id?: string
   waffo_pancake_product_id?: string
   max_purchase_per_user: number
   upgrade_group?: string
   total_amount: number
-  quota_reset_period?: 'never' | 'daily' | 'weekly' | 'monthly' | 'custom' | string
+  quota_reset_period?: SubscriptionQuotaResetPeriod
   quota_reset_custom_seconds?: number
   created_at: number
   updated_at: number
@@ -68,7 +103,7 @@ export interface UserSubscription {
   amount_used: number
   start_time: number
   end_time: number
-  status: string
+  status: UserSubscriptionStatus
   source?: string
   last_reset_time?: number
   next_reset_time?: number
@@ -89,27 +124,33 @@ export interface UserValuePackagePreference {
   updated_at: number
 }
 
+export interface ValuePackagePlan extends SubscriptionPlanLike {
+  plan_kind: 'value_package'
+  package_type: ValuePackageType
+  package_level: ValuePackageLevel
+  model_group: string
+  concurrency_limit: ValuePackageConcurrencyLimit
+}
+
 export interface ValuePackageState {
   preference: UserValuePackagePreference
   subscription?: UserSubscription | null
-  plan?: SubscriptionPlanLike | null
+  plan?: ValuePackagePlan | null
 }
 
-export interface ValuePackagePlanRecord {
-  plan: SubscriptionPlanLike
-}
+export type ValuePackagePlanRecord = ValuePackagePlan
 
-export type ValuePackagePlansResponse = ApiResponse<{
-  plans: ValuePackagePlanRecord[]
+export interface ValuePackagePlansResponse {
+  plans: ValuePackagePlan[]
   state: ValuePackageState | null
-}>
+}
 
 export interface ValuePackagePurchaseIntent {
-  action: string
+  action: ValuePackagePurchaseAction
   requires_confirmation: boolean
   current_subscription?: UserSubscription | null
-  current_plan?: SubscriptionPlanLike | null
-  target_plan?: SubscriptionPlanLike | null
+  current_plan?: ValuePackagePlan | null
+  target_plan?: ValuePackagePlan | null
   message?: string
 }
 
@@ -126,8 +167,8 @@ export interface ValuePackageLdxpSession {
   error_message?: string
 }
 
-export type ValuePackageLdxpSessionResponse = ApiResponse<{
+export interface ValuePackageLdxpSessionResponse {
   session: ValuePackageLdxpSession
   order_id: number
   trade_no: string
-}>
+}

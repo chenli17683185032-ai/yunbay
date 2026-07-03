@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ValuePackagePlanRecord, ValuePackageState } from '../types'
+import type { ValuePackagePlan, ValuePackageState } from '../types'
 
 export type ValuePackageCardStateKind =
   | 'purchase'
@@ -24,6 +24,10 @@ export type ValuePackageCardStateKind =
   | 'running'
   | 'expired'
   | 'disabled'
+
+function currentUnixSeconds(): number {
+  return Math.floor(Date.now() / 1000)
+}
 
 export function getPackageLevelLabel(type?: string): string {
   switch ((type || '').trim()) {
@@ -34,45 +38,68 @@ export function getPackageLevelLabel(type?: string): string {
     case 'month':
       return '月卡'
     default:
-      return ''
+      return '套餐'
   }
 }
 
-export function shouldShowPackageGlow(
-  state: ValuePackageState | null
+function isCurrentValuePackageState(
+  state: ValuePackageState | null,
+  now: number
 ): boolean {
-  const now = Math.floor(Date.now() / 1000)
+  const subscription = state?.subscription
+  const statePlan = state?.plan
+  const activeSubscriptionId =
+    state?.preference.active_user_subscription_id || 0
+
   return Boolean(
     state?.preference.enabled &&
-      state.subscription &&
-      state.plan?.enabled &&
-      state.subscription.status === 'active' &&
-      state.subscription.end_time > now
+    subscription &&
+    statePlan &&
+    activeSubscriptionId === subscription.id &&
+    subscription.plan_id === statePlan.id &&
+    subscription.status === 'active' &&
+    subscription.end_time > now
   )
 }
 
+export function shouldShowPackageGlow(
+  state: ValuePackageState | null,
+  now = currentUnixSeconds()
+): boolean {
+  return isCurrentValuePackageState(state, now)
+}
+
 export function getPackageCardState(
-  record: ValuePackagePlanRecord,
-  state: ValuePackageState | null
+  plan: ValuePackagePlan,
+  state: ValuePackageState | null,
+  now = currentUnixSeconds()
 ): {
   kind: ValuePackageCardStateKind
   userSubscriptionId?: number
 } {
-  const now = Math.floor(Date.now() / 1000)
   const subscription = state?.subscription
-  const activeSubscriptionId = state?.preference.active_user_subscription_id || 0
-  const userSubscriptionId = subscription?.id || activeSubscriptionId || undefined
-  const isOwned =
-    !!subscription &&
-    subscription.plan_id === record.plan.id &&
+  const statePlan = state?.plan
+  const activeSubscriptionId =
+    state?.preference.active_user_subscription_id || 0
+  const userSubscriptionId =
+    subscription?.id || activeSubscriptionId || undefined
+  const isOwned = Boolean(
+    subscription &&
+    statePlan &&
+    subscription.plan_id === plan.id &&
+    statePlan.id === plan.id &&
     activeSubscriptionId === subscription.id
+  )
 
-  if (!isOwned) {
-    return { kind: 'purchase' }
+  if (!plan.enabled) {
+    return {
+      kind: 'disabled',
+      userSubscriptionId: isOwned ? userSubscriptionId : undefined,
+    }
   }
 
-  if (!record.plan.enabled) {
-    return { kind: 'disabled', userSubscriptionId }
+  if (!isOwned || !subscription) {
+    return { kind: 'purchase' }
   }
 
   if (subscription.status !== 'active' || subscription.end_time <= now) {
