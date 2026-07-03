@@ -36,7 +36,7 @@ func (b *failingTaskSettleBilling) NeedsRefund() bool             { return false
 func (b *failingTaskSettleBilling) GetPreConsumedQuota() int      { return 100 }
 func (b *failingTaskSettleBilling) Reserve(targetQuota int) error { return nil }
 
-func TestRelayTaskSuccessSettleErrorDoesNotInsertSuccessTask(t *testing.T) {
+func TestRelayTaskSuccessSettleErrorStillInsertsTaskWithAuditMarker(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Log{}))
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -45,6 +45,8 @@ func TestRelayTaskSuccessSettleErrorDoesNotInsertSuccessTask(t *testing.T) {
 		UserId:          42,
 		UsingGroup:      "day-card",
 		OriginModelName: "video-test",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 3},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "submit"},
 		Billing:         billing,
 		BillingSource:   "subscription",
 		SubscriptionId:  7,
@@ -54,13 +56,19 @@ func TestRelayTaskSuccessSettleErrorDoesNotInsertSuccessTask(t *testing.T) {
 
 	taskErr := finalizeSuccessfulRelayTask(ctx, relayInfo, result)
 
-	require.NotNil(t, taskErr)
-	require.Equal(t, http.StatusInternalServerError, taskErr.StatusCode)
-	require.Equal(t, "settle_task_billing_failed", taskErr.Code)
+	require.Nil(t, taskErr)
 	require.Equal(t, 1, billing.settleCalls)
 	var taskCount int64
 	require.NoError(t, model.DB.Model(&model.Task{}).Count(&taskCount).Error)
-	require.EqualValues(t, 0, taskCount)
+	require.EqualValues(t, 1, taskCount)
+	var task model.Task
+	require.NoError(t, model.DB.First(&task).Error)
+	require.Equal(t, result.UpstreamTaskID, task.PrivateData.UpstreamTaskID)
+	require.Equal(t, relayInfo.BillingSource, task.PrivateData.BillingSource)
+	require.Equal(t, relayInfo.SubscriptionId, task.PrivateData.SubscriptionId)
+	require.Equal(t, relayInfo.TokenId, task.PrivateData.TokenId)
+	require.True(t, task.PrivateData.BillingSettleFailed)
+	require.Equal(t, "usage reservation write failed", task.PrivateData.BillingSettleError)
 	var logCount int64
 	require.NoError(t, model.DB.Model(&model.Log{}).Count(&logCount).Error)
 	require.EqualValues(t, 0, logCount)

@@ -17,6 +17,8 @@ type valuePackageConcurrencyCounter struct {
 	count int
 }
 
+// valuePackageConcurrencyCounters 仅在当前进程内做 best-effort 并发限制。
+// 多实例/分布式部署不会共享该状态，如需严格全局限流需改为 Redis/DB 等共享限流器。
 var valuePackageConcurrencyCounters sync.Map
 
 func normalizeValuePackageConcurrencyLimit(limit int) int {

@@ -580,12 +580,6 @@ func RelayTask(c *gin.Context) {
 }
 
 func finalizeSuccessfulRelayTask(c *gin.Context, relayInfo *relaycommon.RelayInfo, result *relay.TaskSubmitResult) *dto.TaskError {
-	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
-		common.SysError("settle task billing error: " + settleErr.Error())
-		return service.TaskErrorWrapperLocal(settleErr, "settle_task_billing_failed", http.StatusInternalServerError)
-	}
-	service.LogTaskConsumption(c, relayInfo)
-
 	task := model.InitTask(result.Platform, relayInfo)
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 	task.PrivateData.BillingSource = relayInfo.BillingSource
@@ -602,6 +596,15 @@ func finalizeSuccessfulRelayTask(c *gin.Context, relayInfo *relaycommon.RelayInf
 	task.Quota = result.Quota
 	task.Data = result.TaskData
 	task.Action = relayInfo.Action
+
+	if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
+		common.SysError("settle task billing error: " + settleErr.Error())
+		task.PrivateData.BillingSettleFailed = true
+		task.PrivateData.BillingSettleError = settleErr.Error()
+	} else {
+		service.LogTaskConsumption(c, relayInfo)
+	}
+
 	if insertErr := task.Insert(); insertErr != nil {
 		common.SysError("insert task error: " + insertErr.Error())
 	}
