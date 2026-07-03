@@ -417,3 +417,59 @@ func TestActivateAndDeactivateValuePackagePreferenceUpsertIsRepeatable(t *testin
 	require.NoError(t, DB.Model(&UserValuePackagePreference{}).Where("user_id = ?", user.Id).Count(&count).Error)
 	require.EqualValues(t, 1, count)
 }
+
+func TestCompleteValuePackageOrderPreservesCompletedSubscriptionLookupDBError(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3107, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	order := SubscriptionOrder{UserId: user.Id, PlanId: day.Id, Money: day.PriceAmount, TradeNo: "vp-completed-subscription-db-error", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
+	require.NoError(t, DB.Create(&order).Error)
+
+	completed, err := CompleteValuePackageOrder(order.TradeNo, "payload-1", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+
+	forcedErr := errors.New("forced completed subscription lookup failure")
+	callbackName := "test:force_completed_subscription_lookup_error:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "UserSubscription" {
+			return
+		}
+		where := fmt.Sprintf("%#v", tx.Statement.Clauses["WHERE"].Expression)
+		if strings.Contains(where, "id = ? AND user_id = ?") {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, DB.Callback().Query().Remove(callbackName))
+	})
+
+	retry, err := CompleteValuePackageOrder(order.TradeNo, "payload-2", PaymentProviderLDXP, PaymentMethodLDXP, true)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, forcedErr)
+	require.False(t, errors.Is(err, ErrCompletedSubscriptionNotFound), "infrastructure lookup errors must not be converted to completed-subscription business errors")
+	require.Nil(t, retry)
+}
+
+func TestCompleteValuePackageOrderReturnsTypedErrorWhenCompletedSubscriptionMissing(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3108, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	order := SubscriptionOrder{UserId: user.Id, PlanId: day.Id, Money: day.PriceAmount, TradeNo: "vp-completed-subscription-missing", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
+	require.NoError(t, DB.Create(&order).Error)
+
+	completed, err := CompleteValuePackageOrder(order.TradeNo, "payload-1", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+
+	require.NoError(t, DB.Delete(&UserSubscription{}, completed.Id).Error)
+
+	retry, err := CompleteValuePackageOrder(order.TradeNo, "payload-2", PaymentProviderLDXP, PaymentMethodLDXP, true)
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrCompletedSubscriptionNotFound)
+	require.Nil(t, retry)
+}

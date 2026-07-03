@@ -61,6 +61,7 @@ const (
 var (
 	ErrSubscriptionOrderNotFound      = errors.New("subscription order not found")
 	ErrSubscriptionOrderStatusInvalid = errors.New("subscription order status invalid")
+	ErrCompletedSubscriptionNotFound  = errors.New("completed subscription not found")
 )
 
 const (
@@ -1113,7 +1114,10 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 			}
 			var sub UserSubscription
 			if err := tx.Where("id = ? AND user_id = ?", order.UserSubscriptionId, order.UserId).First(&sub).Error; err != nil {
-				return fmt.Errorf("completed subscription not found: %w", err)
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("%w: %w", ErrCompletedSubscriptionNotFound, err)
+				}
+				return err
 			}
 			completed = &sub
 			return nil

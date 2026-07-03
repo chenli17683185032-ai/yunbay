@@ -458,7 +458,8 @@ func isLdxpValuePackageSettlementBusinessError(err error) bool {
 	}
 	if errors.Is(err, model.ErrSubscriptionOrderNotFound) ||
 		errors.Is(err, model.ErrPaymentMethodMismatch) ||
-		errors.Is(err, model.ErrSubscriptionOrderStatusInvalid) {
+		errors.Is(err, model.ErrSubscriptionOrderStatusInvalid) ||
+		errors.Is(err, model.ErrCompletedSubscriptionNotFound) {
 		return true
 	}
 	message := strings.TrimSpace(err.Error())
@@ -471,7 +472,6 @@ func isLdxpValuePackageSettlementBusinessError(err error) bool {
 		"购买高级套餐需要确认覆盖当前低级套餐",
 		"当前已有更高等级套餐未过期，暂不能购买低等级套餐",
 		"completed order missing user subscription id",
-		"completed subscription not found",
 	}
 	for _, businessMessage := range businessMessages {
 		if strings.Contains(message, businessMessage) {

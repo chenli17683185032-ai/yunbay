@@ -1118,6 +1118,48 @@ func TestVerifyValuePackageLdxpSessionRejectsLinkedOrderPlanAndMoneyMismatch(t *
 	assert.Zero(t, subCount)
 }
 
+func TestVerifyValuePackageLdxpSessionKeepsCompletedSubscriptionLookupDBErrorRetryable(t *testing.T) {
+	setupLdxpVerifyValuePackageServiceTest(t)
+	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
+	insertLdxpVerifyUser(t, 7206, 12345)
+	plan := createLdxpVerifyValuePackagePlan(t, "日卡 completed subscription db error", 9.9)
+	now := common.GetTimestamp()
+	order := model.SubscriptionOrder{UserId: 7206, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: "ldxp-vp-completed-subscription-db-error-order", PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, CreateTime: now, Status: common.TopUpStatusPending}
+	require.NoError(t, model.DB.Create(&order).Error)
+
+	completed, err := model.CompleteValuePackageOrder(order.TradeNo, "payload", model.PaymentProviderLDXP, model.PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+	insertPaidLdxpValuePackageVerifySession(t, "ldxp_verify_value_package_completed_subscription_db_error", 7206, plan, order.Id)
+
+	forcedErr := errors.New("forced completed subscription lookup failure")
+	callbackName := "test:force_service_completed_subscription_lookup_error:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, model.DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "UserSubscription" {
+			return
+		}
+		where := fmt.Sprintf("%#v", tx.Statement.Clauses["WHERE"].Expression)
+		if strings.Contains(where, "id = ? AND user_id = ?") {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, model.DB.Callback().Query().Remove(callbackName))
+	})
+
+	result, err := TryVerifyAndRedeemLdxpSession("ldxp_verify_value_package_completed_subscription_db_error")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, forcedErr)
+	assert.Nil(t, result)
+	persisted, loadErr := model.GetLdxpTopupSessionBySessionId("ldxp_verify_value_package_completed_subscription_db_error")
+	require.NoError(t, loadErr)
+	assert.Equal(t, model.LdxpStatusVerified, persisted.Status)
+	assert.NotEqual(t, model.LdxpStatusRedeemFailed, persisted.Status)
+	assert.Empty(t, persisted.ErrorCode)
+	assert.Empty(t, persisted.ErrorMessage)
+}
+
 func TestVerifyValuePackageLdxpSessionKeepsSettlementDBErrorRetryable(t *testing.T) {
 	setupLdxpVerifyValuePackageServiceTest(t)
 	t.Setenv("LDXP_REQUIRE_MAIL_MATCH", "false")
