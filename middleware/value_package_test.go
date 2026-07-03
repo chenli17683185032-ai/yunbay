@@ -280,6 +280,7 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 	recorder := runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
 
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)
 
 	require.NoError(t, model.DB.Where("1 = 1").Delete(&model.ValuePackageUsageRecord{}).Error)
 	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]any{"limit_5h_amount": int64(0), "limit_7d_amount": int64(100)}).Error)
@@ -288,6 +289,7 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 	recorder = runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
 
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)
 }
 
 func TestValuePackageConcurrencyLimiter(t *testing.T) {

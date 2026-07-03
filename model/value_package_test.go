@@ -904,3 +904,20 @@ func TestPreConsumeValuePackageSubscriptionOnlyAcceptsValuePackageAndIsIdempoten
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not value package")
 }
+
+func TestPreConsumeValuePackageSubscriptionUsesUserFacingExhaustedMessage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3403, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 10
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(10)).Error)
+
+	_, err := PreConsumeValuePackageSubscription("vp-exhausted-message", user.Id, sub.Id, 1)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "subscription quota insufficient")
+	require.Contains(t, err.Error(), ValuePackageQuotaExhaustedUserMessage)
+}

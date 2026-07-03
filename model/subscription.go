@@ -2096,17 +2096,17 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 		}
 		usedBefore := sub.AmountUsed
 		if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < amount {
-			return fmt.Errorf("subscription quota insufficient, need=%d", amount)
+			return fmt.Errorf("subscription quota insufficient: %s, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 		used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
 		if err != nil {
 			return err
 		}
 		if plan.Limit5hAmount > 0 && used5h+amount > plan.Limit5hAmount {
-			return fmt.Errorf("subscription quota insufficient, 5h rolling limit exceeded, need=%d", amount)
+			return fmt.Errorf("subscription quota insufficient: %s, 5h rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 		if plan.Limit7dAmount > 0 && used7d+amount > plan.Limit7dAmount {
-			return fmt.Errorf("subscription quota insufficient, 7d rolling limit exceeded, need=%d", amount)
+			return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 
 		record := &SubscriptionPreConsumeRecord{
