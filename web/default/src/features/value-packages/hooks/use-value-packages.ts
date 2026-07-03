@@ -17,8 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import { useAuthStore } from '@/stores/auth-store'
+import { getSelf } from '@/lib/api'
 import {
   cancelLdxpTopupSession,
   getLdxpTopupSession,
@@ -38,6 +41,7 @@ import type {
   ValuePackagePlan,
   ValuePackageState,
 } from '../types'
+import { valuePackageSelfQueryKey } from '../query-keys'
 
 function getErrorMessage(
   responseMessage: string | undefined,
@@ -72,6 +76,8 @@ function isTerminalValuePackageSession(
 
 export function useValuePackages() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const setUser = useAuthStore((store) => store.auth.setUser)
   const [plans, setPlans] = useState<ValuePackagePlan[]>([])
   const [state, setState] = useState<ValuePackageState | null>(null)
   const [loading, setLoading] = useState(true)
@@ -86,6 +92,20 @@ export function useValuePackages() {
   const activeSessionIdRef = useRef<string | null>(null)
   const operationSeqRef = useRef(0)
   const handledSuccessSessionIdRef = useRef<string | null>(null)
+
+  const syncGlobalState = useCallback(
+    (nextState: ValuePackageState | null) => {
+      queryClient.setQueryData(valuePackageSelfQueryKey, nextState)
+    },
+    [queryClient]
+  )
+
+  const refreshSelf = useCallback(async () => {
+    const response = await getSelf().catch(() => null)
+    if (response?.success && response.data) {
+      setUser(response.data)
+    }
+  }, [setUser])
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
@@ -104,18 +124,21 @@ export function useValuePackages() {
       }
 
       setPlans(response.data.plans || [])
-      setState(response.data.state || null)
+      const nextState = response.data.state || null
+      setState(nextState)
+      syncGlobalState(nextState)
       return true
     } catch (_error) {
       setError(t('Failed to load value packages'))
       setPlans([])
       setState(null)
+      syncGlobalState(null)
       return false
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [t])
+  }, [syncGlobalState, t])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -224,6 +247,7 @@ export function useValuePackages() {
         }
 
         setState(response.data)
+        syncGlobalState(response.data)
         toast.success(t('Value package started'))
         return true
       } catch (_error) {
@@ -233,7 +257,7 @@ export function useValuePackages() {
         setActionKey(null)
       }
     },
-    [t]
+    [syncGlobalState, t]
   )
 
   const deactivate = useCallback(async () => {
@@ -250,6 +274,7 @@ export function useValuePackages() {
       }
 
       setState(response.data)
+      syncGlobalState(response.data)
       toast.success(t('Package usage closed'))
       return true
     } catch (_error) {
@@ -258,7 +283,7 @@ export function useValuePackages() {
     } finally {
       setActionKey(null)
     }
-  }, [t])
+  }, [syncGlobalState, t])
 
   const cancelPayment = useCallback(async () => {
     const sessionId = paymentSession?.session.session_id
@@ -399,7 +424,8 @@ export function useValuePackages() {
 
     handledSuccessSessionIdRef.current = session.session_id
     void refresh()
-  }, [paymentSession, refresh])
+    void refreshSelf()
+  }, [paymentSession, refresh, refreshSelf])
 
   return {
     plans,

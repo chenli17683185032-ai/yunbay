@@ -114,6 +114,74 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 
+.yunbay-viewport-benefit-glow {
+  --yunbay-benefit-glow-color: oklch(0.78 0.16 82 / 0.58);
+  --yunbay-benefit-glow-soft-color: oklch(0.78 0.16 82 / 0.22);
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  box-shadow:
+    inset 0 0 18px 3px var(--yunbay-benefit-glow-color),
+    inset 0 0 56px 14px var(--yunbay-benefit-glow-soft-color);
+  opacity: 0.62;
+  animation: yunbay-viewport-benefit-glow 2.8s ease-in-out infinite;
+}
+
+.yunbay-viewport-benefit-glow--package {
+  --yunbay-benefit-glow-color: oklch(0.82 0.17 82 / 0.7);
+  --yunbay-benefit-glow-soft-color: oklch(0.82 0.17 82 / 0.24);
+}
+
+.yunbay-viewport-benefit-glow--vip {
+  --yunbay-benefit-glow-color: oklch(0.78 0.15 78 / 0.62);
+  --yunbay-benefit-glow-soft-color: oklch(0.72 0.17 58 / 0.22);
+}
+
+.yunbay-vip-card-shine {
+  background:
+    radial-gradient(
+      circle at 20% 0%,
+      color-mix(in oklch, var(--warning) 34%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(
+      120deg,
+      transparent 0%,
+      color-mix(in oklch, var(--warning) 18%, transparent) 36%,
+      transparent 58%
+    );
+  animation: yunbay-vip-card-shine 4s ease-in-out infinite;
+}
+
+@keyframes yunbay-viewport-benefit-glow {
+  0%,
+  100% {
+    opacity: 0.42;
+    box-shadow:
+      inset 0 0 14px 2px var(--yunbay-benefit-glow-color),
+      inset 0 0 42px 10px var(--yunbay-benefit-glow-soft-color);
+  }
+  50% {
+    opacity: 0.82;
+    box-shadow:
+      inset 0 0 24px 5px var(--yunbay-benefit-glow-color),
+      inset 0 0 72px 18px var(--yunbay-benefit-glow-soft-color);
+  }
+}
+
+@keyframes yunbay-vip-card-shine {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: translateX(-8%);
+  }
+  50% {
+    opacity: 0.78;
+    transform: translateX(8%);
+  }
+}
+
 /* Override auto-skeleton-react inline styles with Vercel shimmer */
 .auto-skeleton-fade [class^='skeleton-'] {
   background: linear-gradient(
@@ -131,7 +199,9 @@ For commercial licensing, please contact support@quantumnous.com
 @media (prefers-reduced-motion: reduce) {
   .skeleton-shimmer,
   .auto-skeleton-fade [class^='skeleton-'],
-  .yunbay-logo-marquee {
+  .yunbay-logo-marquee,
+  .yunbay-viewport-benefit-glow,
+  .yunbay-vip-card-shine {
     animation: none !important;
   }
 

@@ -24,6 +24,7 @@ import { SearchProvider } from '@/context/search-provider'
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
 import { AnimatedOutlet } from '@/components/page-transition'
 import { SkipToMain } from '@/components/skip-to-main'
+import { AuthenticatedBenefitEffects } from '@/features/value-packages/components/authenticated-benefit-effects'
 import { isFullscreenAuthenticatedPath } from '../lib/fullscreen-authenticated-path'
 import { AppHeader } from './app-header'
 import { AppSidebar } from './app-sidebar'
@@ -42,6 +43,7 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   return (
     <LayoutProvider>
       <SearchProvider>
+        <AuthenticatedBenefitEffects />
         {isFullscreenAuthenticatedPath(pathname) ? (
           content
         ) : (
