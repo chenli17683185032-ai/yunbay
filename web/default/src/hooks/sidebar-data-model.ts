@@ -38,6 +38,7 @@ export type SidebarIconMap = Partial<{
   settings: SidebarIcon
   ticket: SidebarIcon
   user: SidebarIcon
+  valuePackages: SidebarIcon
   users: SidebarIcon
   wallet: SidebarIcon
 }>
@@ -110,6 +111,11 @@ export function buildSidebarData(
           title: t('Wallet'),
           items: [
             {
+              title: t('Value Packages'),
+              url: '/value-packages',
+              icon: icons.valuePackages,
+            },
+            {
               title: t('Wallet / Top up'),
               url: '/wallet',
               icon: icons.wallet,
@@ -181,6 +187,11 @@ export function buildSidebarData(
         id: 'personal',
         title: t('Personal'),
         items: [
+          {
+            title: t('Value Packages'),
+            url: '/value-packages',
+            icon: icons.valuePackages,
+          },
           {
             title: t('Wallet'),
             url: '/wallet',

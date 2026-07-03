@@ -1,0 +1,304 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { Clock, Gauge, Loader2, PauseCircle, Play, Shield } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { cn } from '@/lib/utils'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Separator } from '@/components/ui/separator'
+import {
+  getPackageCardState,
+  getPackageLevelLabel,
+  type ValuePackageCardStateKind,
+} from '../lib/rules'
+import type { ValuePackagePlan, ValuePackageState } from '../types'
+
+interface ValuePackageCardProps {
+  plan: ValuePackagePlan
+  state: ValuePackageState | null
+  actionKey?: string | null
+  onPurchase: (plan: ValuePackagePlan) => void
+  onActivate: (userSubscriptionId: number) => void
+  onDeactivate: () => void
+}
+
+function formatMoney(amount: number, currency: string): string {
+  const normalizedCurrency = currency || 'CNY'
+  const locale = normalizedCurrency === 'CNY' ? 'zh-CN' : undefined
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: normalizedCurrency,
+    minimumFractionDigits: Number.isInteger(amount) ? 0 : 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
+}
+
+function formatLimitAmount(amount: number, t: (key: string) => string): string {
+  if (!amount || amount <= 0) {
+    return t('Unlimited')
+  }
+
+  return new Intl.NumberFormat().format(amount)
+}
+
+function getPlanDurationLabel(
+  plan: ValuePackagePlan,
+  t: (key: string) => string
+) {
+  const value = plan.duration_value || 1
+  switch (plan.duration_unit) {
+    case 'hour':
+      return `${value} ${t('hours')}`
+    case 'day':
+      return `${value} ${t('days')}`
+    case 'month':
+      return `${value} ${t('months')}`
+    case 'year':
+      return `${value} ${t('years')}`
+    default:
+      return t('Custom duration')
+  }
+}
+
+function getBenefits(
+  plan: ValuePackagePlan,
+  t: (key: string) => string
+): string[] {
+  const benefits = (plan.benefits || '')
+    .split(/\n|；|;|，|,/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  if (benefits.length > 0) {
+    return benefits.slice(0, 4)
+  }
+
+  return [
+    t('Dedicated package model group'),
+    t('Independent concurrency control'),
+    t('5-hour limit and 7-day limit protection'),
+  ]
+}
+
+function getActionLabel(
+  kind: ValuePackageCardStateKind,
+  t: (key: string) => string
+) {
+  switch (kind) {
+    case 'start':
+      return `▶ ${t('Start using')}`
+    case 'running':
+      return t('Close package usage')
+    case 'expired':
+      return t('Purchase again')
+    case 'disabled':
+      return t('Not available yet')
+    default:
+      return t('Purchase')
+  }
+}
+
+export function ValuePackageCard({
+  plan,
+  state,
+  actionKey,
+  onPurchase,
+  onActivate,
+  onDeactivate,
+}: ValuePackageCardProps) {
+  const { t } = useTranslation()
+  const cardState = getPackageCardState(plan, state)
+  const hasPaymentConfig = Boolean(
+    plan.ldxp_product_url &&
+    plan.ldxp_product_name &&
+    Number(plan.ldxp_product_amount) > 0
+  )
+  const isBusy =
+    actionKey === `purchase-${plan.id}` ||
+    actionKey === `activate-${cardState.userSubscriptionId || 0}` ||
+    actionKey === 'deactivate'
+  const requiresPayment =
+    cardState.kind === 'purchase' || cardState.kind === 'expired'
+  const disabled =
+    cardState.kind === 'disabled' ||
+    isBusy ||
+    (requiresPayment && !hasPaymentConfig) ||
+    (cardState.kind === 'start' && !cardState.userSubscriptionId)
+  const actionLabel =
+    requiresPayment && !hasPaymentConfig
+      ? t('Not available yet')
+      : getActionLabel(cardState.kind, t)
+  const packageLabel = getPackageLevelLabel(plan.package_type)
+  const benefits = getBenefits(plan, t)
+  const displayPrice = Number(
+    plan.ldxp_product_amount || plan.price_amount || 0
+  )
+
+  const handleAction = () => {
+    if (disabled) {
+      return
+    }
+
+    if (cardState.kind === 'start' && cardState.userSubscriptionId) {
+      onActivate(cardState.userSubscriptionId)
+      return
+    }
+
+    if (cardState.kind === 'running') {
+      onDeactivate()
+      return
+    }
+
+    if (cardState.kind === 'purchase' || cardState.kind === 'expired') {
+      onPurchase(plan)
+    }
+  }
+
+  return (
+    <Card
+      className={cn(
+        'relative gap-0 overflow-hidden py-0 transition-all duration-300',
+        cardState.kind === 'running'
+          ? 'ring-primary/30 shadow-[0_18px_60px_color-mix(in_oklch,var(--primary)_12%,transparent)] ring-2'
+          : 'hover:ring-primary/20 hover:shadow-md'
+      )}
+    >
+      <div className='from-primary/12 pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r via-transparent to-transparent' />
+      <CardHeader className='border-b p-4 sm:p-5'>
+        <div className='flex items-start justify-between gap-3'>
+          <div className='min-w-0'>
+            <Badge variant='secondary' className='mb-3 rounded-full'>
+              {packageLabel}
+            </Badge>
+            <CardTitle className='text-xl font-black tracking-tight sm:text-2xl'>
+              {plan.title || packageLabel}
+            </CardTitle>
+            {plan.subtitle ? (
+              <p className='text-muted-foreground mt-1 text-sm leading-relaxed'>
+                {plan.subtitle}
+              </p>
+            ) : null}
+          </div>
+          <div className='text-right'>
+            <div className='text-2xl font-black tracking-[-0.04em] sm:text-3xl'>
+              {formatMoney(displayPrice, plan.currency)}
+            </div>
+            <div className='text-muted-foreground mt-1 text-xs'>
+              {getPlanDurationLabel(plan, t)}
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className='flex flex-1 flex-col gap-4 p-4 sm:p-5'>
+        <div className='grid grid-cols-3 gap-2 text-xs'>
+          <div className='bg-muted/60 rounded-lg p-2.5'>
+            <div className='text-muted-foreground flex items-center gap-1.5'>
+              <Shield className='size-3.5' />
+              {t('Model group')}
+            </div>
+            <div className='mt-1 truncate font-semibold'>
+              {plan.model_group || t('Not configured')}
+            </div>
+          </div>
+          <div className='bg-muted/60 rounded-lg p-2.5'>
+            <div className='text-muted-foreground flex items-center gap-1.5'>
+              <Gauge className='size-3.5' />
+              {t('Concurrency')}
+            </div>
+            <div className='mt-1 font-semibold'>
+              {plan.concurrency_limit || 1}
+            </div>
+          </div>
+          <div className='bg-muted/60 rounded-lg p-2.5'>
+            <div className='text-muted-foreground flex items-center gap-1.5'>
+              <Clock className='size-3.5' />
+              {t('Countdown')}
+            </div>
+            <div className='mt-1 font-semibold'>{t('No pause')}</div>
+          </div>
+        </div>
+
+        <div className='grid grid-cols-1 gap-2 text-sm sm:grid-cols-2'>
+          <div className='rounded-lg border p-3'>
+            <div className='text-muted-foreground text-xs font-medium'>
+              {t('5-hour limit')}
+            </div>
+            <div className='mt-1 font-semibold tabular-nums'>
+              {formatLimitAmount(Number(plan.limit_5h_amount || 0), t)}
+            </div>
+          </div>
+          <div className='rounded-lg border p-3'>
+            <div className='text-muted-foreground text-xs font-medium'>
+              {t('7-day limit')}
+            </div>
+            <div className='mt-1 font-semibold tabular-nums'>
+              {formatLimitAmount(Number(plan.limit_7d_amount || 0), t)}
+            </div>
+          </div>
+        </div>
+
+        <Separator />
+
+        <ul className='flex flex-col gap-2 text-sm'>
+          {benefits.map((benefit) => (
+            <li key={benefit} className='flex items-start gap-2'>
+              <span className='bg-primary mt-2 size-1.5 shrink-0 rounded-full' />
+              <span>{benefit}</span>
+            </li>
+          ))}
+        </ul>
+
+        {cardState.kind === 'running' || cardState.kind === 'start' ? (
+          <Alert className='mt-auto'>
+            <PauseCircle className='size-4' />
+            <AlertDescription>
+              {t('Closing package usage does not pause its countdown.')}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+      </CardContent>
+
+      <CardFooter className='bg-muted/35 p-4 sm:p-5'>
+        <Button
+          className='w-full'
+          variant={cardState.kind === 'running' ? 'outline' : 'default'}
+          disabled={disabled}
+          onClick={handleAction}
+        >
+          {isBusy ? (
+            <Loader2 className='animate-spin' data-icon='inline-start' />
+          ) : null}
+          {cardState.kind === 'start' && !isBusy ? (
+            <Play data-icon='inline-start' />
+          ) : null}
+          {actionLabel}
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+}

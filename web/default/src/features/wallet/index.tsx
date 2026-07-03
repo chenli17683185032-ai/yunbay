@@ -32,6 +32,7 @@ import { LdxpPaymentDialog } from './components/ldxp-payment-dialog'
 import { LdxpTopupCard } from './components/ldxp-topup-card'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
+import { ValuePackagesEntryCard } from './components/value-packages-entry-card'
 import { WalletStatsCard } from './components/wallet-stats-card'
 import { DEFAULT_DISCOUNT_RATE } from './constants'
 import {
@@ -84,7 +85,6 @@ export function Wallet(props: WalletProps) {
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
-  const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -138,14 +138,24 @@ export function Wallet(props: WalletProps) {
   const ldxpTopup = useLdxpTopup({ onSuccess: fetchUser })
 
   useEffect(() => {
-    fetchUser()
+    const timeoutId = window.setTimeout(() => {
+      void fetchUser()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
   }, [fetchUser])
 
   useEffect(() => {
-    if (props.initialShowHistory) {
+    if (!props.initialShowHistory) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
       setBillingDialogOpen(true)
       window.history.replaceState({}, '', window.location.pathname)
-    }
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
   }, [props.initialShowHistory])
 
   useEffect(() => {
@@ -164,14 +174,20 @@ export function Wallet(props: WalletProps) {
 
   // Initialize topup amount when topup info is loaded
   useEffect(() => {
-    if (topupInfo && topupAmount === 0) {
+    if (!topupInfo || topupAmount !== 0) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
       const minTopup = getMinTopupAmount(topupInfo)
       setTopupAmount(minTopup)
 
       // Calculate initial payment amount with default payment type
       const defaultPaymentType = getDefaultPaymentType(topupInfo)
       calculatePaymentAmount(minTopup, defaultPaymentType)
-    }
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
   }, [topupInfo, topupAmount, calculatePaymentAmount])
 
   // Get current payment type (selected or default)
@@ -300,79 +316,59 @@ export function Wallet(props: WalletProps) {
       ldxpTopup.session && !isLdxpTerminalStatus(ldxpTopup.session.status)
     )
 
-  const handleSubscriptionAvailabilityChange = useCallback(
-    (available: boolean) => {
-      setShowSubscriptionPanel(available)
-    },
-    []
-  )
-
   return (
     <>
       <SectionPageLayout>
         <SectionPageLayout.Title>{t('Wallet')}</SectionPageLayout.Title>
         <SectionPageLayout.Content>
           <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
-            <WalletStatsCard user={user} loading={userLoading} />
+            <ValuePackagesEntryCard />
 
-            <div
-              className={
-                showSubscriptionPanel
-                  ? 'grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] xl:items-start'
-                  : 'grid gap-4'
-              }
-            >
-              <div id='wallet-add-funds' className='scroll-mt-4'>
-                <div className='flex flex-col gap-4'>
-                  <LdxpTopupCard
-                    topupInfo={topupInfo}
-                    loading={topupLoading}
-                    disabled={ldxpTopupDisabled}
-                    error={!ldxpTopup.session ? ldxpTopup.error : null}
-                    onStart={ldxpTopup.start}
-                    onOpenBilling={() => setBillingDialogOpen(true)}
-                  />
-                  <RechargeFormCard
-                    topupInfo={topupInfo}
-                    presetAmounts={presetAmounts}
-                    selectedPreset={selectedPreset}
-                    onSelectPreset={handleSelectPreset}
-                    topupAmount={topupAmount}
-                    onTopupAmountChange={handleTopupAmountChange}
-                    paymentAmount={paymentAmount}
-                    calculating={calculating}
-                    onPaymentMethodSelect={handlePaymentMethodSelect}
-                    paymentLoading={paymentLoading}
-                    redemptionCode={redemptionCode}
-                    onRedemptionCodeChange={setRedemptionCode}
-                    onRedeem={handleRedeem}
-                    redeeming={redeeming}
-                    topupLink={topupInfo?.topup_link}
-                    loading={topupLoading}
-                    priceRatio={(status?.price as number) || 1}
-                    usdExchangeRate={effectiveUsdExchangeRate}
-                    onOpenBilling={() => setBillingDialogOpen(true)}
-                    creemProducts={topupInfo?.creem_products}
-                    enableCreemTopup={topupInfo?.enable_creem_topup}
-                    onCreemProductSelect={handleCreemProductSelect}
-                    enableWaffoTopup={topupInfo?.enable_waffo_topup}
-                    waffoPayMethods={topupInfo?.waffo_pay_methods}
-                    waffoMinTopup={topupInfo?.waffo_min_topup}
-                    onWaffoMethodSelect={handleWaffoMethodSelect}
-                    enableWaffoPancakeTopup={
-                      topupInfo?.enable_waffo_pancake_topup
-                    }
-                  />
-                </div>
+            <div id='wallet-add-funds' className='scroll-mt-4'>
+              <div className='flex flex-col gap-4'>
+                <LdxpTopupCard
+                  topupInfo={topupInfo}
+                  loading={topupLoading}
+                  disabled={ldxpTopupDisabled}
+                  error={!ldxpTopup.session ? ldxpTopup.error : null}
+                  onStart={ldxpTopup.start}
+                  onOpenBilling={() => setBillingDialogOpen(true)}
+                />
+                <RechargeFormCard
+                  topupInfo={topupInfo}
+                  presetAmounts={presetAmounts}
+                  selectedPreset={selectedPreset}
+                  onSelectPreset={handleSelectPreset}
+                  topupAmount={topupAmount}
+                  onTopupAmountChange={handleTopupAmountChange}
+                  paymentAmount={paymentAmount}
+                  calculating={calculating}
+                  onPaymentMethodSelect={handlePaymentMethodSelect}
+                  paymentLoading={paymentLoading}
+                  redemptionCode={redemptionCode}
+                  onRedemptionCodeChange={setRedemptionCode}
+                  onRedeem={handleRedeem}
+                  redeeming={redeeming}
+                  topupLink={topupInfo?.topup_link}
+                  loading={topupLoading}
+                  priceRatio={(status?.price as number) || 1}
+                  usdExchangeRate={effectiveUsdExchangeRate}
+                  onOpenBilling={() => setBillingDialogOpen(true)}
+                  creemProducts={topupInfo?.creem_products}
+                  enableCreemTopup={topupInfo?.enable_creem_topup}
+                  onCreemProductSelect={handleCreemProductSelect}
+                  enableWaffoTopup={topupInfo?.enable_waffo_topup}
+                  waffoPayMethods={topupInfo?.waffo_pay_methods}
+                  waffoMinTopup={topupInfo?.waffo_min_topup}
+                  onWaffoMethodSelect={handleWaffoMethodSelect}
+                  enableWaffoPancakeTopup={
+                    topupInfo?.enable_waffo_pancake_topup
+                  }
+                />
               </div>
-
-              <SubscriptionPlansCard
-                topupInfo={topupInfo}
-                onAvailabilityChange={handleSubscriptionAvailabilityChange}
-                userQuota={user?.quota}
-                onPurchaseSuccess={fetchUser}
-              />
             </div>
+
+            <WalletStatsCard user={user} loading={userLoading} />
 
             <AffiliateRewardsCard
               user={user}
@@ -384,6 +380,12 @@ export function Wallet(props: WalletProps) {
                 topupInfo?.payment_compliance_confirmed !== false
               }
               loading={affiliateLoading || summaryLoading}
+            />
+
+            <SubscriptionPlansCard
+              topupInfo={topupInfo}
+              userQuota={user?.quota}
+              onPurchaseSuccess={fetchUser}
             />
           </div>
         </SectionPageLayout.Content>

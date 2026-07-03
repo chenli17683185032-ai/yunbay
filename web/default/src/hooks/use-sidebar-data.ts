@@ -29,6 +29,7 @@ import {
   Radio,
   Rocket,
   Settings,
+  Sparkles,
   Ticket,
   User,
   Users,
@@ -54,6 +55,7 @@ const SIDEBAR_ICONS: SidebarIconMap = {
   settings: Settings,
   ticket: Ticket,
   user: User,
+  valuePackages: Sparkles,
   users: Users,
   wallet: Wallet,
 }
