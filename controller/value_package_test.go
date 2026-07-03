@@ -127,6 +127,9 @@ func valuePackageControllerRequest(handler gin.HandlerFunc, method string, path 
 }
 
 func valuePackageControllerRoutePattern(path string) string {
+	if idx := strings.Index(path, "?"); idx >= 0 {
+		path = path[:idx]
+	}
 	if strings.HasPrefix(path, "/value-packages/plans/") {
 		if strings.HasSuffix(path, "/purchase-intent") {
 			return "/value-packages/plans/:plan_id/purchase-intent"
@@ -166,7 +169,37 @@ func seedValuePackageControllerPlan(t *testing.T, packageType string, packageLev
 		LdxpSessionTTLSeconds: 900,
 	}
 	require.NoError(t, model.DB.Create(&plan).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
 	return plan
+}
+
+func validAdminValuePackagePlanForTest(packageType string) model.SubscriptionPlan {
+	level := model.ValuePackageLevelDay
+	switch packageType {
+	case model.ValuePackageTypeWeek:
+		level = model.ValuePackageLevelWeek
+	case model.ValuePackageTypeMonth:
+		level = model.ValuePackageLevelMonth
+	}
+	return model.SubscriptionPlan{
+		Title:                 packageType + " admin value package",
+		PriceAmount:           9.9,
+		Currency:              "USD",
+		DurationUnit:          model.SubscriptionDurationDay,
+		DurationValue:         1,
+		Enabled:               true,
+		PlanKind:              model.SubscriptionPlanKindValuePackage,
+		PackageType:           packageType,
+		PackageLevel:          level,
+		ModelGroup:            packageType + "-card",
+		ConcurrencyLimit:      1,
+		Limit5hAmount:         100,
+		Limit7dAmount:         1000,
+		LdxpProductUrl:        "https://ldxp.example.test/" + packageType,
+		LdxpProductName:       packageType + " product",
+		LdxpProductAmount:     9.9,
+		LdxpSessionTTLSeconds: 900,
+	}
 }
 
 func TestGetValuePackagePlansReturnsOnlyValuePackagesAndState(t *testing.T) {
@@ -206,6 +239,92 @@ func TestGetValuePackagePlansReturnsOnlyValuePackagesAndState(t *testing.T) {
 	assert.Equal(t, float64(month.Id), statePlan["id"])
 }
 
+func TestGetValuePackagePlansReturnsOnlyEnabledValuePackages(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_enabled_only_user")
+	enabled := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	disabled := seedValuePackageControllerPlan(t, model.ValuePackageTypeWeek, model.ValuePackageLevelWeek)
+	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", disabled.Id).Update("enabled", false).Error)
+
+	rec := valuePackageControllerRequest(GetValuePackagePlans, http.MethodGet, "/value-packages/plans", nil, user.Id)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	plans := data["plans"].([]interface{})
+	require.Len(t, plans, 1)
+	assert.Equal(t, float64(enabled.Id), plans[0].(map[string]interface{})["id"])
+}
+
+func TestGetSubscriptionPlansExcludesValuePackages(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	valuePackage := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	normal := model.SubscriptionPlan{Title: "normal subscription", PriceAmount: 1, Currency: "USD", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, PlanKind: model.SubscriptionPlanKindSubscription, SortOrder: 30}
+	legacy := model.SubscriptionPlan{Title: "legacy subscription", PriceAmount: 2, Currency: "USD", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, PlanKind: "", SortOrder: 20}
+	disabled := model.SubscriptionPlan{Title: "disabled subscription", PriceAmount: 3, Currency: "USD", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: false, PlanKind: model.SubscriptionPlanKindSubscription, SortOrder: 10}
+	require.NoError(t, model.DB.Create(&normal).Error)
+	require.NoError(t, model.DB.Create(&legacy).Error)
+	require.NoError(t, model.DB.Create(&disabled).Error)
+	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", disabled.Id).Update("enabled", false).Error)
+
+	rec := valuePackageControllerRequest(GetSubscriptionPlans, http.MethodGet, "/subscription/plans", nil, 0)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	rawPlans := body["data"].([]interface{})
+	require.Len(t, rawPlans, 2)
+	ids := make(map[float64]bool, len(rawPlans))
+	for _, raw := range rawPlans {
+		dto := raw.(map[string]interface{})
+		plan := dto["plan"].(map[string]interface{})
+		ids[plan["id"].(float64)] = true
+		assert.NotEqual(t, model.SubscriptionPlanKindValuePackage, plan["plan_kind"])
+	}
+	assert.True(t, ids[float64(normal.Id)])
+	assert.True(t, ids[float64(legacy.Id)])
+	assert.False(t, ids[float64(valuePackage.Id)])
+	assert.False(t, ids[float64(disabled.Id)])
+}
+
+func TestGetValuePackageSelfReturnsCurrentState(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_self_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: common.GetTimestamp() - 10, EndTime: common.GetTimestamp() + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	_, err := model.ActivateValuePackage(user.Id, sub.Id)
+	require.NoError(t, err)
+
+	rec := valuePackageControllerRequest(GetValuePackageSelf, http.MethodGet, "/value-packages/self", nil, user.Id)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	pref := data["preference"].(map[string]interface{})
+	assert.Equal(t, true, pref["enabled"])
+	assert.Equal(t, float64(sub.Id), pref["active_user_subscription_id"])
+	statePlan := data["plan"].(map[string]interface{})
+	assert.Equal(t, float64(plan.Id), statePlan["id"])
+}
+
+func TestGetValuePackagePurchaseIntentConfirmedCover(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_intent_user")
+	day := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	month := seedValuePackageControllerPlan(t, model.ValuePackageTypeMonth, model.ValuePackageLevelMonth)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: day.Id, StartTime: now - 10, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	rec := valuePackageControllerRequest(GetValuePackagePurchaseIntent, http.MethodGet, fmt.Sprintf("/value-packages/plans/%d/purchase-intent?confirmed_cover=true", month.Id), nil, user.Id)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	assert.Equal(t, model.ValuePackagePurchaseActionUpgrade, data["action"])
+	assert.Equal(t, false, data["requires_confirmation"])
+}
+
 func TestCreateValuePackageLdxpSessionCreatesPendingOrder(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	user := createLdxpControllerTestUser(t, "vp_ldxp_user")
@@ -231,6 +350,94 @@ func TestCreateValuePackageLdxpSessionCreatesPendingOrder(t *testing.T) {
 	assert.Equal(t, common.TopUpStatusPending, orders[0].Status)
 	assert.Equal(t, data["trade_no"], orders[0].TradeNo)
 	assert.Equal(t, float64(orders[0].Id), data["order_id"])
+}
+
+func TestCreateValuePackageLdxpSessionRequiresPaymentComplianceBeforeCreatingRecords(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	setPaymentComplianceForTest(t, false)
+	user := createLdxpControllerTestUser(t, "vp_ldxp_compliance_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+
+	rec := valuePackageControllerRequest(CreateValuePackageLdxpSession, http.MethodPost, fmt.Sprintf("/value-packages/plans/%d/ldxp/session", plan.Id), gin.H{"confirmed_cover": true}, user.Id)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, false, body["success"], rec.Body.String())
+	require.Contains(t, body["message"], "compliance_required")
+
+	var orderCount int64
+	require.NoError(t, model.DB.Model(&model.SubscriptionOrder{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&orderCount).Error)
+	assert.Zero(t, orderCount)
+	var sessionCount int64
+	require.NoError(t, model.DB.Model(&model.LdxpTopupSession{}).Where("user_id = ?", user.Id).Count(&sessionCount).Error)
+	assert.Zero(t, sessionCount)
+}
+
+func TestSubscriptionStripePayRejectsValuePackagePlan(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_stripe_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+
+	rec := valuePackageControllerRequest(SubscriptionRequestStripePay, http.MethodPost, "/subscription/stripe/pay", gin.H{"plan_id": plan.Id}, user.Id)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, false, body["success"], rec.Body.String())
+	require.Contains(t, body["message"], "超值套餐仅支持联动小铺购买")
+	var orderCount int64
+	require.NoError(t, model.DB.Model(&model.SubscriptionOrder{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&orderCount).Error)
+	assert.Zero(t, orderCount)
+}
+
+func TestSubscriptionBalancePayRejectsValuePackagePlan(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_balance_user")
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", 1000000).Error)
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+
+	err := model.PurchaseSubscriptionWithBalance(user.Id, plan.Id)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "超值套餐仅支持联动小铺购买")
+	var subCount int64
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", user.Id).Count(&subCount).Error)
+	assert.Zero(t, subCount)
+	var orderCount int64
+	require.NoError(t, model.DB.Model(&model.SubscriptionOrder{}).Where("user_id = ? AND plan_id = ?", user.Id, plan.Id).Count(&orderCount).Error)
+	assert.Zero(t, orderCount)
+	var reloaded model.User
+	require.NoError(t, model.DB.Select("quota").Where("id = ?", user.Id).First(&reloaded).Error)
+	assert.Equal(t, 1000000, reloaded.Quota)
+}
+
+func TestSubscriptionOrderCompletionRejectsValuePackagePlan(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_webhook_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	order := model.SubscriptionOrder{
+		UserId:          user.Id,
+		PlanId:          plan.Id,
+		Money:           plan.PriceAmount,
+		TradeNo:         "value-package-ordinary-webhook",
+		PaymentMethod:   model.PaymentMethodStripe,
+		PaymentProvider: model.PaymentProviderStripe,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      common.GetTimestamp(),
+	}
+	require.NoError(t, model.DB.Create(&order).Error)
+
+	err := model.CompleteSubscriptionOrder(order.TradeNo, "payload", model.PaymentProviderStripe, model.PaymentMethodStripe)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "超值套餐仅支持联动小铺购买")
+	var subCount int64
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("user_id = ?", user.Id).Count(&subCount).Error)
+	assert.Zero(t, subCount)
+	var topupCount int64
+	require.NoError(t, model.DB.Model(&model.TopUp{}).Where("trade_no = ?", order.TradeNo).Count(&topupCount).Error)
+	assert.Zero(t, topupCount)
+	var reloaded model.SubscriptionOrder
+	require.NoError(t, model.DB.Where("trade_no = ?", order.TradeNo).First(&reloaded).Error)
+	assert.Equal(t, common.TopUpStatusPending, reloaded.Status)
+	assert.Zero(t, reloaded.UserSubscriptionId)
 }
 
 func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
@@ -259,6 +466,23 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, false, pref["enabled"])
 	assert.Equal(t, float64(0), pref["active_user_subscription_id"])
+}
+
+func TestAdminCreateSubscriptionPlanNormalizesValuePackageLevelFromType(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+	plan.PackageLevel = model.ValuePackageLevelMonth
+
+	rec := valuePackageControllerRequest(AdminCreateSubscriptionPlan, http.MethodPost, "/subscription/admin/plans", gin.H{"plan": plan}, 1)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	assert.Equal(t, model.ValuePackageTypeDay, data["package_type"])
+	assert.Equal(t, float64(model.ValuePackageLevelDay), data["package_level"])
+	var persisted model.SubscriptionPlan
+	require.NoError(t, model.DB.First(&persisted, int(data["id"].(float64))).Error)
+	assert.Equal(t, model.ValuePackageLevelDay, persisted.PackageLevel)
 }
 
 func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageConfig(t *testing.T) {
@@ -296,6 +520,73 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageConfig(t *testing.
 	rec = valuePackageControllerRequest(AdminCreateSubscriptionPlan, http.MethodPost, "/subscription/admin/plans", gin.H{"plan": invalidConcurrencyPlan}, 1)
 	body = decodeTestResponse(t, rec)
 	assert.Equal(t, false, body["success"], rec.Body.String())
+}
+
+func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageValidationCases(t *testing.T) {
+	setupValuePackageControllerTest(t)
+
+	tests := []struct {
+		name    string
+		mutate  func(*model.SubscriptionPlan)
+		message string
+	}{
+		{
+			name: "invalid package type",
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.PackageType = "year"
+			},
+			message: "套餐类型必须是 day、week 或 month",
+		},
+		{
+			name: "missing model group",
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.ModelGroup = " "
+			},
+			message: "套餐模型分组不能为空",
+		},
+		{
+			name: "negative 5h limit",
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.Limit5hAmount = -1
+			},
+			message: "套餐额度不能为负数",
+		},
+		{
+			name: "negative 7d limit",
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.Limit7dAmount = -1
+			},
+			message: "套餐额度不能为负数",
+		},
+		{
+			name: "7d lower than 5h",
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.Limit5hAmount = 1000
+				plan.Limit7dAmount = 999
+			},
+			message: "7天额度不能小于5小时额度",
+		},
+		{
+			name: "enabled ttl invalid",
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.LdxpSessionTTLSeconds = 0
+			},
+			message: "启用超值套餐时必须配置 LDXP 商品链接、名称、金额和会话有效期",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+			tt.mutate(&plan)
+
+			rec := valuePackageControllerRequest(AdminCreateSubscriptionPlan, http.MethodPost, "/subscription/admin/plans", gin.H{"plan": plan}, 1)
+
+			body := decodeTestResponse(t, rec)
+			require.Equal(t, false, body["success"], rec.Body.String())
+			assert.Contains(t, body["message"], tt.message)
+		})
+	}
 }
 
 func TestAdminUpdateSubscriptionPlanPersistsValuePackageFields(t *testing.T) {
@@ -337,4 +628,20 @@ func TestAdminUpdateSubscriptionPlanPersistsValuePackageFields(t *testing.T) {
 	assert.Equal(t, 29.9, persisted.LdxpProductAmount)
 	assert.Equal(t, "ref-month-updated", persisted.LdxpProductRef)
 	assert.EqualValues(t, 1200, persisted.LdxpSessionTTLSeconds)
+}
+
+func TestAdminUpdateSubscriptionPlanNormalizesValuePackageLevelFromType(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeMonth, model.ValuePackageLevelMonth)
+	updated := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+	updated.PackageLevel = model.ValuePackageLevelMonth
+
+	rec := valuePackageControllerRequest(AdminUpdateSubscriptionPlan, http.MethodPut, fmt.Sprintf("/subscription/admin/plans/%d", plan.Id), gin.H{"plan": updated}, 1)
+
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	var persisted model.SubscriptionPlan
+	require.NoError(t, model.DB.First(&persisted, plan.Id).Error)
+	assert.Equal(t, model.ValuePackageTypeDay, persisted.PackageType)
+	assert.Equal(t, model.ValuePackageLevelDay, persisted.PackageLevel)
 }

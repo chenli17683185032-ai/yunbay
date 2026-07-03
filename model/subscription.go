@@ -687,6 +687,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if err != nil {
 			return err
 		}
+		if plan.IsValuePackage() {
+			return errors.New("超值套餐仅支持联动小铺购买")
+		}
 		if !plan.Enabled {
 			// still allow completion for already purchased orders
 		}
@@ -860,6 +863,9 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 		plan, err := getSubscriptionPlanByIdTx(tx, planId)
 		if err != nil {
 			return err
+		}
+		if plan.IsValuePackage() {
+			return errors.New("超值套餐仅支持联动小铺购买")
 		}
 		if !plan.Enabled {
 			return errors.New("套餐未启用")
@@ -1129,7 +1135,7 @@ type ValuePackageState struct {
 
 func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
 	var plans []SubscriptionPlan
-	if err := DB.Where("plan_kind = ?", SubscriptionPlanKindValuePackage).
+	if err := DB.Where("enabled = ? AND plan_kind = ?", true, SubscriptionPlanKindValuePackage).
 		Order("package_level asc, sort_order desc, id desc").
 		Find(&plans).Error; err != nil {
 		return nil, err

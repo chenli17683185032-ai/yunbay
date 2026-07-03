@@ -35,7 +35,9 @@ func GetSubscriptionPlans(c *gin.Context) {
 	}
 
 	var plans []model.SubscriptionPlan
-	if err := model.DB.Where("enabled = ?", true).Order("sort_order desc, id desc").Find(&plans).Error; err != nil {
+	if err := model.DB.Where("enabled = ? AND (plan_kind = ? OR plan_kind = '' OR plan_kind IS NULL)", true, model.SubscriptionPlanKindSubscription).
+		Order("sort_order desc, id desc").
+		Find(&plans).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -116,6 +118,14 @@ func SubscriptionRequestBalancePay(c *gin.Context) {
 	common.ApiSuccess(c, nil)
 }
 
+func rejectValuePackagePlanForSubscriptionPurchase(c *gin.Context, plan *model.SubscriptionPlan) bool {
+	if plan != nil && plan.IsValuePackage() {
+		common.ApiErrorMsg(c, "超值套餐仅支持联动小铺购买")
+		return true
+	}
+	return false
+}
+
 // ---- Admin APIs ----
 
 func AdminListSubscriptionPlans(c *gin.Context) {
@@ -157,17 +167,11 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	plan.UpgradeGroup = ""
 	switch plan.PackageType {
 	case model.ValuePackageTypeDay:
-		if plan.PackageLevel <= 0 {
-			plan.PackageLevel = model.ValuePackageLevelDay
-		}
+		plan.PackageLevel = model.ValuePackageLevelDay
 	case model.ValuePackageTypeWeek:
-		if plan.PackageLevel <= 0 {
-			plan.PackageLevel = model.ValuePackageLevelWeek
-		}
+		plan.PackageLevel = model.ValuePackageLevelWeek
 	case model.ValuePackageTypeMonth:
-		if plan.PackageLevel <= 0 {
-			plan.PackageLevel = model.ValuePackageLevelMonth
-		}
+		plan.PackageLevel = model.ValuePackageLevelMonth
 	default:
 		return "套餐类型必须是 day、week 或 month"
 	}

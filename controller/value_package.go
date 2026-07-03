@@ -59,6 +59,10 @@ func GetValuePackagePurchaseIntent(c *gin.Context) {
 }
 
 func CreateValuePackageLdxpSession(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
+
 	userId := c.GetInt("id")
 	planId, _ := strconv.Atoi(c.Param("plan_id"))
 	if planId <= 0 {
