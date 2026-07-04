@@ -24,9 +24,10 @@ import {
   getUserBillingHistory,
   getAllBillingHistory,
   completeOrder,
+  deleteAdminOrder,
   isApiSuccess,
 } from '../api'
-import type { TopupRecord } from '../types'
+import type { BillingRecord, OrderType } from '../types'
 
 // ============================================================================
 // Billing History Hook
@@ -43,13 +44,14 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   const { initialPage = 1, initialPageSize = 10 } = options
   const isAdmin = useIsAdmin()
 
-  const [records, setRecords] = useState<TopupRecord[]>([])
+  const [records, setRecords] = useState<BillingRecord[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(initialPage)
   const [pageSize, setPageSize] = useState(initialPageSize)
   const [keyword, setKeyword] = useState('')
   const [loading, setLoading] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   /**
    * Fetch billing history
@@ -116,6 +118,38 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     [isAdmin, fetchBillingHistory]
   )
 
+  const handleDeleteOrder = useCallback(
+    async (orderType: OrderType, tradeNo: string, reason = '') => {
+      if (!isAdmin) {
+        toast.error(i18next.t('Admin access required'))
+        return false
+      }
+      setDeleting(true)
+      try {
+        const response = await deleteAdminOrder({
+          order_type: orderType,
+          trade_no: tradeNo,
+          reason,
+        })
+        if (isApiSuccess(response)) {
+          toast.success(i18next.t('Order hidden successfully'))
+          await fetchBillingHistory()
+          return true
+        }
+        toast.error(response.message || i18next.t('Failed to hide order'))
+        return false
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('Failed to hide order:', error)
+        toast.error(i18next.t('Failed to hide order'))
+        return false
+      } finally {
+        setDeleting(false)
+      }
+    },
+    [isAdmin, fetchBillingHistory]
+  )
+
   /**
    * Change page
    */
@@ -152,11 +186,13 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     keyword,
     loading,
     completing,
+    deleting,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
+    handleDeleteOrder,
     refresh: fetchBillingHistory,
   }
 }

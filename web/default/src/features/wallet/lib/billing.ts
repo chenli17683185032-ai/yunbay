@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { formatTimestampToDate } from '@/lib/format'
 import type { StatusBadgeProps } from '@/components/status-badge'
-import type { TopupStatus } from '../types'
+import type { BillingRecord, OrderType, TopupStatus } from '../types'
 
 // ============================================================================
 // Billing Utility Functions
@@ -54,6 +54,36 @@ export function getStatusConfig(status: TopupStatus): StatusConfig {
   return STATUS_CONFIG[status] || STATUS_CONFIG.pending
 }
 
+export function getOrderTypeLabel(
+  orderType: string | undefined,
+  t?: (key: string) => string
+): string {
+  const labels: Record<OrderType, string> = {
+    topup: 'Top-up',
+    subscription: 'Subscription',
+  }
+  const label =
+    orderType === 'topup' || orderType === 'subscription'
+      ? labels[orderType]
+      : orderType || 'Top-up'
+  return t ? t(label) : label
+}
+
+export function getPlanSummary(
+  record: Partial<BillingRecord>,
+  t?: (key: string) => string
+): string {
+  if (!('order_type' in record) || record.order_type !== 'subscription') {
+    return ''
+  }
+  const title = record.plan_title || (t ? t('Deleted plan') : 'Deleted plan')
+  const value = record.duration_value || 0
+  const unit = record.duration_unit || ''
+  if (!value || !unit) return title
+  const unitLabel = t ? t(unit) : unit
+  return `${title} · ${value} ${unitLabel}`
+}
+
 /**
  * Payment method display names
  */
@@ -62,6 +92,9 @@ export const PAYMENT_METHOD_NAMES: Record<string, string> = {
   alipay: 'Alipay',
   wxpay: 'WeChat Pay',
   waffo: 'Waffo',
+  waffo_pancake: 'Waffo Pancake',
+  balance: 'Balance',
+  creem: 'Creem',
 }
 
 /**

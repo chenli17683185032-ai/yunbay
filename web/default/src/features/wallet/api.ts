@@ -42,6 +42,7 @@ import type {
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
   LdxpTopupSessionResponse,
+  DeleteOrderRequest,
 } from './types'
 
 // ============================================================================
@@ -66,6 +67,9 @@ export async function getTopupInfo(): Promise<TopupInfoResponse> {
 /**
  * Redeem a topup code
  */
+export async function redeemTopupCode(
+  request: RedemptionRequest
+): Promise<ApiResponse<number>>
 export async function redeemTopupCode(
   request: RedemptionRequest
 ): Promise<RedemptionResponse> {
@@ -285,10 +289,20 @@ export async function getAllBillingHistory(
     p: page.toString(),
     page_size: pageSize.toString(),
   })
-  if (keyword) {
-    params.append('keyword', keyword)
-  }
-  const res = await api.get(`/api/user/topup?${params.toString()}`)
+  if (keyword) params.append('keyword', keyword)
+  const res = await api.get(
+    `/api/order-management/admin/billing-orders?${params.toString()}`
+  )
+  return res.data
+}
+
+export async function deleteAdminOrder(
+  request: DeleteOrderRequest
+): Promise<ApiResponse> {
+  const res = await api.delete(
+    `/api/order-management/admin/billing-orders/${encodeURIComponent(request.order_type)}/${encodeURIComponent(request.trade_no)}`,
+    { data: { reason: request.reason || '' } }
+  )
   return res.data
 }
 

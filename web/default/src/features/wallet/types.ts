@@ -369,10 +369,31 @@ export interface TopupRecord {
 }
 
 /**
+ * Unified admin order type
+ */
+export type OrderType = 'topup' | 'subscription'
+
+/**
+ * Unified admin order record
+ */
+export interface AdminOrderRecord extends TopupRecord {
+  order_type: OrderType
+  payment_provider?: string
+  plan_id?: number
+  plan_title?: string
+  duration_unit?: 'year' | 'month' | 'day' | 'hour' | 'custom'
+  duration_value?: number
+  custom_seconds?: number
+}
+
+export type BillingRecord = TopupRecord | AdminOrderRecord
+
+
+/**
  * Billing history response
  */
 export interface BillingHistoryResponse {
-  items: TopupRecord[]
+  items: BillingRecord[]
   total: number
 }
 
@@ -381,4 +402,10 @@ export interface BillingHistoryResponse {
  */
 export interface CompleteOrderRequest {
   trade_no: string
+}
+
+export interface DeleteOrderRequest {
+  order_type: OrderType
+  trade_no: string
+  reason?: string
 }

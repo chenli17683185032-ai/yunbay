@@ -17,7 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState } from 'react'
-import { Search, Copy, Check, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  Search,
+  Copy,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Trash2,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { formatCurrencyFromUSD } from '@/lib/currency'
 import { formatNumber } from '@/lib/format'
@@ -51,6 +58,8 @@ import { useBillingHistory } from '../../hooks/use-billing-history'
 import {
   getStatusConfig,
   getPaymentMethodName,
+  getOrderTypeLabel,
+  getPlanSummary,
   formatTimestamp,
 } from '../../lib/billing'
 
@@ -72,14 +81,20 @@ export function BillingHistoryDialog({
     keyword,
     loading,
     completing,
+    deleting,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
+    handleDeleteOrder,
   } = useBillingHistory()
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<{
+    orderType: 'topup' | 'subscription'
+    tradeNo: string
+  } | null>(null)
   const { copyToClipboard, copiedText } = useCopyToClipboard({ notify: false })
 
   const totalPages = Math.ceil(total / pageSize)
@@ -204,6 +219,17 @@ export function BillingHistoryDialog({
                                 <Copy className='h-3 w-3' />
                               )}
                             </Button>
+                            <StatusBadge
+                              label={getOrderTypeLabel(
+                                'order_type' in record
+                                  ? record.order_type
+                                  : 'topup',
+                                t
+                              )}
+                              variant='neutral'
+                              size='sm'
+                              copyable={false}
+                            />
                             {isAdmin && record.user_id != null && (
                               <StatusBadge
                                 label={`${t('User ID')}: ${record.user_id}`}
@@ -216,6 +242,12 @@ export function BillingHistoryDialog({
                           <div className='text-muted-foreground text-xs'>
                             {formatTimestamp(record.create_time)}
                           </div>
+                          {'order_type' in record &&
+                            record.order_type === 'subscription' && (
+                              <div className='text-muted-foreground text-xs'>
+                                {getPlanSummary(record, t)}
+                              </div>
+                            )}
                         </div>
                         <StatusBadge
                           label={statusConfig.label}
@@ -258,15 +290,38 @@ export function BillingHistoryDialog({
                       </div>
 
                       {/* Admin Actions */}
-                      {isAdmin && record.status === 'pending' && (
-                        <div className='mt-4 flex justify-end'>
+                      {isAdmin && (
+                        <div className='mt-4 flex justify-end gap-2'>
+                          {record.status === 'pending' &&
+                            (!('order_type' in record) ||
+                              record.order_type === 'topup') && (
+                              <Button
+                                size='sm'
+                                variant='outline'
+                                onClick={() =>
+                                  setConfirmTradeNo(record.trade_no)
+                                }
+                                disabled={completing}
+                              >
+                                {t('Complete Order')}
+                              </Button>
+                            )}
                           <Button
                             size='sm'
-                            variant='outline'
-                            onClick={() => setConfirmTradeNo(record.trade_no)}
-                            disabled={completing}
+                            variant='destructive'
+                            onClick={() =>
+                              setDeleteTarget({
+                                orderType:
+                                  'order_type' in record
+                                    ? record.order_type
+                                    : 'topup',
+                                tradeNo: record.trade_no,
+                              })
+                            }
+                            disabled={deleting}
                           >
-                            {t('Complete Order')}
+                            <Trash2 className='mr-1 h-3 w-3' />
+                            {t('Hide Order')}
                           </Button>
                         </div>
                       )}
@@ -337,6 +392,41 @@ export function BillingHistoryDialog({
               disabled={completing}
             >
               {completing ? t('Processing...') : t('Confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('Hide Order')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'This order will be hidden from order management. The original payment record will not be deleted.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>
+              {t('Cancel')}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!deleteTarget) return
+                const success = await handleDeleteOrder(
+                  deleteTarget.orderType,
+                  deleteTarget.tradeNo,
+                  'test order'
+                )
+                if (success) setDeleteTarget(null)
+              }}
+              disabled={deleting}
+            >
+              {deleting ? t('Processing...') : t('Confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
