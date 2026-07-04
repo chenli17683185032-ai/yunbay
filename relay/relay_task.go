@@ -195,15 +195,14 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 6. 将 OtherRatios 应用到基础额度
 	if !common.StringsContains(constant.TaskPricePatches, modelName) {
-		for _, ra := range info.PriceData.OtherRatios {
-			if ra != 1.0 {
-				info.PriceData.Quota = int(float64(info.PriceData.Quota) * ra)
-			}
-		}
+		info.PriceData.Quota = service.ApplyTaskOtherRatios(info.PriceData.Quota, info.PriceData.OtherRatios)
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
-	if info.Billing == nil && !info.PriceData.FreeModel {
+	// Retry 会重新计算 PriceData；若已有订阅计费会话，需要恢复订阅 1x 快照，
+	// 保证最终 quota、日志和 TaskBillingContext 不回退到钱包组倍率。
+	service.EnsureSubscriptionBillingRatio(info)
+	if info.Billing == nil && (!info.PriceData.FreeModel || info.PriceData.FreeByGroupRatio) {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
 			return nil, service.TaskErrorFromAPIError(apiErr)

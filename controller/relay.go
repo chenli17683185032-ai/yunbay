@@ -158,7 +158,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
 
-	if priceData.FreeModel {
+	if priceData.FreeModel && !priceData.FreeByGroupRatio {
 		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
 	} else {
 		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
@@ -601,12 +601,18 @@ func finalizeSuccessfulRelayTask(c *gin.Context, relayInfo *relaycommon.RelayInf
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelPrice:      relayInfo.PriceData.ModelPrice,
-		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-		ModelRatio:      relayInfo.PriceData.ModelRatio,
-		OtherRatios:     relayInfo.PriceData.OtherRatios,
-		OriginModelName: relayInfo.OriginModelName,
-		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+		ModelPrice:                relayInfo.PriceData.ModelPrice,
+		HasGroupRatio:             true,
+		GroupRatio:                relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:                relayInfo.PriceData.ModelRatio,
+		OtherRatios:               relayInfo.PriceData.OtherRatios,
+		OriginModelName:           relayInfo.OriginModelName,
+		PerCallBilling:            common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
+		SubscriptionRatioApplied:  relayInfo.PriceData.SubscriptionRatioApplied,
+		HasOriginalGroupRatio:     relayInfo.PriceData.HasOriginalGroupRatioInfo,
+		OriginalGroupRatio:        relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio,
+		HasOriginalUserGroupRatio: relayInfo.PriceData.HasOriginalGroupRatioInfo,
+		OriginalUserGroupRatio:    relayInfo.PriceData.OriginalGroupRatioInfo.GroupSpecialRatio,
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

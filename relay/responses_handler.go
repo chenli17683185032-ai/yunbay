@@ -20,6 +20,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func ensureResponsesCompactSubscriptionBillingRatio(info *relaycommon.RelayInfo) {
+	service.EnsureSubscriptionBillingRatio(info)
+}
+
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
@@ -150,6 +154,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			info.PriceData = originPriceData
 			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		}
+		ensureResponsesCompactSubscriptionBillingRatio(info)
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 
 		info.OriginModelName = originModelName

@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -45,6 +46,13 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	other["group_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
 	if info.PriceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = info.PriceData.GroupRatioInfo.GroupSpecialRatio
+	}
+	if info.PriceData.SubscriptionRatioApplied {
+		other["subscription_ratio_applied"] = true
+	}
+	if info.PriceData.HasOriginalGroupRatioInfo {
+		other["original_group_ratio"] = info.PriceData.OriginalGroupRatioInfo.GroupRatio
+		other["original_user_group_ratio"] = info.PriceData.OriginalGroupRatioInfo.GroupSpecialRatio
 	}
 	if info.IsModelMapped {
 		other["is_model_mapped"] = true
@@ -125,6 +133,15 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 			other["model_ratio"] = bc.ModelRatio
 		}
 		other["group_ratio"] = bc.GroupRatio
+		if bc.SubscriptionRatioApplied {
+			other["subscription_ratio_applied"] = true
+		}
+		if bc.HasOriginalGroupRatio {
+			other["original_group_ratio"] = bc.OriginalGroupRatio
+		}
+		if bc.HasOriginalUserGroupRatio {
+			other["original_user_group_ratio"] = bc.OriginalUserGroupRatio
+		}
 		if len(bc.OtherRatios) > 0 {
 			for k, v := range bc.OtherRatios {
 				other[k] = v
@@ -265,34 +282,34 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	// 获取模型/令牌组倍率信息；历史空任务组按默认令牌组兼容，不能回退到网站用户组。
-	group := resolveTaskBillingGroup(task.Group)
-	if group == "" {
-		return
-	}
-
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
+	// 优先使用任务提交时冻结的分组倍率快照；缺失时按令牌组回退。
+	// 历史空任务组按默认令牌组兼容，不能回退到网站用户组，否则会把旧任务重算到用户当前组倍率。
 	var finalGroupRatio float64
-	if hasUserGroupRatio {
-		finalGroupRatio = userGroupRatio
+	if bc := task.PrivateData.BillingContext; bc != nil && (bc.HasGroupRatio || bc.GroupRatio > 0) {
+		finalGroupRatio = bc.GroupRatio
 	} else {
-		finalGroupRatio = groupRatio
-	}
+		group := resolveTaskBillingGroup(task.Group)
+		if group == "" {
+			return
+		}
 
-	// 计算 OtherRatios 乘积（视频折扣、时长等）
-	otherMultiplier := 1.0
-	if bc := task.PrivateData.BillingContext; bc != nil {
-		for _, r := range bc.OtherRatios {
-			if r != 1.0 && r > 0 {
-				otherMultiplier *= r
-			}
+		groupRatio := ratio_setting.GetGroupRatio(group)
+		userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
+		if hasUserGroupRatio {
+			finalGroupRatio = userGroupRatio
+		} else {
+			finalGroupRatio = groupRatio
 		}
 	}
 
-	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio * otherMultiplier
-	actualQuota := int(float64(totalTokens) * modelRatio * finalGroupRatio * otherMultiplier)
+	otherRatios := map[string]float64(nil)
+	if bc := task.PrivateData.BillingContext; bc != nil {
+		otherRatios = bc.OtherRatios
+	}
+	otherMultiplier := otherRatioProduct(types.PriceData{OtherRatios: otherRatios}).InexactFloat64()
+
+	// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio，再按任务提交语义逐个应用 OtherRatios 截断。
+	actualQuota := applyOtherRatiosStepwise(int(float64(totalTokens)*modelRatio*finalGroupRatio), otherRatios)
 
 	reason := fmt.Sprintf("token重算：tokens=%d, modelRatio=%.2f, groupRatio=%.2f, otherMultiplier=%.4f", totalTokens, modelRatio, finalGroupRatio, otherMultiplier)
 	RecalculateTaskQuota(ctx, task, actualQuota, reason)

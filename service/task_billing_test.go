@@ -49,7 +49,9 @@ func TestMain(m *testing.M) {
 		&model.LdxpMailEvent{},
 		&model.AffiliateCommission{},
 		&model.AffiliateWithdrawal{},
+		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
+		&model.SubscriptionPreConsumeRecord{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -74,6 +76,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM ldxp_mail_events")
 		model.DB.Exec("DELETE FROM affiliate_commissions")
 		model.DB.Exec("DELETE FROM affiliate_withdrawals")
+		model.DB.Exec("DELETE FROM subscription_plans")
+		model.DB.Exec("DELETE FROM subscription_pre_consume_records")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 	})
 }
@@ -782,4 +786,102 @@ func TestSettle_NonPerCall_AdaptorAdjustWorks(t *testing.T) {
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeRefund, log.Type)
+}
+
+func TestRecalculateTaskQuotaByTokensUsesBillingContextGroupRatioSnapshot(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	oldModelRatio := ratio_setting.ModelRatio2JSONString()
+	oldGroupRatio := ratio_setting.GroupRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"test-model":1}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":0.3}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(oldModelRatio))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldGroupRatio))
+	})
+
+	const userID, tokenID, channelID, subID = 40, 40, 40, 40
+	const subTotal, subUsed int64 = 100000, 300
+	const preConsumed = 300
+	const tokenRemain = 10000
+
+	seedUser(t, userID, 0)
+	seedToken(t, tokenID, userID, "sk-sub-snapshot", tokenRemain)
+	seedChannel(t, channelID)
+	seedSubscription(t, subID, userID, subTotal, subUsed)
+
+	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
+	task.Group = "default"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelRatio:      1,
+		GroupRatio:      1,
+		OriginModelName: "test-model",
+	}
+
+	RecalculateTaskQuotaByTokens(ctx, task, 1000)
+
+	assert.Equal(t, 1000, task.Quota)
+	assert.Equal(t, subUsed+700, getSubscriptionUsed(t, subID))
+	assert.Equal(t, tokenRemain-700, getTokenRemainQuota(t, tokenID))
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Contains(t, log.Content, "groupRatio=1.00")
+}
+
+func TestTaskBillingOtherIncludesSubscriptionRatioAuditFromBillingContext(t *testing.T) {
+	task := makeTask(41, 0, 1000, 0, BillingSourceSubscription, 41)
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelPrice:                0.02,
+		GroupRatio:                1,
+		OriginModelName:           "test-model",
+		SubscriptionRatioApplied:  true,
+		HasOriginalGroupRatio:     true,
+		OriginalGroupRatio:        0.3,
+		HasOriginalUserGroupRatio: true,
+		OriginalUserGroupRatio:    -1,
+	}
+
+	other := taskBillingOther(task)
+
+	assert.Equal(t, true, other["subscription_ratio_applied"])
+	assert.Equal(t, 0.3, other["original_group_ratio"])
+	assert.Equal(t, -1.0, other["original_user_group_ratio"])
+}
+
+func TestRecalculateTaskQuotaByTokensPreservesExplicitZeroGroupRatioSnapshot(t *testing.T) {
+	truncate(t)
+	ctx := context.Background()
+
+	oldModelRatio := ratio_setting.ModelRatio2JSONString()
+	oldGroupRatio := ratio_setting.GroupRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"test-model":1}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(oldModelRatio))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldGroupRatio))
+	})
+
+	const userID, tokenID, channelID = 42, 42, 42
+	const initQuota, tokenRemain = 10000, 10000
+
+	seedUser(t, userID, initQuota)
+	seedToken(t, tokenID, userID, "sk-zero-ratio-snapshot", tokenRemain)
+	seedChannel(t, channelID)
+
+	task := makeTask(userID, channelID, 0, tokenID, BillingSourceWallet, 0)
+	task.Group = "default"
+	task.PrivateData.BillingContext = &model.TaskBillingContext{
+		ModelRatio:      1,
+		HasGroupRatio:   true,
+		GroupRatio:      0,
+		OriginModelName: "test-model",
+	}
+
+	RecalculateTaskQuotaByTokens(ctx, task, 1000)
+
+	assert.Equal(t, 0, task.Quota)
+	assert.Equal(t, initQuota, getUserQuota(t, userID))
+	assert.Equal(t, tokenRemain, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, int64(0), countLogs(t))
 }
