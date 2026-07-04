@@ -558,7 +558,26 @@ func GetSubscriptionPlanById(id int) (*SubscriptionPlan, error) {
 	return getSubscriptionPlanByIdTx(nil, id)
 }
 
+func getSubscriptionPlanByIdFreshTx(tx *gorm.DB, id int) (*SubscriptionPlan, error) {
+	if id <= 0 {
+		return nil, errors.New("invalid plan id")
+	}
+	query := DB
+	if tx != nil {
+		query = tx
+	}
+	var plan SubscriptionPlan
+	if err := query.Where("id = ?", id).First(&plan).Error; err != nil {
+		return nil, err
+	}
+	plan.NormalizeDefaults()
+	return &plan, nil
+}
+
 func getSubscriptionPlanByIdTx(tx *gorm.DB, id int) (*SubscriptionPlan, error) {
+	if tx != nil {
+		return getSubscriptionPlanByIdFreshTx(tx, id)
+	}
 	if id <= 0 {
 		return nil, errors.New("invalid plan id")
 	}
@@ -569,19 +588,15 @@ func getSubscriptionPlanByIdTx(tx *gorm.DB, id int) (*SubscriptionPlan, error) {
 			return &cached, nil
 		}
 	}
-	var plan SubscriptionPlan
-	query := DB
-	if tx != nil {
-		query = tx
-	}
-	if err := query.Where("id = ?", id).First(&plan).Error; err != nil {
+	plan, err := getSubscriptionPlanByIdFreshTx(nil, id)
+	if err != nil {
 		return nil, err
 	}
 	plan.NormalizeDefaults()
 	if tx == nil {
-		_ = getSubscriptionPlanCache().SetWithTTL(key, plan, subscriptionPlanCacheTTL())
+		_ = getSubscriptionPlanCache().SetWithTTL(key, *plan, subscriptionPlanCacheTTL())
 	}
-	return &plan, nil
+	return plan, nil
 }
 
 func CountUserSubscriptionsByPlan(userId int, planId int) (int64, error) {
@@ -671,7 +686,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 			return nil, errors.New("已达到该套餐购买上限")
 		}
 	}
-	nowUnix := GetDBTimestamp()
+	nowUnix := getDBTimestampTx(tx)
 	now := time.Unix(nowUnix, 0)
 	endUnix, err := calcPlanEndTime(now, plan)
 	if err != nil {

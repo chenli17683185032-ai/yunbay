@@ -20,6 +20,9 @@ type Redemption struct {
 	Status       int            `json:"status" gorm:"default:1"`
 	Name         string         `json:"name" gorm:"index"`
 	Quota        int            `json:"quota" gorm:"default:100"`
+	Type         string         `json:"type" gorm:"type:varchar(32);default:'quota';index"`
+	PlanId       int            `json:"plan_id" gorm:"index;default:0"`
+	PlanTitle    string         `json:"plan_title,omitempty" gorm:"-:all"`
 	Kind         string         `json:"kind" gorm:"type:varchar(32);default:'legacy';index"`
 	Amount       int64          `json:"amount" gorm:"default:0"`
 	Money        float64        `json:"money" gorm:"default:0"`
@@ -36,6 +39,11 @@ type Redemption struct {
 }
 
 const (
+	RedemptionTypeQuota        = "quota"
+	RedemptionTypeSubscription = "subscription"
+)
+
+const (
 	RedemptionKindLegacy      = "legacy"
 	RedemptionKindPaidTopUp   = "paid_topup"
 	RedemptionKindPromoCredit = "promo_credit"
@@ -50,6 +58,9 @@ const (
 
 type RedeemRedemptionMeta struct {
 	Id           int     `json:"id"`
+	Type         string  `json:"type"`
+	PlanId       int     `json:"plan_id,omitempty"`
+	PlanTitle    string  `json:"plan_title,omitempty"`
 	Kind         string  `json:"kind"`
 	Quota        int     `json:"quota"`
 	Amount       int64   `json:"amount"`
@@ -60,7 +71,10 @@ type RedeemRedemptionMeta struct {
 }
 
 type RedeemResult struct {
-	Quota      int                  `json:"quota"`
+	Type       string               `json:"type"`
+	Quota      int                  `json:"quota,omitempty"`
+	PlanId     int                  `json:"plan_id,omitempty"`
+	PlanTitle  string               `json:"plan_title,omitempty"`
 	Redemption RedeemRedemptionMeta `json:"redemption"`
 }
 
@@ -151,6 +165,52 @@ func GetRedemptionById(id int) (*Redemption, error) {
 	return &redemption, err
 }
 
+func normalizeRedemptionType(redemptionType string) string {
+	switch strings.TrimSpace(redemptionType) {
+	case "", RedemptionTypeQuota:
+		return RedemptionTypeQuota
+	case RedemptionTypeSubscription:
+		return RedemptionTypeSubscription
+	default:
+		return ""
+	}
+}
+
+func validateRedemptionPlanForCreate(redemption *Redemption) error {
+	if redemption == nil {
+		return ErrRedemptionInvalid
+	}
+	redemption.Type = normalizeRedemptionType(redemption.Type)
+	if redemption.Type == "" {
+		return ErrRedemptionInvalid
+	}
+	if redemption.Type != RedemptionTypeSubscription {
+		return nil
+	}
+	if redemption.PlanId <= 0 {
+		return ErrRedemptionInvalid
+	}
+	if _, err := getSubscriptionPlanByIdFreshTx(nil, redemption.PlanId); err != nil {
+		return err
+	}
+	redemption.Quota = 0
+	redemption.Kind = RedemptionKindPromoCredit
+	redemption.Amount = 0
+	redemption.Money = 0
+	redemption.CountAsTopUp = false
+	if strings.TrimSpace(redemption.Source) == "" {
+		redemption.Source = RedemptionSourcePromo
+	}
+	return nil
+}
+
+func ValidateRedemptionForCreate(redemption *Redemption) error {
+	if err := NormalizeRedemptionForCreate(redemption); err != nil {
+		return err
+	}
+	return nil
+}
+
 func GenerateRedemptionBatchId(source string, amount int64, now int64) string {
 	if source == "" {
 		source = RedemptionSourceManual
@@ -180,6 +240,15 @@ func CreateRedemptionTopUpTradeNo(redemptionID int, userID int) string {
 func NormalizeRedemptionForCreate(redemption *Redemption) error {
 	if redemption == nil {
 		return ErrRedemptionInvalid
+	}
+	if err := validateRedemptionPlanForCreate(redemption); err != nil {
+		return err
+	}
+	if redemption.Type == RedemptionTypeSubscription {
+		if redemption.BatchId == "" {
+			redemption.BatchId = GenerateRedemptionBatchId(redemption.Source, redemption.Amount, common.GetTimestamp())
+		}
+		return nil
 	}
 	redemption.Kind = strings.TrimSpace(redemption.Kind)
 	redemption.Source = strings.TrimSpace(redemption.Source)
@@ -221,6 +290,7 @@ func ValidateRedemptionKindForCreate(redemption *Redemption) error {
 }
 
 func normalizeRedeemedRedemption(redemption *Redemption) {
+	redemption.Type = normalizeRedemptionType(redemption.Type)
 	if redemption.Kind == "" {
 		redemption.Kind = RedemptionKindLegacy
 	}
@@ -232,9 +302,15 @@ func normalizeRedeemedRedemption(redemption *Redemption) {
 func buildRedeemResult(redemption *Redemption) *RedeemResult {
 	normalizeRedeemedRedemption(redemption)
 	return &RedeemResult{
-		Quota: redemption.Quota,
+		Type:      redemption.Type,
+		Quota:     redemption.Quota,
+		PlanId:    redemption.PlanId,
+		PlanTitle: redemption.PlanTitle,
 		Redemption: RedeemRedemptionMeta{
 			Id:           redemption.Id,
+			Type:         redemption.Type,
+			PlanId:       redemption.PlanId,
+			PlanTitle:    redemption.PlanTitle,
 			Kind:         redemption.Kind,
 			Quota:        redemption.Quota,
 			Amount:       redemption.Amount,
@@ -325,6 +401,26 @@ func redeemWithTxResult(tx *gorm.DB, key string, userId int) (*RedeemResult, boo
 	return buildRedeemResult(redemption), vipUpgraded, nil
 }
 
+func claimRedemptionCodeTx(tx *gorm.DB, redemption *Redemption, userId int, now int64) error {
+	claim := tx.Model(&Redemption{}).
+		Where("id = ? AND status = ?", redemption.Id, common.RedemptionCodeStatusEnabled).
+		Updates(map[string]interface{}{
+			"status":        common.RedemptionCodeStatusUsed,
+			"redeemed_time": now,
+			"used_user_id":  userId,
+		})
+	if claim.Error != nil {
+		return claim.Error
+	}
+	if claim.RowsAffected != 1 {
+		return ErrRedemptionUsed
+	}
+	redemption.RedeemedTime = now
+	redemption.Status = common.RedemptionCodeStatusUsed
+	redemption.UsedUserId = userId
+	return nil
+}
+
 func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) (bool, error) {
 	query := tx.Where(commonKeyCol+" = ?", key)
 	if !common.UsingSQLite {
@@ -345,6 +441,26 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) (
 		return false, ErrRedemptionExpired
 	}
 	normalizeRedeemedRedemption(redemption)
+	if redemption.Type == "" {
+		return false, ErrRedemptionInvalid
+	}
+
+	if redemption.Type == RedemptionTypeSubscription {
+		plan, err := getSubscriptionPlanByIdFreshTx(tx, redemption.PlanId)
+		if err != nil {
+			return false, err
+		}
+		if err := claimRedemptionCodeTx(tx, redemption, userId, now); err != nil {
+			return false, err
+		}
+		if _, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "redemption"); err != nil {
+			return false, err
+		}
+		redemption.Quota = 0
+		redemption.PlanTitle = plan.Title
+		return false, nil
+	}
+
 	if redemption.Kind == RedemptionKindCoupon || (redemption.Kind != RedemptionKindLegacy && redemption.Kind != RedemptionKindPaidTopUp && redemption.Kind != RedemptionKindPromoCredit) {
 		return false, ErrRedemptionUnsupportedKind
 	}
@@ -354,18 +470,15 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) (
 	if redemption.Kind == RedemptionKindPromoCredit && redemption.CountAsTopUp {
 		return false, ErrRedemptionInvalid
 	}
+	if err := claimRedemptionCodeTx(tx, redemption, userId, now); err != nil {
+		return false, err
+	}
 	result := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota))
 	if result.Error != nil {
 		return false, result.Error
 	}
 	if result.RowsAffected != 1 {
 		return false, ErrRedemptionInvalid
-	}
-	redemption.RedeemedTime = now
-	redemption.Status = common.RedemptionCodeStatusUsed
-	redemption.UsedUserId = userId
-	if err = tx.Save(redemption).Error; err != nil {
-		return false, err
 	}
 	if redemption.Kind == RedemptionKindPaidTopUp && redemption.CountAsTopUp {
 		topUp := &TopUp{
@@ -398,6 +511,10 @@ func RecordRedeemLog(userId int, result *RedeemResult) {
 	if result == nil {
 		return
 	}
+	if result.Type == RedemptionTypeSubscription {
+		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码开通套餐 %s，兑换码ID %d", result.PlanTitle, result.Redemption.Id))
+		return
+	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(result.Quota), result.Redemption.Id))
 }
 
@@ -415,7 +532,7 @@ func (redemption *Redemption) SelectUpdate() error {
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (redemption *Redemption) Update() error {
 	var err error
-	err = DB.Model(redemption).Select("name", "status", "quota", "redeemed_time", "expired_time").Updates(redemption).Error
+	err = DB.Model(redemption).Select("name", "status", "quota", "type", "plan_id", "kind", "amount", "money", "count_as_topup", "batch_id", "source", "redeemed_time", "expired_time").Updates(redemption).Error
 	return err
 }
 

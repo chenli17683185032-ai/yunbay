@@ -96,6 +96,8 @@ func AddRedemption(c *gin.Context) {
 		switch {
 		case errors.Is(err, model.ErrRedemptionUnsupportedKind):
 			common.ApiErrorI18n(c, i18n.MsgRedemptionUnsupportedKind)
+		case redemption.Type == model.RedemptionTypeSubscription:
+			common.ApiErrorI18n(c, i18n.MsgRedemptionInvalid)
 		case redemption.Kind == model.RedemptionKindPaidTopUp:
 			common.ApiErrorI18n(c, i18n.MsgRedemptionPaidTopupInvalid)
 		case redemption.Kind == model.RedemptionKindPromoCredit:
@@ -103,6 +105,7 @@ func AddRedemption(c *gin.Context) {
 		default:
 			common.ApiErrorI18n(c, i18n.MsgRedemptionInvalid)
 		}
+
 		return
 	}
 	var keys []string
@@ -115,6 +118,8 @@ func AddRedemption(c *gin.Context) {
 			Status:       common.RedemptionCodeStatusEnabled,
 			CreatedTime:  common.GetTimestamp(),
 			Quota:        redemption.Quota,
+			Type:         redemption.Type,
+			PlanId:       redemption.PlanId,
 			Kind:         redemption.Kind,
 			Amount:       redemption.Amount,
 			Money:        redemption.Money,
@@ -145,6 +150,8 @@ func AddRedemption(c *gin.Context) {
 		"count_as_topup": redemption.CountAsTopUp,
 		"source":         redemption.Source,
 		"batch_id":       redemption.BatchId,
+		"type":           redemption.Type,
+		"plan_id":        redemption.PlanId,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success":  true,

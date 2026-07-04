@@ -1259,9 +1259,14 @@ func TopUp(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success":    true,
-		"message":    "",
-		"data":       result.Quota,
+		"success": true,
+		"message": "",
+		"data": func() interface{} {
+			if result.Type == model.RedemptionTypeSubscription {
+				return result
+			}
+			return result.Quota
+		}(),
 		"redemption": result.Redemption,
 	})
 }

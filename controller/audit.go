@@ -45,8 +45,9 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply":     "Applied upstream model changes to channel (ID: ${id})",
 	"channel.upstream_apply_all": "Applied upstream model changes to ${count} channels",
 
-	"redemption.create": "Created ${count} ${kind} redemption codes named ${name} (${quota} each, amount ${amount}, money ${money}, count_as_topup ${count_as_topup}, source ${source}, batch ${batch_id})",
-	"redemption.export": "Exported ${count} redemption codes from batch ${batch_id} as ${format}",
+	"redemption.create":              "Created ${count} ${kind} redemption codes named ${name} (${quota} each, amount ${amount}, money ${money}, count_as_topup ${count_as_topup}, source ${source}, batch ${batch_id})",
+	"redemption.subscription.create": "Created ${count} subscription redemption codes named ${name} for plan ${plan_title}",
+	"redemption.export":              "Exported ${count} redemption codes from batch ${batch_id} as ${format}",
 
 	"order.delete_mark": "Hidden ${order_type} order ${trade_no} from admin billing order management (${reason})",
 
