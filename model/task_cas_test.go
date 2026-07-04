@@ -42,6 +42,8 @@ func TestMain(m *testing.M) {
 		&Channel{},
 		&Ability{},
 		&TopUp{},
+		&Redemption{},
+		&OrderDeletionMark{},
 		&LdxpTopupSession{},
 		&LdxpMailEvent{},
 		&AffiliateCommission{},
@@ -49,6 +51,7 @@ func TestMain(m *testing.M) {
 		&SubscriptionPlan{},
 		&SubscriptionOrder{},
 		&UserSubscription{},
+		&SubscriptionPreConsumeRecord{},
 		&PerfMetric{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
@@ -67,6 +70,8 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM channels")
 		DB.Exec("DELETE FROM abilities")
 		DB.Exec("DELETE FROM top_ups")
+		DB.Exec("DELETE FROM redemptions")
+		DB.Exec("DELETE FROM order_deletion_marks")
 		DB.Exec("DELETE FROM ldxp_topup_sessions")
 		DB.Exec("DELETE FROM ldxp_mail_events")
 		DB.Exec("DELETE FROM affiliate_commissions")
@@ -74,6 +79,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM subscription_orders")
 		DB.Exec("DELETE FROM subscription_plans")
 		DB.Exec("DELETE FROM user_subscriptions")
+		DB.Exec("DELETE FROM subscription_pre_consume_records")
 		DB.Exec("DELETE FROM perf_metrics")
 	})
 }

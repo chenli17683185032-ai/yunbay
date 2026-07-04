@@ -6,6 +6,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestOrderManagementAnalyticsAggregatesProductionLdxpFields(t *testing.T) {
@@ -259,4 +260,300 @@ func TestAffiliateWithdrawalRejectIsSingleTransition(t *testing.T) {
 
 	_, err = RejectAffiliateWithdrawal(withdrawal.Id, "重复驳回")
 	require.ErrorIs(t, err, ErrAffiliateWithdrawalAlreadyProcessed)
+}
+
+func TestListAdminOrdersIncludesTopupsAndSubscriptionOrders(t *testing.T) {
+	truncateTables(t)
+
+	plan := &SubscriptionPlan{
+		Title:         "Pro Monthly",
+		PriceAmount:   12.5,
+		Currency:      "USD",
+		DurationUnit:  SubscriptionDurationMonth,
+		DurationValue: 1,
+		CustomSeconds: 0,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+
+	topup := &TopUp{
+		UserId:          11,
+		Amount:          1000,
+		Money:           10,
+		TradeNo:         "topup-001",
+		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: PaymentProviderStripe,
+		CreateTime:      100,
+		CompleteTime:    110,
+		Status:          common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(topup).Error)
+
+	subscription := &SubscriptionOrder{
+		UserId:          22,
+		PlanId:          plan.Id,
+		Money:           12.5,
+		TradeNo:         "sub-001",
+		PaymentMethod:   PaymentMethodBalance,
+		PaymentProvider: PaymentProviderBalance,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      200,
+		CompleteTime:    0,
+	}
+	require.NoError(t, DB.Create(subscription).Error)
+
+	records, total, err := ListAdminOrders(&common.PageInfo{Page: 1, PageSize: 10}, "")
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, records, 2)
+
+	assert.Equal(t, OrderTypeSubscription, records[0].OrderType)
+	assert.Equal(t, subscription.Id, records[0].Id)
+	assert.Equal(t, "sub-001", records[0].TradeNo)
+	assert.Equal(t, plan.Id, records[0].PlanId)
+	assert.Equal(t, "Pro Monthly", records[0].PlanTitle)
+	assert.Equal(t, SubscriptionDurationMonth, records[0].DurationUnit)
+	assert.Equal(t, 1, records[0].DurationValue)
+	assert.EqualValues(t, 0, records[0].CustomSeconds)
+
+	assert.Equal(t, OrderTypeTopup, records[1].OrderType)
+	assert.Equal(t, topup.Id, records[1].Id)
+	assert.Equal(t, "topup-001", records[1].TradeNo)
+	assert.EqualValues(t, 1000, records[1].Amount)
+	assert.Equal(t, 10.0, records[1].Money)
+}
+
+func TestListAdminOrdersSearchesSubscriptionTradeNo(t *testing.T) {
+	truncateTables(t)
+
+	matching := &SubscriptionOrder{
+		UserId:          31,
+		Money:           20,
+		TradeNo:         "sub-search-hit",
+		PaymentMethod:   PaymentMethodBalance,
+		PaymentProvider: PaymentProviderBalance,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      300,
+	}
+	require.NoError(t, DB.Create(matching).Error)
+	require.NoError(t, DB.Create(&SubscriptionOrder{
+		UserId:          32,
+		Money:           30,
+		TradeNo:         "sub-other",
+		PaymentMethod:   PaymentMethodBalance,
+		PaymentProvider: PaymentProviderBalance,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      400,
+	}).Error)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:          33,
+		Amount:          4000,
+		Money:           40,
+		TradeNo:         "topup-other",
+		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: PaymentProviderStripe,
+		CreateTime:      500,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+
+	records, total, err := ListAdminOrders(&common.PageInfo{Page: 1, PageSize: 10}, " search-hit ")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, records, 1)
+	assert.Equal(t, OrderTypeSubscription, records[0].OrderType)
+	assert.Equal(t, matching.TradeNo, records[0].TradeNo)
+}
+
+func TestListAdminOrdersNilPageInfoUsesDefaultPagination(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:          51,
+		Amount:          1000,
+		Money:           10,
+		TradeNo:         "topup-nil-page",
+		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: PaymentProviderStripe,
+		CreateTime:      700,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+
+	records, total, err := ListAdminOrders(nil, "")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, records, 1)
+	assert.Equal(t, "topup-nil-page", records[0].TradeNo)
+}
+
+func TestListAdminOrdersPaginationBeyondTotalReturnsEmptySliceWithTotal(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:          61,
+		Amount:          2000,
+		Money:           20,
+		TradeNo:         "topup-page-one",
+		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: PaymentProviderStripe,
+		CreateTime:      800,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+
+	records, total, err := ListAdminOrders(&common.PageInfo{Page: 2, PageSize: 10}, "")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	assert.NotNil(t, records)
+	assert.Empty(t, records)
+}
+
+func TestMarkAdminOrderDeletedCanMarkNonexistentOrder(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, MarkAdminOrderDeleted(OrderTypeSubscription, "missing-sub-order", 303, "hide future scan"))
+
+	var mark OrderDeletionMark
+	require.NoError(t, DB.Where("order_type = ? AND trade_no = ?", OrderTypeSubscription, "missing-sub-order").First(&mark).Error)
+	assert.Equal(t, 303, mark.DeletedBy)
+	assert.Equal(t, "hide future scan", mark.Reason)
+	assert.NotZero(t, mark.DeletedTime)
+}
+
+func TestMarkAdminOrderDeletedEmptyReasonDoesNotOverwriteExistingReason(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, MarkAdminOrderDeleted(OrderTypeTopup, "topup-keep-reason", 404, "keep this reason"))
+	require.NoError(t, MarkAdminOrderDeleted(OrderTypeTopup, "topup-keep-reason", 505, "   "))
+
+	var mark OrderDeletionMark
+	require.NoError(t, DB.Where("order_type = ? AND trade_no = ?", OrderTypeTopup, "topup-keep-reason").First(&mark).Error)
+	assert.Equal(t, 505, mark.DeletedBy)
+	assert.Equal(t, "keep this reason", mark.Reason)
+	assert.NotZero(t, mark.DeletedTime)
+}
+
+func TestMarkAdminOrderDeletedHidesOrderAndIsIdempotent(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&TopUp{
+		UserId:          41,
+		Amount:          5000,
+		Money:           50,
+		TradeNo:         "topup-hide-me",
+		PaymentMethod:   PaymentMethodStripe,
+		PaymentProvider: PaymentProviderStripe,
+		CreateTime:      600,
+		Status:          common.TopUpStatusSuccess,
+	}).Error)
+
+	records, total, err := ListAdminOrders(&common.PageInfo{Page: 1, PageSize: 10}, "")
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, records, 1)
+
+	require.NoError(t, MarkAdminOrderDeleted(" topup ", " topup-hide-me ", 101, "first reason"))
+	require.NoError(t, MarkAdminOrderDeleted(OrderTypeTopup, "topup-hide-me", 202, "second reason"))
+
+	records, total, err = ListAdminOrders(&common.PageInfo{Page: 1, PageSize: 10}, "")
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, total)
+	assert.Empty(t, records)
+
+	var marks []OrderDeletionMark
+	require.NoError(t, DB.Find(&marks).Error)
+	require.Len(t, marks, 1)
+	assert.Equal(t, OrderTypeTopup, marks[0].OrderType)
+	assert.Equal(t, "topup-hide-me", marks[0].TradeNo)
+	assert.Equal(t, 202, marks[0].DeletedBy)
+	assert.Equal(t, "second reason", marks[0].Reason)
+	assert.NotZero(t, marks[0].DeletedTime)
+}
+
+func TestMarkAdminOrderDeletedTreatsConcurrentInsertAsIdempotent(t *testing.T) {
+	truncateTables(t)
+
+	const tradeNo = "topup-concurrent-insert"
+	const callbackName = "test:inject_order_deletion_mark_concurrent_insert"
+	injected := false
+	require.NoError(t, DB.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		mark, ok := tx.Statement.Dest.(*OrderDeletionMark)
+		if !ok || injected || mark.OrderType != OrderTypeTopup || mark.TradeNo != tradeNo {
+			return
+		}
+		injected = true
+		err := tx.Session(&gorm.Session{NewDB: true}).Create(&OrderDeletionMark{
+			OrderType:   OrderTypeTopup,
+			TradeNo:     tradeNo,
+			DeletedBy:   606,
+			DeletedTime: 12345,
+			Reason:      "injected reason",
+		}).Error
+		if err != nil {
+			tx.AddError(err)
+		}
+	}))
+	t.Cleanup(func() {
+		_ = DB.Callback().Create().Remove(callbackName)
+	})
+
+	err := MarkAdminOrderDeleted(OrderTypeTopup, tradeNo, 707, "caller reason")
+	require.NoError(t, err)
+	assert.True(t, injected)
+
+	var marks []OrderDeletionMark
+	require.NoError(t, DB.Where("order_type = ? AND trade_no = ?", OrderTypeTopup, tradeNo).Find(&marks).Error)
+	require.Len(t, marks, 1)
+	assert.Equal(t, 707, marks[0].DeletedBy)
+	assert.Equal(t, "caller reason", marks[0].Reason)
+	assert.NotEqualValues(t, 12345, marks[0].DeletedTime)
+}
+
+func TestMarkAdminOrderDeletedValidatesOrderTypeAndTradeNo(t *testing.T) {
+	truncateTables(t)
+
+	assert.Error(t, MarkAdminOrderDeleted("unknown", "trade-no", 1, ""))
+	assert.Error(t, MarkAdminOrderDeleted(OrderTypeTopup, "   ", 1, ""))
+	assert.Error(t, MarkAdminOrderDeleted(OrderTypeSubscription, "", 1, ""))
+
+	var count int64
+	require.NoError(t, DB.Model(&OrderDeletionMark{}).Count(&count).Error)
+	assert.EqualValues(t, 0, count)
+}
+
+func TestAdminOrderHelperSignatures(t *testing.T) {
+	truncateTables(t)
+
+	normalized := normalizeAdminOrderType(" topup ")
+	assert.Equal(t, OrderTypeTopup, normalized)
+	assert.Empty(t, normalizeAdminOrderType(" invalid "))
+
+	require.NoError(t, DB.Create(&OrderDeletionMark{
+		OrderType:   OrderTypeTopup,
+		TradeNo:     "helper-signature-trade",
+		DeletedBy:   606,
+		DeletedTime: 12345,
+	}).Error)
+	marks, err := loadOrderDeletionMarkSet()
+	require.NoError(t, err)
+	var _ map[string]struct{} = marks
+	_, ok := marks[orderDeletionKey(OrderTypeTopup, "helper-signature-trade")]
+	assert.True(t, ok)
+
+	plan := &SubscriptionPlan{
+		Title:         "Helper Plan",
+		PriceAmount:   9.9,
+		Currency:      "USD",
+		DurationUnit:  SubscriptionDurationDay,
+		DurationValue: 7,
+		CustomSeconds: 0,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	records, err := attachSubscriptionPlanFields([]AdminOrderRecord{{
+		OrderType: OrderTypeSubscription,
+		PlanId:    plan.Id,
+		TradeNo:   "helper-subscription",
+	}})
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.Equal(t, "Helper Plan", records[0].PlanTitle)
+	assert.Equal(t, SubscriptionDurationDay, records[0].DurationUnit)
+	assert.Equal(t, 7, records[0].DurationValue)
 }

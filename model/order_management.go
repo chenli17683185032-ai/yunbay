@@ -2,12 +2,15 @@ package model
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -795,4 +798,260 @@ func truncateOrderManagementTablesForTest() {
 	DB.Exec("DELETE FROM ldxp_mail_events")
 	DB.Exec("DELETE FROM affiliate_commissions")
 	DB.Exec("DELETE FROM affiliate_withdrawals")
+}
+
+const (
+	OrderTypeTopup        = "topup"
+	OrderTypeSubscription = "subscription"
+)
+
+type OrderDeletionMark struct {
+	Id          int    `json:"id"`
+	OrderType   string `json:"order_type" gorm:"type:varchar(32);index:idx_order_delete_unique,unique"`
+	TradeNo     string `json:"trade_no" gorm:"type:varchar(255);index:idx_order_delete_unique,unique"`
+	DeletedBy   int    `json:"deleted_by" gorm:"index"`
+	DeletedTime int64  `json:"deleted_time" gorm:"bigint;index"`
+	Reason      string `json:"reason" gorm:"type:varchar(255);default:''"`
+}
+
+type AdminOrderRecord struct {
+	OrderType       string  `json:"order_type"`
+	Id              int     `json:"id"`
+	TradeNo         string  `json:"trade_no"`
+	UserId          int     `json:"user_id"`
+	Status          string  `json:"status"`
+	PaymentMethod   string  `json:"payment_method"`
+	PaymentProvider string  `json:"payment_provider"`
+	Amount          int64   `json:"amount"`
+	Money           float64 `json:"money"`
+	CreateTime      int64   `json:"create_time"`
+	CompleteTime    int64   `json:"complete_time"`
+	PlanId          int     `json:"plan_id,omitempty"`
+	PlanTitle       string  `json:"plan_title,omitempty"`
+	DurationUnit    string  `json:"duration_unit,omitempty"`
+	DurationValue   int     `json:"duration_value,omitempty"`
+	CustomSeconds   int64   `json:"custom_seconds,omitempty"`
+}
+
+func ListAdminOrders(pageInfo *common.PageInfo, keyword string) ([]AdminOrderRecord, int64, error) {
+	keyword = strings.TrimSpace(keyword)
+	if pageInfo == nil {
+		pageInfo = &common.PageInfo{Page: 1, PageSize: common.ItemsPerPage}
+	}
+	if pageInfo.Page < 1 {
+		pageInfo.Page = 1
+	}
+	if pageInfo.PageSize <= 0 {
+		pageInfo.PageSize = common.ItemsPerPage
+	}
+
+	deletionMarks, err := loadOrderDeletionMarkSet()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	topupOrders, err := loadAdminTopupOrders(keyword)
+	if err != nil {
+		return nil, 0, err
+	}
+	subscriptionOrders, err := loadAdminSubscriptionOrders(keyword)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	records := make([]AdminOrderRecord, 0, len(topupOrders)+len(subscriptionOrders))
+	for _, record := range topupOrders {
+		if _, deleted := deletionMarks[orderDeletionKey(record.OrderType, record.TradeNo)]; !deleted {
+			records = append(records, record)
+		}
+	}
+	for _, record := range subscriptionOrders {
+		if _, deleted := deletionMarks[orderDeletionKey(record.OrderType, record.TradeNo)]; !deleted {
+			records = append(records, record)
+		}
+	}
+
+	sort.SliceStable(records, func(i, j int) bool {
+		if records[i].CreateTime == records[j].CreateTime {
+			return records[i].Id > records[j].Id
+		}
+		return records[i].CreateTime > records[j].CreateTime
+	})
+
+	total := int64(len(records))
+	start := pageInfo.GetStartIdx()
+	if start >= len(records) {
+		return []AdminOrderRecord{}, total, nil
+	}
+	end := start + pageInfo.GetPageSize()
+	if end > len(records) {
+		end = len(records)
+	}
+	return records[start:end], total, nil
+}
+
+func MarkAdminOrderDeleted(orderType, tradeNo string, adminId int, reason string) error {
+	orderType = normalizeAdminOrderType(orderType)
+	if orderType == "" {
+		return errors.New("invalid order_type")
+	}
+	tradeNo = strings.TrimSpace(tradeNo)
+	if tradeNo == "" {
+		return errors.New("trade_no is required")
+	}
+	reason = strings.TrimSpace(reason)
+	now := common.GetTimestamp()
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		mark := OrderDeletionMark{
+			OrderType:   orderType,
+			TradeNo:     tradeNo,
+			DeletedBy:   adminId,
+			DeletedTime: now,
+			Reason:      reason,
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "order_type"}, {Name: "trade_no"}},
+			DoNothing: true,
+		}).Create(&mark).Error; err != nil {
+			return err
+		}
+
+		updates := map[string]interface{}{
+			"deleted_by":   adminId,
+			"deleted_time": now,
+		}
+		if reason != "" {
+			updates["reason"] = reason
+		}
+		return tx.Model(&OrderDeletionMark{}).
+			Where("order_type = ? AND trade_no = ?", orderType, tradeNo).
+			Updates(updates).Error
+	})
+}
+
+func normalizeAdminOrderType(orderType string) string {
+	switch strings.TrimSpace(orderType) {
+	case OrderTypeTopup:
+		return OrderTypeTopup
+	case OrderTypeSubscription:
+		return OrderTypeSubscription
+	default:
+		return ""
+	}
+}
+
+func orderDeletionKey(orderType, tradeNo string) string {
+	return orderType + "\x00" + tradeNo
+}
+
+func loadOrderDeletionMarkSet() (map[string]struct{}, error) {
+	var marks []OrderDeletionMark
+	if err := DB.Find(&marks).Error; err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(marks))
+	for _, mark := range marks {
+		set[orderDeletionKey(mark.OrderType, mark.TradeNo)] = struct{}{}
+	}
+	return set, nil
+}
+
+func loadAdminTopupOrders(keyword string) ([]AdminOrderRecord, error) {
+	query := DB.Model(&TopUp{})
+	if keyword != "" {
+		query = query.Where("trade_no LIKE ?", "%"+keyword+"%")
+	}
+
+	var topups []TopUp
+	if err := query.Order("create_time desc").Order("id desc").Find(&topups).Error; err != nil {
+		return nil, err
+	}
+
+	records := make([]AdminOrderRecord, 0, len(topups))
+	for _, topup := range topups {
+		records = append(records, AdminOrderRecord{
+			OrderType:       OrderTypeTopup,
+			Id:              topup.Id,
+			TradeNo:         topup.TradeNo,
+			UserId:          topup.UserId,
+			Status:          topup.Status,
+			PaymentMethod:   topup.PaymentMethod,
+			PaymentProvider: topup.PaymentProvider,
+			Amount:          topup.Amount,
+			Money:           topup.Money,
+			CreateTime:      topup.CreateTime,
+			CompleteTime:    topup.CompleteTime,
+		})
+	}
+	return records, nil
+}
+
+func loadAdminSubscriptionOrders(keyword string) ([]AdminOrderRecord, error) {
+	query := DB.Model(&SubscriptionOrder{})
+	if keyword != "" {
+		query = query.Where("trade_no LIKE ?", "%"+keyword+"%")
+	}
+
+	var orders []SubscriptionOrder
+	if err := query.Order("create_time desc").Order("id desc").Find(&orders).Error; err != nil {
+		return nil, err
+	}
+
+	records := make([]AdminOrderRecord, 0, len(orders))
+	for _, order := range orders {
+		records = append(records, AdminOrderRecord{
+			OrderType:       OrderTypeSubscription,
+			Id:              order.Id,
+			TradeNo:         order.TradeNo,
+			UserId:          order.UserId,
+			Status:          order.Status,
+			PaymentMethod:   order.PaymentMethod,
+			PaymentProvider: order.PaymentProvider,
+			Money:           order.Money,
+			CreateTime:      order.CreateTime,
+			CompleteTime:    order.CompleteTime,
+			PlanId:          order.PlanId,
+		})
+	}
+	records, err := attachSubscriptionPlanFields(records)
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func attachSubscriptionPlanFields(records []AdminOrderRecord) ([]AdminOrderRecord, error) {
+	planIds := make([]int, 0)
+	seen := make(map[int]bool)
+	for _, record := range records {
+		if record.PlanId > 0 && !seen[record.PlanId] {
+			seen[record.PlanId] = true
+			planIds = append(planIds, record.PlanId)
+		}
+	}
+	if len(planIds) == 0 {
+		return records, nil
+	}
+
+	var plans []SubscriptionPlan
+	if err := DB.Where("id IN ?", planIds).Find(&plans).Error; err != nil {
+		return nil, err
+	}
+	plansById := make(map[int]SubscriptionPlan, len(plans))
+	for _, plan := range plans {
+		plansById[plan.Id] = plan
+	}
+
+	for i := range records {
+		plan, ok := plansById[records[i].PlanId]
+		if !ok {
+			continue
+		}
+		records[i].PlanTitle = plan.Title
+		records[i].DurationUnit = plan.DurationUnit
+		records[i].DurationValue = plan.DurationValue
+		records[i].CustomSeconds = plan.CustomSeconds
+	}
+	return records, nil
 }
