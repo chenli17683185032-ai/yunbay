@@ -220,6 +220,8 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			orderManagementAdminRoute.GET("/analytics", controller.AdminOrderManagementAnalytics)
 			orderManagementAdminRoute.GET("/orders", controller.AdminOrderManagementOrders)
+			orderManagementAdminRoute.GET("/billing-orders", controller.AdminListBillingOrders)
+			orderManagementAdminRoute.DELETE("/billing-orders/:order_type/*trade_no", controller.AdminDeleteBillingOrder)
 			orderManagementAdminRoute.POST("/orders/:id/mail-check", controller.AdminOrderManagementOrderMailCheck)
 			orderManagementAdminRoute.POST("/mail-check", controller.AdminOrderManagementMailCheck)
 			orderManagementAdminRoute.GET("/mail-check/:job_id", controller.AdminOrderManagementMailCheckJob)

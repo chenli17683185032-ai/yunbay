@@ -432,3 +432,56 @@ func affiliateWithdrawalDTOFromModel(withdrawal *model.AffiliateWithdrawal) *dto
 		ProcessedTime: withdrawal.ProcessedTime,
 	}
 }
+
+func AdminListBillingOrders(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	keyword := c.Query("keyword")
+	orders, total, err := model.ListAdminOrders(pageInfo, keyword)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetTotal(int(total))
+	pageInfo.SetItems(orders)
+	common.ApiSuccess(c, pageInfo)
+}
+
+func AdminDeleteBillingOrder(c *gin.Context) {
+	orderType := normalizeAdminOrderTypeParam(c.Param("order_type"))
+	tradeNo := normalizeAdminOrderTradeNoParam(c.Param("trade_no"))
+	if orderType == "" || tradeNo == "" {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+
+	var req dto.AdminDeleteOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if err := model.MarkAdminOrderDeleted(orderType, tradeNo, c.GetInt("id"), req.Reason); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "order.delete_mark", map[string]interface{}{
+		"order_type": orderType,
+		"trade_no":   tradeNo,
+		"reason":     strings.TrimSpace(req.Reason),
+	})
+	common.ApiSuccess(c, nil)
+}
+
+func normalizeAdminOrderTypeParam(orderType string) string {
+	switch strings.TrimSpace(orderType) {
+	case model.OrderTypeTopup:
+		return model.OrderTypeTopup
+	case model.OrderTypeSubscription:
+		return model.OrderTypeSubscription
+	default:
+		return ""
+	}
+}
+
+func normalizeAdminOrderTradeNoParam(tradeNo string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(tradeNo), "/"))
+}

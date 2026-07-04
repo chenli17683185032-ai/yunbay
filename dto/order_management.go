@@ -119,3 +119,7 @@ type AffiliateSourceOrderDTO struct {
 	CommissionMoney float64 `json:"commission_money"`
 	MailStatus      string  `json:"mail_status"`
 }
+
+type AdminDeleteOrderRequest struct {
+	Reason string `json:"reason"`
+}

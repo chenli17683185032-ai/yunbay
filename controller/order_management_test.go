@@ -1,15 +1,21 @@
 package controller
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestParseOrderManagementRange7dAnd30d(t *testing.T) {
@@ -102,4 +108,251 @@ func TestMailCheckRequestCustomRangeFromBody(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1782518400), start)
 	require.Equal(t, int64(1782604800), end)
+}
+
+func setupOrderManagementControllerTestDB(t *testing.T) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	oldDB := model.DB
+	oldLogDB := model.LOG_DB
+	oldUsingSQLite := common.UsingSQLite
+	oldUsingMySQL := common.UsingMySQL
+	oldUsingPostgreSQL := common.UsingPostgreSQL
+	oldRedisEnabled := common.RedisEnabled
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	oldLogConsumeEnabled := common.LogConsumeEnabled
+
+	common.UsingSQLite = true
+	common.UsingMySQL = false
+	common.UsingPostgreSQL = false
+	common.RedisEnabled = false
+	common.BatchUpdateEnabled = false
+	common.LogConsumeEnabled = true
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.Log{},
+		&model.TopUp{},
+		&model.Redemption{},
+		&model.OrderDeletionMark{},
+		&model.SubscriptionPlan{},
+		&model.SubscriptionOrder{},
+		&model.UserSubscription{},
+		&model.SubscriptionPreConsumeRecord{},
+	))
+	t.Cleanup(func() {
+		sqlDB, err := db.DB()
+		if err == nil {
+			_ = sqlDB.Close()
+		}
+		model.DB = oldDB
+		model.LOG_DB = oldLogDB
+		common.UsingSQLite = oldUsingSQLite
+		common.UsingMySQL = oldUsingMySQL
+		common.UsingPostgreSQL = oldUsingPostgreSQL
+		common.RedisEnabled = oldRedisEnabled
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+		common.LogConsumeEnabled = oldLogConsumeEnabled
+	})
+}
+
+func newOrderManagementContext(method string, path string, body string) (*gin.Context, *httptest.ResponseRecorder) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(method, path, strings.NewReader(body))
+	ctx.Request.Header.Set("Content-Type", "application/json")
+	ctx.Set("id", 99)
+	return ctx, recorder
+}
+
+func createOrderManagementRouter() *gin.Engine {
+	router := gin.New()
+	router.DELETE("/billing-orders/:order_type/*trade_no", func(c *gin.Context) {
+		c.Set("id", 99)
+		AdminDeleteBillingOrder(c)
+	})
+	return router
+}
+
+type adminListOrdersResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Page     int                      `json:"page"`
+		PageSize int                      `json:"page_size"`
+		Total    int                      `json:"total"`
+		Items    []model.AdminOrderRecord `json:"items"`
+	} `json:"data"`
+}
+
+func TestAdminDeleteOrderRejectsInvalidType(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	ctx, recorder := newOrderManagementContext(http.MethodDelete, "/api/order-management/admin/billing-orders/invoice/A", `{}`)
+	ctx.Params = gin.Params{
+		{Key: "order_type", Value: "invoice"},
+		{Key: "trade_no", Value: "A"},
+	}
+
+	AdminDeleteBillingOrder(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "参数错误")
+}
+
+func TestAdminDeleteOrderRejectsMalformedJSONWithoutDeletionMark(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	ctx, recorder := newOrderManagementContext(http.MethodDelete, "/api/order-management/admin/billing-orders/topup/TRADE-BAD-JSON", `{"reason":`)
+	ctx.Params = gin.Params{
+		{Key: "order_type", Value: model.OrderTypeTopup},
+		{Key: "trade_no", Value: "TRADE-BAD-JSON"},
+	}
+
+	AdminDeleteBillingOrder(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "参数错误")
+	var count int64
+	require.NoError(t, model.DB.Model(&model.OrderDeletionMark{}).
+		Where("order_type = ? AND trade_no = ?", model.OrderTypeTopup, "TRADE-BAD-JSON").
+		Count(&count).Error)
+	assert.Equal(t, int64(0), count)
+}
+
+func TestAdminDeleteOrderRouterAllowsSlashContainingTradeNo(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:        1,
+		Amount:        100,
+		Money:         1,
+		TradeNo:       "TRADE/A",
+		PaymentMethod: model.PaymentMethodStripe,
+		CreateTime:    1000,
+		Status:        common.TopUpStatusPending,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodDelete, "/billing-orders/topup/TRADE%2FA", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	createOrderManagementRouter().ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+	var mark model.OrderDeletionMark
+	require.NoError(t, model.DB.Where("order_type = ? AND trade_no = ?", model.OrderTypeTopup, "TRADE/A").First(&mark).Error)
+	assert.Equal(t, 99, mark.DeletedBy)
+}
+
+func TestAdminDeleteOrderRouterDoesNotDoubleDecodeTradeNo(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:        1,
+		Amount:        100,
+		Money:         1,
+		TradeNo:       "TRADE%2FA",
+		PaymentMethod: model.PaymentMethodStripe,
+		CreateTime:    1000,
+		Status:        common.TopUpStatusPending,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:        2,
+		Amount:        200,
+		Money:         2,
+		TradeNo:       "TRADE/A",
+		PaymentMethod: model.PaymentMethodStripe,
+		CreateTime:    1001,
+		Status:        common.TopUpStatusPending,
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodDelete, "/billing-orders/topup/TRADE%252FA", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	createOrderManagementRouter().ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+
+	var literalEscapedMark model.OrderDeletionMark
+	require.NoError(t, model.DB.Where("order_type = ? AND trade_no = ?", model.OrderTypeTopup, "TRADE%2FA").First(&literalEscapedMark).Error)
+	assert.Equal(t, 99, literalEscapedMark.DeletedBy)
+
+	var slashCount int64
+	require.NoError(t, model.DB.Model(&model.OrderDeletionMark{}).
+		Where("order_type = ? AND trade_no = ?", model.OrderTypeTopup, "TRADE/A").
+		Count(&slashCount).Error)
+	assert.Equal(t, int64(0), slashCount)
+}
+
+func TestAdminDeleteOrderWritesDeletionMarkKeepsOriginalAndHidesFromList(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	model.DB.Exec("DELETE FROM order_deletion_marks")
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:        1,
+		Amount:        100,
+		Money:         1,
+		TradeNo:       "TRADE-1",
+		PaymentMethod: model.PaymentMethodStripe,
+		CreateTime:    1000,
+		Status:        common.TopUpStatusPending,
+	}).Error)
+	ctx, recorder := newOrderManagementContext(http.MethodDelete, "/api/order-management/admin/billing-orders/topup/TRADE-1", `{"reason":"测试订单"}`)
+	ctx.Params = gin.Params{
+		{Key: "order_type", Value: model.OrderTypeTopup},
+		{Key: "trade_no", Value: "TRADE-1"},
+	}
+
+	AdminDeleteBillingOrder(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"success":true`)
+
+	var mark model.OrderDeletionMark
+	require.NoError(t, model.DB.Where("order_type = ? AND trade_no = ?", model.OrderTypeTopup, "TRADE-1").First(&mark).Error)
+	assert.Equal(t, 99, mark.DeletedBy)
+	assert.Equal(t, "测试订单", mark.Reason)
+
+	var topup model.TopUp
+	require.NoError(t, model.DB.Where("trade_no = ?", "TRADE-1").First(&topup).Error)
+	assert.Equal(t, int64(100), topup.Amount)
+
+	listCtx, listRecorder := newOrderManagementContext(http.MethodGet, "/api/order-management/admin/billing-orders?p=1&page_size=10", "")
+	AdminListBillingOrders(listCtx)
+	require.Equal(t, http.StatusOK, listRecorder.Code)
+	var response adminListOrdersResponse
+	require.NoError(t, common.Unmarshal(listRecorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, 0, response.Data.Total)
+	assert.Empty(t, response.Data.Items)
+}
+
+func TestAdminListOrdersReturnsPageInfo(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	model.DB.Exec("DELETE FROM top_ups")
+	model.DB.Exec("DELETE FROM order_deletion_marks")
+	require.NoError(t, model.DB.Create(&model.TopUp{
+		UserId:        1,
+		Amount:        100,
+		Money:         1,
+		TradeNo:       "ORDER-LIST-1",
+		PaymentMethod: model.PaymentMethodStripe,
+		CreateTime:    1000,
+		Status:        common.TopUpStatusPending,
+	}).Error)
+
+	ctx, recorder := newOrderManagementContext(http.MethodGet, "/api/order-management/admin/billing-orders?p=1&page_size=10", "")
+	AdminListBillingOrders(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response adminListOrdersResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, 1, response.Data.Page)
+	assert.Equal(t, 10, response.Data.PageSize)
+	assert.Equal(t, 1, response.Data.Total)
+	require.Len(t, response.Data.Items, 1)
+	assert.Equal(t, "ORDER-LIST-1", response.Data.Items[0].TradeNo)
+	assert.Equal(t, model.OrderTypeTopup, response.Data.Items[0].OrderType)
 }
