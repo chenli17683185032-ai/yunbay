@@ -2,10 +2,13 @@ package controller
 
 import (
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -416,6 +419,12 @@ type AdminUpdateSubscriptionPlanStatusRequest struct {
 	Enabled *bool `json:"enabled"`
 }
 
+type AdminCreateSubscriptionRedemptionsRequest struct {
+	Name        string `json:"name"`
+	Count       int    `json:"count"`
+	ExpiredTime int64  `json:"expired_time"`
+}
+
 func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 	if !requirePaymentCompliance(c) {
 		return
@@ -449,6 +458,88 @@ func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 	}
 	model.InvalidateSubscriptionPlanCache(id)
 	common.ApiSuccess(c, nil)
+}
+
+func AdminCreateSubscriptionRedemptions(c *gin.Context) {
+	if !requirePaymentCompliance(c) {
+		return
+	}
+
+	id, _ := strconv.Atoi(c.Param("id"))
+	if id <= 0 {
+		common.ApiErrorMsg(c, "无效的ID")
+		return
+	}
+	var plan model.SubscriptionPlan
+	if err := model.DB.Where("id = ?", id).First(&plan).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	plan.NormalizeDefaults()
+
+	var req AdminCreateSubscriptionRedemptionsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	if req.Name == "" {
+		req.Name = plan.Title + "兑换码"
+	}
+	if utf8.RuneCountInString(req.Name) == 0 || utf8.RuneCountInString(req.Name) > 20 {
+		common.ApiErrorI18n(c, i18n.MsgRedemptionNameLength)
+		return
+	}
+	if req.Count <= 0 {
+		common.ApiErrorI18n(c, i18n.MsgRedemptionCountPositive)
+		return
+	}
+	if req.Count > 100 {
+		common.ApiErrorI18n(c, i18n.MsgRedemptionCountMax)
+		return
+	}
+	if valid, msg := validateExpiredTime(c, req.ExpiredTime); !valid {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": msg})
+		return
+	}
+
+	keys := make([]string, 0, req.Count)
+	for i := 0; i < req.Count; i++ {
+		key := common.GetUUID()
+		redemption := map[string]interface{}{
+			"user_id":         c.GetInt("id"),
+			"name":            req.Name,
+			"key":             key,
+			"created_time":    common.GetTimestamp(),
+			"quota":           0,
+			"type":            model.RedemptionTypeSubscription,
+			"plan_id":         plan.Id,
+			"kind":            model.RedemptionKindPromoCredit,
+			"amount":          0,
+			"money":           0,
+			"count_as_top_up": false,
+			"source":          model.RedemptionSourcePromo,
+			"batch_id":        model.GenerateRedemptionBatchId(model.RedemptionSourcePromo, 0, common.GetTimestamp()),
+			"expired_time":    req.ExpiredTime,
+			"status":          common.RedemptionCodeStatusEnabled,
+		}
+		if err := model.DB.Model(&model.Redemption{}).Create(redemption).Error; err != nil {
+			common.SysError("failed to insert subscription redemption: " + err.Error())
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": i18n.T(c, i18n.MsgRedemptionCreateFailed),
+				"data":    keys,
+			})
+			return
+		}
+		keys = append(keys, key)
+	}
+	recordManageAudit(c, "redemption.subscription.create", map[string]interface{}{
+		"name":       req.Name,
+		"count":      req.Count,
+		"plan_title": plan.Title,
+	})
+	common.ApiSuccess(c, keys)
 }
 
 type AdminBindSubscriptionRequest struct {
