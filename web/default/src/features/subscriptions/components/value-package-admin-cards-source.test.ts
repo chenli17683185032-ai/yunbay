@@ -30,6 +30,8 @@ test('value package admin cards source contains all fixed package config fields'
   assert.match(source, /month/)
   assert.match(source, /ldxp_product_url/)
   assert.match(source, /plan\.currency/)
+  assert.match(source, /currency: 'CNY'/)
+  assert.match(source, /plan\.currency \|\| 'CNY'/)
   assert.match(source, /concurrency_limit/)
   assert.match(source, /limit_5h_amount/)
   assert.match(source, /limit_7d_amount/)

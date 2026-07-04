@@ -36,6 +36,10 @@ test('value package card source keeps required user controls and limit copy', as
   assert.match(source, /!Number\.isFinite\(limit\) \|\| limit <= 0/)
   assert.match(source, /hasUsageProgress/)
   assert.match(source, /Math\.round\(amount \|\| 0\)/)
+  assert.match(source, /getValuePackageDisplayCurrency/)
+  assert.match(source, /currencyOverride/)
+  assert.match(source, /CNY/)
+  assert.match(source, /zh-CN/)
   assert.doesNotMatch(source, /t=\{t\}/)
   assert.match(
     source,

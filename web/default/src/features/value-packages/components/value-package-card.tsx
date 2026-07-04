@@ -55,8 +55,13 @@ interface ValuePackageCardProps {
   onDeactivate: () => void
 }
 
-function formatMoney(amount: number, currency: string): string {
-  const normalizedCurrency = currency || 'CNY'
+function getValuePackageDisplayCurrency(currencyOverride?: string): string {
+  const normalized = currencyOverride?.trim()
+  return normalized || 'CNY'
+}
+
+function formatMoney(amount: number, currencyOverride?: string): string {
+  const normalizedCurrency = getValuePackageDisplayCurrency(currencyOverride)
   const locale = normalizedCurrency === 'CNY' ? 'zh-CN' : undefined
   return new Intl.NumberFormat(locale, {
     style: 'currency',
@@ -231,8 +236,7 @@ export function ValuePackageCard({
   )
   const usage = state?.subscription?.plan_id === plan.id ? state.usage : null
   const hasUsageProgress =
-    usage &&
-    (usage.total_limit > 0 || usage.limit_5h > 0 || usage.limit_7d > 0)
+    usage && (usage.total_limit > 0 || usage.limit_5h > 0 || usage.limit_7d > 0)
   const exhaustedMessage =
     usage?.exhausted_message ||
     '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
@@ -284,7 +288,7 @@ export function ValuePackageCard({
           </div>
           <div className='text-right'>
             <div className='text-2xl font-black tracking-[-0.04em] sm:text-3xl'>
-              {formatMoney(displayPrice, plan.currency)}
+              {formatMoney(displayPrice, 'CNY')}
             </div>
             <div className='text-muted-foreground mt-1 text-xs'>
               {getPlanDurationLabel(plan, t)}

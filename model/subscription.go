@@ -297,8 +297,14 @@ func (p *SubscriptionPlan) NormalizeDefaults() {
 	if p.AllowBalancePay == nil {
 		p.AllowBalancePay = common.GetPointer(true)
 	}
-	if strings.TrimSpace(p.PlanKind) == "" {
+	p.PlanKind = strings.TrimSpace(p.PlanKind)
+	if p.PlanKind == "" {
 		p.PlanKind = SubscriptionPlanKindSubscription
+	}
+	if p.PlanKind == SubscriptionPlanKindValuePackage {
+		p.Currency = "CNY"
+	} else {
+		p.Currency = "USD"
 	}
 	if p.ConcurrencyLimit <= 0 {
 		p.ConcurrencyLimit = 1

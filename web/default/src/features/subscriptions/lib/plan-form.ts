@@ -19,10 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 import type { TFunction } from 'i18next'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
-import {
-  getValuePackageDuration,
-  getValuePackageLevel,
-} from '../constants'
+import { getValuePackageDuration, getValuePackageLevel } from '../constants'
 import type { SubscriptionPlan, PlanPayload } from '../types'
 
 export function getPlanFormSchema(t: TFunction) {
@@ -151,7 +148,7 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
     plan: {
       ...values,
       price_amount: Number(values.price_amount || 0),
-      currency: 'USD',
+      currency: isValuePackage ? 'CNY' : 'USD',
       duration_unit: packageDuration?.duration_unit || values.duration_unit,
       duration_value:
         packageDuration?.duration_value ?? Number(values.duration_value || 0),

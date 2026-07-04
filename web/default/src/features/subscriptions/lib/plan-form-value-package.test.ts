@@ -18,12 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { SubscriptionPlan } from '../types'
 import {
   formValuesToPlanPayload,
   planToFormValues,
   PLAN_FORM_DEFAULTS,
 } from './plan-form'
-import type { SubscriptionPlan } from '../types'
 
 test('value package limit fields convert dollars to quota payload', () => {
   const values = {
@@ -106,4 +106,24 @@ test('planToFormValues preserves per-card ldxp payment config', () => {
   assert.equal(values.ldxp_product_amount, 9.9)
   assert.equal(values.plan_kind, 'value_package')
   assert.equal(values.package_type, 'day')
+})
+
+test('value package plan payload uses CNY currency for user-facing RMB cards', () => {
+  const values = {
+    ...PLAN_FORM_DEFAULTS,
+    title: '月卡',
+    price_amount: 88,
+    plan_kind: 'value_package' as const,
+    package_type: 'month' as const,
+    model_group: 'month-card',
+    ldxp_product_url: 'https://ldxp.example.test/month',
+    ldxp_product_name: '月卡商品',
+    ldxp_product_amount: 88,
+  }
+
+  const payload = formValuesToPlanPayload(values)
+
+  assert.equal(payload.plan.currency, 'CNY')
+  assert.equal(payload.plan.price_amount, 88)
+  assert.equal(payload.plan.ldxp_product_amount, 88)
 })
