@@ -435,6 +435,49 @@ type SubscriptionSummary struct {
 	Subscription *UserSubscription `json:"subscription"`
 }
 
+type SubscriptionPlanStats struct {
+	ActiveUserCount         int64 `json:"active_user_count"`
+	ActiveSubscriptionCount int64 `json:"active_subscription_count"`
+	RemainingAmount         int64 `json:"remaining_amount"`
+	UnlimitedCount          int64 `json:"unlimited_count"`
+}
+
+func GetSubscriptionPlanStatsMap(now int64) (map[int]SubscriptionPlanStats, error) {
+	if now <= 0 {
+		now = common.GetTimestamp()
+	}
+	var subs []UserSubscription
+	if err := DB.Where("status = ? AND end_time > ?", "active", now).Find(&subs).Error; err != nil {
+		return nil, err
+	}
+	stats := make(map[int]SubscriptionPlanStats)
+	usersByPlan := make(map[int]map[int]struct{})
+	for _, sub := range subs {
+		planId := sub.PlanId
+		stat := stats[planId]
+		stat.ActiveSubscriptionCount++
+		if _, ok := usersByPlan[planId]; !ok {
+			usersByPlan[planId] = make(map[int]struct{})
+		}
+		usersByPlan[planId][sub.UserId] = struct{}{}
+		if sub.AmountTotal == 0 {
+			stat.UnlimitedCount++
+		} else {
+			remaining := sub.AmountTotal - sub.AmountUsed
+			if remaining > 0 {
+				stat.RemainingAmount += remaining
+			}
+		}
+		stats[planId] = stat
+	}
+	for planId, users := range usersByPlan {
+		stat := stats[planId]
+		stat.ActiveUserCount = int64(len(users))
+		stats[planId] = stat
+	}
+	return stats, nil
+}
+
 func calcPlanEndTime(start time.Time, plan *SubscriptionPlan) (int64, error) {
 	if plan == nil {
 		return 0, errors.New("plan is nil")

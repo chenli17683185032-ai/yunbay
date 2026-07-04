@@ -16,7 +16,8 @@ import (
 // ---- Shared types ----
 
 type SubscriptionPlanDTO struct {
-	Plan model.SubscriptionPlan `json:"plan"`
+	Plan  model.SubscriptionPlan       `json:"plan"`
+	Stats *model.SubscriptionPlanStats `json:"stats,omitempty"`
 }
 
 type BillingPreferenceRequest struct {
@@ -135,11 +136,18 @@ func AdminListSubscriptionPlans(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	statsMap, err := model.GetSubscriptionPlanStatsMap(common.GetTimestamp())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	result := make([]SubscriptionPlanDTO, 0, len(plans))
 	for _, p := range plans {
 		p.NormalizeDefaults()
+		stat := statsMap[p.Id]
 		result = append(result, SubscriptionPlanDTO{
-			Plan: p,
+			Plan:  p,
+			Stats: &stat,
 		})
 	}
 	common.ApiSuccess(c, result)
