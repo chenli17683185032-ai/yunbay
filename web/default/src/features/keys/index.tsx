@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
 import { ApiKeysDialogs } from './components/api-keys-dialogs'
+import { ApiKeysPackageBillingAlert } from './components/api-keys-package-billing-alert'
 import { ApiKeysPrimaryButtons } from './components/api-keys-primary-buttons'
 import { ApiKeysProvider } from './components/api-keys-provider'
 import { ApiKeysTable } from './components/api-keys-table'
@@ -33,7 +34,10 @@ export function ApiKeys() {
           <ApiKeysPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
-          <ApiKeysTable />
+          <div className='flex flex-col gap-4'>
+            <ApiKeysPackageBillingAlert />
+            <ApiKeysTable />
+          </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
 

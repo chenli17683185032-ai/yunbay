@@ -951,3 +951,25 @@ func TestPreConsumeValuePackageSubscriptionUsesUserFacingExhaustedMessage(t *tes
 	require.Contains(t, err.Error(), "subscription quota insufficient")
 	require.Contains(t, err.Error(), ValuePackageQuotaExhaustedUserMessage)
 }
+
+func TestValuePackageNormalizeDefaultsUsesCNYCurrency(t *testing.T) {
+	plan := SubscriptionPlan{
+		PlanKind: SubscriptionPlanKindValuePackage,
+		Currency: "USD",
+	}
+
+	plan.NormalizeDefaults()
+
+	require.Equal(t, "CNY", plan.Currency)
+}
+
+func TestSubscriptionNormalizeDefaultsKeepsStandardPlansUSD(t *testing.T) {
+	plan := SubscriptionPlan{
+		PlanKind: SubscriptionPlanKindSubscription,
+		Currency: "CNY",
+	}
+
+	plan.NormalizeDefaults()
+
+	require.Equal(t, "USD", plan.Currency)
+}

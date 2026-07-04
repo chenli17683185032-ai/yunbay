@@ -37,7 +37,7 @@ import { VALUE_PACKAGE_TYPES } from '../constants'
 import type { PlanRecord, SubscriptionPlan } from '../types'
 import { useSubscriptions } from './subscriptions-provider'
 
-function formatMoney(amount: number, currency = 'USD'): string {
+function formatMoney(amount: number, currency = 'CNY'): string {
   try {
     return new Intl.NumberFormat(undefined, {
       style: 'currency',
@@ -66,7 +66,7 @@ function createTemplatePlan(
     title: type.labelKey,
     subtitle: '',
     price_amount: 0,
-    currency: 'USD',
+    currency: 'CNY',
     duration_unit: type.durationUnit,
     duration_value: type.durationValue,
     custom_seconds: 0,
@@ -193,7 +193,7 @@ export function ValuePackageAdminCards() {
                           Number(
                             plan.ldxp_product_amount || plan.price_amount || 0
                           ),
-                          plan.currency || 'USD'
+                          plan.currency || 'CNY'
                         )}
                       </span>
                     </div>
