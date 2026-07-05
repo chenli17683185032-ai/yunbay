@@ -146,27 +146,23 @@ func acquireValuePackageRedisSlot(userSubscriptionId int, limit int) (func(), bo
 	defer cancel()
 	acquired, err := common.RDB.Eval(ctx, valuePackageConcurrencyRedisAcquireScript, []string{key}, token, limit, time.Now().Unix(), ttlSeconds).Int()
 	if err != nil {
+		common.SysLog(fmt.Sprintf("value package concurrency redis acquire error: subscription=%d error=%s", userSubscriptionId, err.Error()))
 		return nil, false, err
 	}
 	if acquired != 1 {
 		return nil, false, nil
 	}
 
-	var mu sync.Mutex
-	released := false
 	stopRefresh := make(chan struct{})
 	go keepValuePackageRedisSlotFresh(key, token, ttlSeconds, stopRefresh)
+	var releaseOnce sync.Once
 	return func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if released {
-			return
-		}
-		released = true
-		close(stopRefresh)
-		if err := releaseValuePackageRedisSlot(key, token, ttlSeconds); err != nil {
-			common.SysError(fmt.Sprintf("failed to release value package concurrency slot: %v", err))
-		}
+		releaseOnce.Do(func() {
+			close(stopRefresh)
+			if err := releaseValuePackageRedisSlot(key, token, ttlSeconds); err != nil {
+				common.SysLog(fmt.Sprintf("value package concurrency redis release error: key=%s error=%s", key, err.Error()))
+			}
+		})
 	}, true, nil
 }
 
@@ -182,6 +178,7 @@ func keepValuePackageRedisSlotFresh(key string, token string, ttlSeconds int64, 
 				continue
 			}
 			if !refreshed {
+				common.SysLog(fmt.Sprintf("value package concurrency redis refresh stopped: key=%s token=%s", key, common.LocalLogPreview(token)))
 				return
 			}
 		case <-stop:
@@ -276,6 +273,7 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 			return
 		}
 		if !ok {
+			common.SysLog(fmt.Sprintf("value package concurrency denied: subscription=%d limit=%d", state.Subscription.Id, normalizeValuePackageConcurrencyLimit(state.Plan.ConcurrencyLimit)))
 			abortWithOpenAiMessage(c, http.StatusTooManyRequests, "超值套餐并发请求数已达上限")
 			return
 		}

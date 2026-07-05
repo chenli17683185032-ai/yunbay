@@ -603,3 +603,41 @@ func TestValuePackagePlaygroundGroupPermissionUsesOriginalUserGroup(t *testing.T
 	require.Contains(t, recorder.Body.String(), `"user_group":"`+model.UserGroupTiyan+`"`)
 	require.Contains(t, recorder.Body.String(), `"using_group":"gpt-pro"`)
 }
+
+func TestValuePackageScopeDoesNotOverwriteRoutingOrUserGroups(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 1000, 5000, 1)
+	_, err := model.ActivateValuePackage(user.Id, sub.Id)
+	require.NoError(t, err)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		common.SetContextKey(c, constant.ContextKeyUserId, user.Id)
+		common.SetContextKey(c, constant.ContextKeyUserGroup, model.UserGroupVIP)
+		common.SetContextKey(c, constant.ContextKeyUsingGroup, "gpt-plus")
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, "gpt-plus")
+		c.Next()
+	})
+	router.Use(ValuePackageGroupScope())
+	router.GET("/check", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"user_group":    common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+			"using_group":   common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+			"token_group":   common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
+			"package_group": common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup),
+		})
+	})
+
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/check", nil)
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var body map[string]string
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &body))
+	require.Equal(t, model.UserGroupVIP, body["user_group"])
+	require.Equal(t, "gpt-plus", body["using_group"])
+	require.Equal(t, "gpt-plus", body["token_group"])
+	require.Equal(t, plan.ModelGroup, body["package_group"])
+}
