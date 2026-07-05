@@ -146,10 +146,36 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
 
+	if quota <= 0 {
+		return nil
+	}
+
+	relayInfo.RealtimeActualQuota += quota
+	reserveTarget := relayInfo.RealtimeActualQuota
+	if relayInfo.FinalPreConsumedQuota > reserveTarget {
+		reserveTarget = relayInfo.FinalPreConsumedQuota
+	}
+	if relayInfo.RealtimeReservedQuota >= reserveTarget {
+		return nil
+	}
+
+	if relayInfo.Billing != nil {
+		if err := relayInfo.Billing.Reserve(reserveTarget); err != nil {
+			return err
+		}
+		relayInfo.RealtimeReservedQuota = reserveTarget
+		if err := recordValuePackageUsageForRelay(relayInfo, reserveTarget); err != nil {
+			return err
+		}
+		logger.LogInfo(ctx, "realtime streaming reserve quota success, quota: "+fmt.Sprintf("%d", reserveTarget))
+		return nil
+	}
+
 	err = PostConsumeQuota(relayInfo, quota, 0, false)
 	if err != nil {
 		return err
 	}
+	relayInfo.RealtimeReservedQuota += quota
 	logger.LogInfo(ctx, "realtime streaming consume quota success, quota: "+fmt.Sprintf("%d", quota))
 	return nil
 }

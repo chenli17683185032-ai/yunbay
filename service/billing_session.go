@@ -86,21 +86,28 @@ func (s *BillingSession) Settle(actualQuota int) error {
 }
 
 func (s *BillingSession) recordValuePackageUsage(actualQuota int) error {
-	if s == nil || s.relayInfo == nil || actualQuota < 0 || s.relayInfo.ValuePackageSubscriptionId <= 0 {
+	if s == nil {
+		return nil
+	}
+	return recordValuePackageUsageForRelay(s.relayInfo, actualQuota)
+}
+
+func recordValuePackageUsageForRelay(relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+	if relayInfo == nil || actualQuota < 0 || relayInfo.ValuePackageSubscriptionId <= 0 {
 		return nil
 	}
 	record := &model.ValuePackageUsageRecord{
-		UserId:             s.relayInfo.UserId,
-		UserSubscriptionId: s.relayInfo.ValuePackageSubscriptionId,
-		PlanId:             s.relayInfo.ValuePackagePlanId,
-		PackageType:        s.relayInfo.ValuePackagePackageType,
-		ModelGroup:         s.relayInfo.ValuePackageModelGroup,
-		RequestId:          s.relayInfo.RequestId,
+		UserId:             relayInfo.UserId,
+		UserSubscriptionId: relayInfo.ValuePackageSubscriptionId,
+		PlanId:             relayInfo.ValuePackagePlanId,
+		PackageType:        relayInfo.ValuePackagePackageType,
+		ModelGroup:         relayInfo.ValuePackageModelGroup,
+		RequestId:          relayInfo.RequestId,
 		Quota:              int64(actualQuota),
 	}
 	if err := model.RecordValuePackageUsage(record); err != nil {
 		common.SysLog(fmt.Sprintf("error recording value package usage (userId=%d, subscriptionId=%d, requestId=%s): %s",
-			s.relayInfo.UserId, s.relayInfo.ValuePackageSubscriptionId, s.relayInfo.RequestId, err.Error()))
+			relayInfo.UserId, relayInfo.ValuePackageSubscriptionId, relayInfo.RequestId, err.Error()))
 		return err
 	}
 	return nil
