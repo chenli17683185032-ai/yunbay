@@ -171,6 +171,7 @@ test('one-click API key creation reveals and copies the new key', async () => {
   assert.equal(createdPayload?.group, 'gpt-plus')
   assert.equal(createdPayload?.cross_group_retry, false)
   assert.equal(result.fullKey, 'sk-generated-key')
+  assert.equal(result.copied, true)
   assert.equal(copiedText, 'sk-generated-key')
 })
 
@@ -218,5 +219,28 @@ test('one-click API key creation returns generated key when clipboard copy fails
 
   assert.equal(result.name, 'yunbay-quick-start-1')
   assert.equal(result.fullKey, 'sk-key')
+  assert.equal(result.copied, false)
+})
+
+test('one-click API key creation returns generated key when clipboard copy rejects', async () => {
+  const result = await generateAndCopyQuickStartApiKey({
+    now: () => 2,
+    defaultGroup: 'gpt-plus',
+    createApiKey: async () => ({ success: true }),
+    searchApiKeys: async ({ keyword }) => ({
+      success: true,
+      data: { items: [{ id: 8, name: keyword || '' }] },
+    }),
+    fetchTokenKey: async () => ({
+      success: true,
+      data: { key: 'rejected-key' },
+    }),
+    copyToClipboard: async () => {
+      throw new Error('clipboard denied')
+    },
+  })
+
+  assert.equal(result.name, 'yunbay-quick-start-2')
+  assert.equal(result.fullKey, 'sk-rejected-key')
   assert.equal(result.copied, false)
 })

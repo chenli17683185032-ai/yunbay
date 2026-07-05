@@ -111,7 +111,13 @@ export async function generateAndCopyQuickStartApiKey(
   }
 
   const fullKey = key.startsWith('sk-') ? key : `sk-${key}`
-  const copied = await dependencies.copyToClipboard(fullKey)
+  let copied = false
+
+  try {
+    copied = await dependencies.copyToClipboard(fullKey)
+  } catch {
+    copied = false
+  }
 
   return { name, fullKey, copied }
 }

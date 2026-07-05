@@ -95,6 +95,9 @@ import {
 } from './quick-start-data'
 import { redeemQuickStartCode } from './quick-start-redemption'
 
+const QUICK_START_API_KEY_COPY_FAILED_MESSAGE =
+  'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
+
 const PURPOSE_ICONS = {
   'web-coding': Code2,
   chat: MessageSquare,
@@ -232,11 +235,7 @@ export function QuickStart() {
       if (copied) {
         toast.success(t('Already copied to clipboard'))
       } else {
-        toast.warning(
-          t(
-            'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
-          )
-        )
+        toast.warning(t(QUICK_START_API_KEY_COPY_FAILED_MESSAGE))
       }
       return
     }
@@ -272,11 +271,7 @@ export function QuickStart() {
       if (result.copied) {
         toast.success(t('Already copied to clipboard'))
       } else {
-        toast.warning(
-          t(
-            'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
-          )
-        )
+        toast.warning(t(QUICK_START_API_KEY_COPY_FAILED_MESSAGE))
       }
     } catch (error) {
       toast.error(
@@ -615,9 +610,7 @@ export function QuickStart() {
                   <p className='mt-2 text-sm leading-7 text-white/54'>
                     {generatedApiKey
                       ? generatedApiKeyCopied === false
-                        ? t(
-                            'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
-                          )
+                        ? t(QUICK_START_API_KEY_COPY_FAILED_MESSAGE)
                         : t('Already copied to clipboard')
                       : t(
                           'Click generate. The new API key will be copied to your clipboard.'
