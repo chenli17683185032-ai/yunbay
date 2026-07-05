@@ -373,10 +373,11 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	if relayInfo.ValuePackageSubscriptionId > 0 {
-		subConsume := int64(preConsumedQuota)
-		if subConsume <= 0 {
-			subConsume = 1
+		subConsumeInt := subscriptionPreConsumeQuota(relayInfo, preConsumedQuota)
+		if subConsumeInt <= 0 {
+			subConsumeInt = 1
 		}
+		subConsume := int64(subConsumeInt)
 		session := &BillingSession{
 			relayInfo: relayInfo,
 			funding: &SubscriptionFunding{
@@ -387,9 +388,12 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 				valuePackageSubscriptionId: relayInfo.ValuePackageSubscriptionId,
 			},
 		}
-		if apiErr := session.preConsume(c, int(subConsume)); apiErr != nil {
+		if apiErr := session.preConsume(c, subConsumeInt); apiErr != nil {
 			return nil, apiErr
 		}
+		applySubscriptionBillingRatio(relayInfo, subConsumeInt)
+		session.preConsumedQuota = subConsumeInt
+		session.syncRelayInfo()
 		return session, nil
 	}
 

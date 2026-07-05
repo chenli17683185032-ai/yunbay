@@ -143,6 +143,10 @@ func setupOrderManagementControllerTestDB(t *testing.T) {
 		&model.SubscriptionPlan{},
 		&model.SubscriptionOrder{},
 		&model.UserSubscription{},
+		&model.UserValuePackagePreference{},
+		&model.ValuePackageUsageRecord{},
+		&model.LdxpTopupSession{},
+		&model.LdxpMailEvent{},
 		&model.SubscriptionPreConsumeRecord{},
 	))
 	t.Cleanup(func() {
@@ -186,6 +190,16 @@ type adminListOrdersResponse struct {
 		PageSize int                      `json:"page_size"`
 		Total    int                      `json:"total"`
 		Items    []model.AdminOrderRecord `json:"items"`
+	} `json:"data"`
+}
+
+type adminOrderManagementOrdersResponse struct {
+	Success bool `json:"success"`
+	Data    struct {
+		Page     int                            `json:"page"`
+		PageSize int                            `json:"page_size"`
+		Total    int                            `json:"total"`
+		Items    []dto.OrderManagementOrderItem `json:"items"`
 	} `json:"data"`
 }
 
@@ -355,4 +369,59 @@ func TestAdminListOrdersReturnsPageInfo(t *testing.T) {
 	require.Len(t, response.Data.Items, 1)
 	assert.Equal(t, "ORDER-LIST-1", response.Data.Items[0].TradeNo)
 	assert.Equal(t, model.OrderTypeTopup, response.Data.Items[0].OrderType)
+}
+
+func TestAdminOrderManagementOrdersReturnsValuePackageBillingFields(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+
+	plan := &model.SubscriptionPlan{
+		Title:        "月卡",
+		PlanKind:     model.SubscriptionPlanKindValuePackage,
+		PackageType:  model.ValuePackageTypeMonth,
+		PackageLevel: model.ValuePackageLevelMonth,
+		TotalAmount:  30000,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	order := &model.SubscriptionOrder{
+		UserId:          88,
+		PlanId:          plan.Id,
+		Money:           19.9,
+		TradeNo:         "LDXP_VP-admin-month",
+		PaymentMethod:   model.PaymentMethodLDXP,
+		PaymentProvider: model.PaymentProviderLDXP,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      1782518300,
+		CompleteTime:    1782518400,
+	}
+	require.NoError(t, model.DB.Create(order).Error)
+	require.NoError(t, model.DB.Create(&model.LdxpTopupSession{
+		SessionId:           "vp-admin-month-session",
+		UserId:              88,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		Money:               19.9,
+		WorkerAmount:        19.9,
+		WorkerOrderNo:       "LDADMINMONTH",
+		Status:              model.LdxpStatusSuccess,
+		CreatedTime:         1782518500,
+	}).Error)
+
+	ctx, recorder := newOrderManagementContext(http.MethodGet, "/api/order-management/admin/orders?range=custom&start_time=1782518400&end_time=1782604800&p=1&page_size=10", "")
+
+	AdminOrderManagementOrders(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response adminOrderManagementOrdersResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	assert.Equal(t, 1, response.Data.Total)
+	require.Len(t, response.Data.Items, 1)
+	item := response.Data.Items[0]
+	assert.Equal(t, model.OrderTypeSubscription, item.BillingOrderType)
+	assert.Equal(t, "LDXP_VP-admin-month", item.TradeNo)
+	assert.Equal(t, plan.Id, item.PlanId)
+	assert.Equal(t, "月卡", item.PlanTitle)
+	assert.Equal(t, model.PaymentMethodLDXP, item.PaymentMethod)
+	assert.Equal(t, common.TopUpStatusSuccess, item.OrderStatus)
 }

@@ -735,6 +735,96 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	return sub, nil
 }
 
+func CreateValuePackageSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, source string) (*UserSubscription, error) {
+	if tx == nil {
+		return nil, errors.New("tx is nil")
+	}
+	if plan == nil || plan.Id == 0 {
+		return nil, errors.New("invalid plan")
+	}
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	normalizeValuePackagePlan(plan)
+	if !plan.IsValuePackage() {
+		return nil, errors.New("目标套餐不是超值套餐")
+	}
+	if !plan.Enabled {
+		return nil, errors.New("套餐未启用")
+	}
+	intent, err := checkValuePackagePurchaseIntentTx(tx, userId, plan, true)
+	if err != nil {
+		return nil, err
+	}
+	nowUnix := getDBTimestampTx(tx)
+	start := time.Unix(nowUnix, 0)
+	endUnix, err := calcPlanEndTime(start, plan)
+	if err != nil {
+		return nil, err
+	}
+	var completed *UserSubscription
+	switch intent.Action {
+	case ValuePackagePurchaseActionExtend:
+		var existing UserSubscription
+		if err := withUpdateLock(tx).Where("id = ?", intent.CurrentSubscription.Id).First(&existing).Error; err != nil {
+			return nil, err
+		}
+		base := existing.EndTime
+		if base < nowUnix {
+			base = nowUnix
+		}
+		duration := endUnix - nowUnix
+		existing.EndTime = base + duration
+		existing.UpdatedAt = common.GetTimestamp()
+		if err := tx.Save(&existing).Error; err != nil {
+			return nil, err
+		}
+		completed = &existing
+	case ValuePackagePurchaseActionUpgrade:
+		if intent.CurrentSubscription != nil {
+			if err := tx.Model(&UserSubscription{}).Where("id = ?", intent.CurrentSubscription.Id).Updates(map[string]interface{}{
+				"status":       UserSubscriptionStatusCovered,
+				"covered_time": nowUnix,
+				"updated_at":   common.GetTimestamp(),
+			}).Error; err != nil {
+				return nil, err
+			}
+		}
+		fallthrough
+	case ValuePackagePurchaseActionCreate:
+		sub := &UserSubscription{
+			UserId:      userId,
+			PlanId:      plan.Id,
+			AmountTotal: plan.TotalAmount,
+			AmountUsed:  0,
+			StartTime:   nowUnix,
+			EndTime:     endUnix,
+			Status:      UserSubscriptionStatusActive,
+			Source:      source,
+			CreatedAt:   common.GetTimestamp(),
+			UpdatedAt:   common.GetTimestamp(),
+		}
+		if err := tx.Create(sub).Error; err != nil {
+			return nil, err
+		}
+		completed = sub
+		if intent.Action == ValuePackagePurchaseActionUpgrade && intent.CurrentSubscription != nil {
+			if err := tx.Model(&UserSubscription{}).Where("id = ?", intent.CurrentSubscription.Id).Update("covered_by_subscription_id", sub.Id).Error; err != nil {
+				return nil, err
+			}
+		}
+	default:
+		return nil, errors.New("unknown value package purchase action")
+	}
+	if completed == nil || completed.Id <= 0 {
+		return nil, errors.New("completed subscription missing")
+	}
+	if err := ensureValuePackagePreferenceAfterPurchaseTx(tx, userId, completed.Id); err != nil {
+		return nil, err
+	}
+	return completed, nil
+}
+
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
 // expectedPaymentProvider guards against cross-gateway callback attacks (empty skips the check).
 // actualPaymentMethod updates the order's PaymentMethod to reflect the real payment type used (empty skips update).

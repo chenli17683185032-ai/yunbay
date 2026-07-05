@@ -74,11 +74,18 @@ export interface OrderManagementAffiliateBrief {
 export interface OrderManagementOrderItem {
   id: number
   order_type: string
+  billing_order_type?: 'topup' | 'subscription' | ''
+  trade_no?: string
   session_id: string
   user_id: number
   username: string
   site_amount: number
   external_paid_amount: number
+  payment_method?: string
+  payment_provider?: string
+  order_status?: string
+  plan_id?: number
+  plan_title?: string
   worker_order_no: string
   mail_order_no: string
   mail_paid_amount: number

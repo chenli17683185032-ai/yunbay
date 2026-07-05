@@ -51,6 +51,53 @@ func TestRunBatchMailCheckHonorsLimit(t *testing.T) {
 	assert.Equal(t, 2, result.AffectedCount)
 }
 
+func TestRunBatchMailCheckSkipsDeletedValuePackageOrders(t *testing.T) {
+	model.TruncateOrderManagementTablesForTest(t)
+
+	plan := &model.SubscriptionPlan{
+		Title:        "周卡",
+		PlanKind:     model.SubscriptionPlanKindValuePackage,
+		PackageType:  model.ValuePackageTypeWeek,
+		PackageLevel: model.ValuePackageLevelWeek,
+		TotalAmount:  7000,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	order := &model.SubscriptionOrder{
+		UserId:          2,
+		PlanId:          plan.Id,
+		Money:           9.9,
+		TradeNo:         "LDXP_VP-week-skip-mail-check",
+		PaymentMethod:   model.PaymentMethodLDXP,
+		PaymentProvider: model.PaymentProviderLDXP,
+		Status:          "pending",
+		CreateTime:      1782600000,
+	}
+	require.NoError(t, model.DB.Create(order).Error)
+	session := &model.LdxpTopupSession{
+		SessionId:           "deleted_vp_mail_check",
+		UserId:              2,
+		Purpose:             model.LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		Money:               9.9,
+		WorkerAmount:        9.9,
+		WorkerOrderNo:       "LD_DELETED_VP_MAIL_CHECK",
+		Status:              model.LdxpStatusWorkerPaid,
+		CreatedTime:         1782600000,
+	}
+	require.NoError(t, model.DB.Create(session).Error)
+	require.NoError(t, model.MarkAdminOrderDeleted(model.OrderTypeSubscription, order.TradeNo, 9, "do not rescan"))
+
+	job := NewOrderMailCheckRunner(fakeMailSource{})
+	result := job.RunBatch(context.Background(), model.OrderMailCheckBatchFilter{StartTime: 1782600000, EndTime: 1782609999, Limit: 10})
+	require.NoError(t, result.Error)
+	assert.Equal(t, 0, result.AffectedCount)
+
+	var saved model.LdxpTopupSession
+	require.NoError(t, model.DB.First(&saved, session.Id).Error)
+	assert.Empty(t, saved.ErrorCode)
+}
+
 func TestRunSingleMailCheckFetchErrorMarksSessionFailed(t *testing.T) {
 	model.TruncateOrderManagementTablesForTest(t)
 

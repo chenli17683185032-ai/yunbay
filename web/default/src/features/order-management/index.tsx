@@ -26,6 +26,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { SectionPageLayout } from '@/components/layout'
 import {
+  deleteBillingOrder,
   getOrderAnalytics,
   getOrderManagementOrders,
   startBatchMailCheck,
@@ -101,6 +102,7 @@ export function OrderManagement() {
   const navigate = route.useNavigate()
   const search = route.useSearch()
   const [verifyingId, setVerifyingId] = useState<number | null>(null)
+  const [deletingOrderKey, setDeletingOrderKey] = useState<string | null>(null)
 
   const range: DateRangeKey = isDateRangeKey(search.range) ? search.range : '7d'
   const page = search.page && search.page > 0 ? search.page : 1
@@ -191,6 +193,24 @@ export function OrderManagement() {
       toast.success(t('Verify unfinished orders now'))
       await invalidateOrderManagement()
     },
+  })
+
+  const deleteOrderMutation = useMutation({
+    mutationFn: deleteBillingOrder,
+    onMutate: (request) =>
+      setDeletingOrderKey(`${request.order_type}:${request.trade_no}`),
+    onSuccess: async (result) => {
+      if (!result.success) {
+        toast.error(result.message || t('Failed to delete order'))
+        return
+      }
+      toast.success(t('Order deleted successfully'))
+      await invalidateOrderManagement()
+    },
+    onError: () => {
+      toast.error(t('Failed to delete order'))
+    },
+    onSettled: () => setDeletingOrderKey(null),
   })
 
   const handleRangeChange = useCallback(
@@ -316,8 +336,16 @@ export function OrderManagement() {
             verifyingId={verifyingId}
             page={page}
             pageSize={pageSize}
+            deletingOrderKey={deletingOrderKey}
             onPageChange={handlePageChange}
             onVerify={(id) => singleMailCheckMutation.mutate(id)}
+            onDelete={(orderType, tradeNo) =>
+              deleteOrderMutation.mutate({
+                order_type: orderType,
+                trade_no: tradeNo,
+                reason: 'deleted from order management',
+              })
+            }
           />
 
           <AffiliateStatsSection

@@ -93,6 +93,13 @@ func (r *OrderMailCheckRunner) RunSingle(ctx context.Context, sessionId int) Ord
 	if err := model.DB.WithContext(ctx).First(&session, sessionId).Error; err != nil {
 		return OrderMailCheckResult{Error: err}
 	}
+	deleted, err := model.IsOrderManagementSessionDeleted(session)
+	if err != nil {
+		return OrderMailCheckResult{Error: err}
+	}
+	if deleted {
+		return OrderMailCheckResult{}
+	}
 	return r.verifySessions(ctx, []model.LdxpTopupSession{session})
 }
 

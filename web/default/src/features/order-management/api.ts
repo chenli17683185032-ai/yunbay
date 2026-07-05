@@ -157,3 +157,15 @@ export async function rejectWithdrawal(
   )
   return res.data
 }
+
+export async function deleteBillingOrder(request: {
+  order_type: 'topup' | 'subscription'
+  trade_no: string
+  reason?: string
+}): Promise<ApiResponse> {
+  const res = await api.delete(
+    `/api/order-management/admin/billing-orders/${encodeURIComponent(request.order_type)}/${encodeURIComponent(request.trade_no)}`,
+    { data: { reason: request.reason || '' } }
+  )
+  return res.data
+}

@@ -69,6 +69,49 @@ func TestRedeemSubscriptionCodeCreatesUserSubscription(t *testing.T) {
 	assert.Equal(t, 22, saved.UsedUserId)
 }
 
+func TestRedeemSubscriptionCodeCreatesValuePackageSubscription(t *testing.T) {
+	truncateTables(t)
+	seedRedemptionUser(t, 26, 100)
+	plan := SubscriptionPlan{
+		Title:         "月卡",
+		DurationUnit:  SubscriptionDurationMonth,
+		DurationValue: 1,
+		Enabled:       true,
+		TotalAmount:   30000,
+		PlanKind:      SubscriptionPlanKindValuePackage,
+		PackageType:   ValuePackageTypeMonth,
+		PackageLevel:  ValuePackageLevelMonth,
+		ModelGroup:    "plus",
+	}
+	require.NoError(t, DB.Create(&plan).Error)
+	InvalidateSubscriptionPlanCache(plan.Id)
+	code := Redemption{UserId: 1, Key: "VALUEPACKAGECODE", Name: "月卡码", Type: RedemptionTypeSubscription, PlanId: plan.Id, Status: common.RedemptionCodeStatusEnabled, CreatedTime: common.GetTimestamp()}
+	require.NoError(t, DB.Create(&code).Error)
+
+	result, err := Redeem("VALUEPACKAGECODE", 26)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, RedemptionTypeSubscription, result.Type)
+	assert.Equal(t, plan.Id, result.PlanId)
+	assert.Equal(t, "月卡", result.PlanTitle)
+
+	var subs []UserSubscription
+	require.NoError(t, DB.Where("user_id = ? AND plan_id = ? AND source = ?", 26, plan.Id, "redemption").Find(&subs).Error)
+	require.Len(t, subs, 1)
+	assert.Equal(t, UserSubscriptionStatusActive, subs[0].Status)
+	assert.Equal(t, int64(30000), subs[0].AmountTotal)
+
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", 26).First(&pref).Error)
+	assert.False(t, pref.Enabled)
+	assert.Equal(t, subs[0].Id, pref.ActiveUserSubscriptionId)
+
+	var saved Redemption
+	require.NoError(t, DB.Where("id = ?", code.Id).First(&saved).Error)
+	assert.Equal(t, common.RedemptionCodeStatusUsed, saved.Status)
+	assert.Equal(t, 26, saved.UsedUserId)
+}
+
 func TestRedeemSubscriptionCodeDoesNotConsumeCodeWhenPlanMissing(t *testing.T) {
 	truncateTables(t)
 	seedRedemptionUser(t, 23, 100)

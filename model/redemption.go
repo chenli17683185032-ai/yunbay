@@ -453,7 +453,12 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) (
 		if err := claimRedemptionCodeTx(tx, redemption, userId, now); err != nil {
 			return false, err
 		}
-		if _, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "redemption"); err != nil {
+		if plan.IsValuePackage() {
+			_, err = CreateValuePackageSubscriptionFromPlanTx(tx, userId, plan, "redemption")
+		} else {
+			_, err = CreateUserSubscriptionFromPlanTx(tx, userId, plan, "redemption")
+		}
+		if err != nil {
 			return false, err
 		}
 		redemption.Quota = 0

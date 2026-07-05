@@ -20,14 +20,14 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const sourcePath = new URL('./value-package-admin-cards.tsx', import.meta.url)
+const sourcePath = new URL('./order-details-table.tsx', import.meta.url)
 
-test('value package admin cards show stats and redemption entry on each card', async () => {
+test('order management table exposes delete action for billing orders', async () => {
   const source = await readFile(sourcePath, 'utf8')
 
-  assert.match(source, /record\?\.stats/)
-  assert.match(source, /Active Users/)
-  assert.match(source, /Remaining Quota/)
-  assert.match(source, /Generate Codes/)
-  assert.match(source, /setOpen\('generate-redemptions'\)/)
+  assert.match(source, /billing_order_type/)
+  assert.match(source, /trade_no/)
+  assert.match(source, /Delete Order/)
+  assert.match(source, /This order will be hidden from order management/)
+  assert.match(source, /onDelete/)
 })

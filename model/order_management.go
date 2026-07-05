@@ -109,10 +109,18 @@ type AffiliateSourceOrderRow struct {
 type OrderManagementOrderRow struct {
 	Id                       int
 	SessionId                string
+	Purpose                  string
+	BillingOrderType         string
+	TradeNo                  string
 	UserId                   int
 	Username                 string
 	SiteAmountCents          int64
 	ExternalPaidCents        int64
+	PaymentMethod            string
+	PaymentProvider          string
+	Status                   string
+	PlanId                   int
+	PlanTitle                string
 	WorkerOrderNo            string
 	MailOrderNo              string
 	MailAmountCents          int64
@@ -129,14 +137,26 @@ type OrderManagementOrderRow struct {
 func GetOrderManagementAnalytics(startTime, endTime int64) (*OrderAnalyticsResult, error) {
 	var sessions []LdxpTopupSession
 	if err := DB.Where("created_time >= ? AND created_time <= ?", startTime, endTime).
-		Where("status IN ? AND (topup_id > ? OR redemption_id > ?)", orderManagementSettledLdxpStatuses(), 0, 0).
+		Where("status IN ? AND ((topup_id > ? OR redemption_id > ?) OR (purpose = ? AND subscription_order_id > ?))",
+			orderManagementSettledLdxpStatuses(), 0, 0, LdxpPurposeValuePackage, 0).
 		Order("created_time ASC, id ASC").Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	billingBySessionId, err := getOrderManagementBillingContexts(sessions)
+	if err != nil {
+		return nil, err
+	}
+	deletionMarks, err := loadOrderDeletionMarkSet()
+	if err != nil {
 		return nil, err
 	}
 
 	result := &OrderAnalyticsResult{}
 	dailyByDate := make(map[string]*OrderAnalyticsDaily)
 	for _, session := range sessions {
+		if isOrderManagementBillingDeleted(billingBySessionId[session.Id], deletionMarks) {
+			continue
+		}
 		siteCents := orderManagementMoneyCents(session.Money)
 		externalCents := orderManagementMoneyCents(session.WorkerAmount)
 		mailStatus := OrderManagementMailStatusFromSession(session)
@@ -336,23 +356,34 @@ func ListOrderManagementOrders(startTime, endTime int64, mailStatus string, keyw
 	offset, limit = normalizeOffsetLimit(offset, limit, 20, 100)
 	query := DB.Model(&LdxpTopupSession{}).
 		Where("created_time >= ? AND created_time <= ?", startTime, endTime).
-		Where("status IN ? AND (topup_id > ? OR redemption_id > ?)", orderManagementSettledLdxpStatuses(), 0, 0)
+		Where("status IN ? AND ((topup_id > ? OR redemption_id > ?) OR (purpose = ? AND subscription_order_id > ?))",
+			orderManagementSettledLdxpStatuses(), 0, 0, LdxpPurposeValuePackage, 0)
 	keyword = strings.TrimSpace(keyword)
-	if keyword != "" {
-		like := "%" + keyword + "%"
-		query = query.Where("session_id LIKE ? OR worker_order_no LIKE ? OR mail_order_no LIKE ? OR mail_message_id LIKE ?", like, like, like, like)
-	}
 
 	var sessions []LdxpTopupSession
 	if err := query.Order("created_time DESC, id DESC").Find(&sessions).Error; err != nil {
+		return nil, 0, err
+	}
+	billingBySessionId, err := getOrderManagementBillingContexts(sessions)
+	if err != nil {
+		return nil, 0, err
+	}
+	deletionMarks, err := loadOrderDeletionMarkSet()
+	if err != nil {
 		return nil, 0, err
 	}
 
 	filtered := make([]LdxpTopupSession, 0, len(sessions))
 	mailStatus = strings.TrimSpace(mailStatus)
 	for _, session := range sessions {
+		billing := billingBySessionId[session.Id]
+		if isOrderManagementBillingDeleted(billing, deletionMarks) {
+			continue
+		}
 		if mailStatus == "" || OrderManagementMailStatusFromSession(session) == mailStatus {
-			filtered = append(filtered, session)
+			if orderManagementKeywordMatches(session, billing, keyword) {
+				filtered = append(filtered, session)
+			}
 		}
 	}
 	total := int64(len(filtered))
@@ -388,13 +419,22 @@ func ListOrderManagementOrders(startTime, endTime int64, mailStatus string, keyw
 
 	rows := make([]OrderManagementOrderRow, 0, len(pageSessions))
 	for _, session := range pageSessions {
+		billing := billingBySessionId[session.Id]
 		row := OrderManagementOrderRow{
 			Id:                session.Id,
 			SessionId:         session.SessionId,
+			Purpose:           session.Purpose,
+			BillingOrderType:  billing.OrderType,
+			TradeNo:           billing.TradeNo,
 			UserId:            session.UserId,
 			Username:          usernames[session.UserId],
 			SiteAmountCents:   orderManagementMoneyCents(session.Money),
 			ExternalPaidCents: orderManagementMoneyCents(session.WorkerAmount),
+			PaymentMethod:     billing.PaymentMethod,
+			PaymentProvider:   billing.PaymentProvider,
+			Status:            billing.Status,
+			PlanId:            billing.PlanId,
+			PlanTitle:         billing.PlanTitle,
 			WorkerOrderNo:     session.WorkerOrderNo,
 			MailOrderNo:       session.MailOrderNo,
 			MailAmountCents:   orderManagementMoneyCents(session.MailAmount),
@@ -412,6 +452,154 @@ func ListOrderManagementOrders(startTime, endTime int64, mailStatus string, keyw
 		rows = append(rows, row)
 	}
 	return rows, total, nil
+}
+
+type orderManagementBillingContext struct {
+	OrderType       string
+	TradeNo         string
+	PaymentMethod   string
+	PaymentProvider string
+	Status          string
+	PlanId          int
+	PlanTitle       string
+}
+
+func getOrderManagementBillingContexts(sessions []LdxpTopupSession) (map[int]orderManagementBillingContext, error) {
+	contexts := make(map[int]orderManagementBillingContext, len(sessions))
+	if len(sessions) == 0 {
+		return contexts, nil
+	}
+	topupIDs := make([]int, 0, len(sessions))
+	subscriptionOrderIDs := make([]int, 0, len(sessions))
+	for _, session := range sessions {
+		if session.TopupId > 0 {
+			topupIDs = append(topupIDs, session.TopupId)
+		}
+		if session.Purpose == LdxpPurposeValuePackage && session.SubscriptionOrderId > 0 {
+			subscriptionOrderIDs = append(subscriptionOrderIDs, session.SubscriptionOrderId)
+		}
+	}
+
+	topupsById := make(map[int]TopUp)
+	topupIDs = uniquePositiveInts(topupIDs)
+	if len(topupIDs) > 0 {
+		var topups []TopUp
+		if err := DB.Where("id IN ?", topupIDs).Find(&topups).Error; err != nil {
+			return nil, err
+		}
+		for _, topup := range topups {
+			topupsById[topup.Id] = topup
+		}
+	}
+
+	subscriptionOrdersById := make(map[int]AdminOrderRecord)
+	subscriptionOrderIDs = uniquePositiveInts(subscriptionOrderIDs)
+	if len(subscriptionOrderIDs) > 0 {
+		var orders []SubscriptionOrder
+		if err := DB.Where("id IN ?", subscriptionOrderIDs).Find(&orders).Error; err != nil {
+			return nil, err
+		}
+		records := make([]AdminOrderRecord, 0, len(orders))
+		for _, order := range orders {
+			records = append(records, AdminOrderRecord{
+				OrderType:       OrderTypeSubscription,
+				Id:              order.Id,
+				TradeNo:         order.TradeNo,
+				UserId:          order.UserId,
+				Status:          order.Status,
+				PaymentMethod:   order.PaymentMethod,
+				PaymentProvider: order.PaymentProvider,
+				Money:           order.Money,
+				CreateTime:      order.CreateTime,
+				CompleteTime:    order.CompleteTime,
+				PlanId:          order.PlanId,
+			})
+		}
+		var err error
+		records, err = attachSubscriptionPlanFields(records)
+		if err != nil {
+			return nil, err
+		}
+		for _, record := range records {
+			subscriptionOrdersById[record.Id] = record
+		}
+	}
+
+	for _, session := range sessions {
+		if session.Purpose == LdxpPurposeValuePackage && session.SubscriptionOrderId > 0 {
+			if order, ok := subscriptionOrdersById[session.SubscriptionOrderId]; ok {
+				contexts[session.Id] = orderManagementBillingContext{
+					OrderType:       OrderTypeSubscription,
+					TradeNo:         order.TradeNo,
+					PaymentMethod:   order.PaymentMethod,
+					PaymentProvider: order.PaymentProvider,
+					Status:          order.Status,
+					PlanId:          order.PlanId,
+					PlanTitle:       order.PlanTitle,
+				}
+				continue
+			}
+		}
+		if session.TopupId > 0 {
+			if topup, ok := topupsById[session.TopupId]; ok {
+				contexts[session.Id] = orderManagementBillingContext{
+					OrderType:       OrderTypeTopup,
+					TradeNo:         topup.TradeNo,
+					PaymentMethod:   topup.PaymentMethod,
+					PaymentProvider: topup.PaymentProvider,
+					Status:          topup.Status,
+				}
+			}
+		}
+	}
+	return contexts, nil
+}
+
+func orderManagementKeywordMatches(session LdxpTopupSession, billing orderManagementBillingContext, keyword string) bool {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return true
+	}
+	keyword = strings.ToLower(keyword)
+	values := []string{
+		session.SessionId,
+		session.WorkerOrderNo,
+		session.MailOrderNo,
+		session.MailMessageId,
+		session.ProductName,
+		session.WorkerProductName,
+		session.MailProductName,
+		billing.TradeNo,
+		billing.PlanTitle,
+		billing.PaymentMethod,
+		billing.PaymentProvider,
+	}
+	for _, value := range values {
+		if strings.Contains(strings.ToLower(value), keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isOrderManagementBillingDeleted(billing orderManagementBillingContext, deletionMarks map[string]struct{}) bool {
+	if billing.OrderType == "" || billing.TradeNo == "" || deletionMarks == nil {
+		return false
+	}
+	_, deleted := deletionMarks[orderDeletionKey(billing.OrderType, billing.TradeNo)]
+	return deleted
+}
+
+func IsOrderManagementSessionDeleted(session LdxpTopupSession) (bool, error) {
+	contexts, err := getOrderManagementBillingContexts([]LdxpTopupSession{session})
+	if err != nil {
+		return false, err
+	}
+	deletionMarks, err := loadOrderDeletionMarkSet()
+	if err != nil {
+		return false, err
+	}
+	return isOrderManagementBillingDeleted(contexts[session.Id], deletionMarks), nil
 }
 
 func GetAffiliateSourceOrders(inviterUserId int, startTime int64, endTime int64, limit int) ([]AffiliateSourceOrderRow, error) {
@@ -770,8 +958,19 @@ func ListMailCheckCandidatesWithContext(ctx context.Context, filter OrderMailChe
 	if err := query.Order("created_time DESC, id DESC").Limit(limit * 5).Find(&sessions).Error; err != nil {
 		return nil, err
 	}
+	billingBySessionId, err := getOrderManagementBillingContexts(sessions)
+	if err != nil {
+		return nil, err
+	}
+	deletionMarks, err := loadOrderDeletionMarkSet()
+	if err != nil {
+		return nil, err
+	}
 	candidates := make([]LdxpTopupSession, 0, limit)
 	for _, session := range sessions {
+		if isOrderManagementBillingDeleted(billingBySessionId[session.Id], deletionMarks) {
+			continue
+		}
 		status := OrderManagementMailStatusFromSession(session)
 		if status == MailCheckStatusVerified || status == MailCheckStatusNotRequired || status == MailCheckStatusChecking {
 			continue
@@ -796,6 +995,9 @@ func TruncateOrderManagementTablesForTest(t interface {
 func truncateOrderManagementTablesForTest() {
 	DB.Exec("DELETE FROM ldxp_topup_sessions")
 	DB.Exec("DELETE FROM ldxp_mail_events")
+	DB.Exec("DELETE FROM order_deletion_marks")
+	DB.Exec("DELETE FROM subscription_orders")
+	DB.Exec("DELETE FROM subscription_plans")
 	DB.Exec("DELETE FROM affiliate_commissions")
 	DB.Exec("DELETE FROM affiliate_withdrawals")
 }

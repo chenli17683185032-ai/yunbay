@@ -40,9 +40,31 @@ func TestOrderManagementAnalyticsAggregatesProductionLdxpFields(t *testing.T) {
 func TestOrderManagementOrdersExcludeUnsettledLdxpSessions(t *testing.T) {
 	truncateTables(t)
 
+	plan := &SubscriptionPlan{
+		Title:        "月卡",
+		PlanKind:     SubscriptionPlanKindValuePackage,
+		PackageType:  ValuePackageTypeMonth,
+		PackageLevel: ValuePackageLevelMonth,
+		TotalAmount:  30000,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	order := &SubscriptionOrder{
+		UserId:          9,
+		PlanId:          plan.Id,
+		Money:           19.9,
+		TradeNo:         "LDXP_VP-month-order",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      1782518300,
+		CompleteTime:    1782518400,
+	}
+	require.NoError(t, DB.Create(order).Error)
+
 	records := []*LdxpTopupSession{
 		{SessionId: "settled_topup", UserId: 1, TopupId: 8001, Money: 10.00, WorkerAmount: 10.30, WorkerOrderNo: "LD_SETTLED_TOPUP", Status: LdxpStatusSuccess, CreatedTime: 1782518400},
 		{SessionId: "settled_redemption", UserId: 2, RedemptionId: 9001, Money: 10.00, WorkerAmount: 10.00, WorkerOrderNo: "LD_SETTLED_REDEEM", Status: LdxpStatusSuccess, CreatedTime: 1782518500},
+		{SessionId: "settled_value_package", UserId: 9, Purpose: LdxpPurposeValuePackage, SubscriptionOrderId: order.Id, SubscriptionPlanId: plan.Id, Money: 19.90, WorkerAmount: 19.90, WorkerOrderNo: "LD_VALUE_PACKAGE", Status: LdxpStatusSuccess, CreatedTime: 1782518550},
 		{SessionId: "created", UserId: 3, Money: 1000.00, WorkerAmount: 0.00, WorkerOrderNo: "LD_CREATED", Status: LdxpStatusCreated, CreatedTime: 1782518600},
 		{SessionId: "paid_waiting_mail", UserId: 4, Money: 50.00, WorkerAmount: 51.50, WorkerOrderNo: "LD_WAIT", Status: LdxpStatusWorkerPaid, ErrorCode: "waiting_mail", CreatedTime: 1782518700},
 		{SessionId: "canceled", UserId: 5, Money: 500.00, WorkerAmount: 515.00, WorkerOrderNo: "LD_CANCELED", Status: LdxpStatusCanceled, CreatedTime: 1782518800},
@@ -56,15 +78,129 @@ func TestOrderManagementOrdersExcludeUnsettledLdxpSessions(t *testing.T) {
 
 	result, err := GetOrderManagementAnalytics(1782518400, 1782691199)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2000), result.Summary.SiteAmountCents)
-	assert.Equal(t, int64(2030), result.Summary.ExternalPaidCents)
-	assert.Equal(t, 2, result.Summary.OrderCount)
+	assert.Equal(t, int64(3990), result.Summary.SiteAmountCents)
+	assert.Equal(t, int64(4020), result.Summary.ExternalPaidCents)
+	assert.Equal(t, 3, result.Summary.OrderCount)
 
 	rows, total, err := ListOrderManagementOrders(1782518400, 1782691199, "", "", 0, 20)
 	require.NoError(t, err)
-	assert.Equal(t, int64(2), total)
-	require.Len(t, rows, 2)
-	assert.ElementsMatch(t, []string{"settled_topup", "settled_redemption"}, []string{rows[0].SessionId, rows[1].SessionId})
+	assert.Equal(t, int64(3), total)
+	require.Len(t, rows, 3)
+	assert.ElementsMatch(t, []string{"settled_topup", "settled_redemption", "settled_value_package"}, []string{rows[0].SessionId, rows[1].SessionId, rows[2].SessionId})
+
+	valuePackageRow := findOrderManagementRowBySessionId(t, rows, "settled_value_package")
+	assert.Equal(t, OrderTypeSubscription, valuePackageRow.BillingOrderType)
+	assert.Equal(t, "LDXP_VP-month-order", valuePackageRow.TradeNo)
+	assert.Equal(t, plan.Id, valuePackageRow.PlanId)
+	assert.Equal(t, "月卡", valuePackageRow.PlanTitle)
+}
+
+func TestOrderManagementOrdersHonorDeletionMarksForValuePackageOrders(t *testing.T) {
+	truncateTables(t)
+
+	plan := &SubscriptionPlan{
+		Title:        "周卡",
+		PlanKind:     SubscriptionPlanKindValuePackage,
+		PackageType:  ValuePackageTypeWeek,
+		PackageLevel: ValuePackageLevelWeek,
+		TotalAmount:  7000,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	order := &SubscriptionOrder{
+		UserId:          12,
+		PlanId:          plan.Id,
+		Money:           9.9,
+		TradeNo:         "LDXP_VP-week-order",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      1782518300,
+		CompleteTime:    1782518400,
+	}
+	require.NoError(t, DB.Create(order).Error)
+	require.NoError(t, DB.Create(&LdxpTopupSession{
+		SessionId:           "deleted_value_package",
+		UserId:              12,
+		Purpose:             LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		Money:               9.90,
+		WorkerAmount:        9.90,
+		WorkerOrderNo:       "LD_VALUE_PACKAGE_DELETE",
+		Status:              LdxpStatusSuccess,
+		CreatedTime:         1782518550,
+	}).Error)
+
+	rows, total, err := ListOrderManagementOrders(1782518400, 1782691199, "", "", 0, 20)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, rows, 1)
+
+	require.NoError(t, MarkAdminOrderDeleted(OrderTypeSubscription, order.TradeNo, 101, "test order"))
+
+	rows, total, err = ListOrderManagementOrders(1782518400, 1782691199, "", "", 0, 20)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, total)
+	assert.Empty(t, rows)
+}
+
+func TestOrderManagementAnalyticsHonorsDeletionMarksForValuePackageOrders(t *testing.T) {
+	truncateTables(t)
+
+	plan := &SubscriptionPlan{
+		Title:        "日卡",
+		PlanKind:     SubscriptionPlanKindValuePackage,
+		PackageType:  ValuePackageTypeDay,
+		PackageLevel: ValuePackageLevelDay,
+		TotalAmount:  1000,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	order := &SubscriptionOrder{
+		UserId:          13,
+		PlanId:          plan.Id,
+		Money:           3.9,
+		TradeNo:         "LDXP_VP-day-deleted-analytics",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		Status:          common.TopUpStatusSuccess,
+		CreateTime:      1782518300,
+		CompleteTime:    1782518400,
+	}
+	require.NoError(t, DB.Create(order).Error)
+	require.NoError(t, DB.Create(&LdxpTopupSession{
+		SessionId:           "deleted_value_package_analytics",
+		UserId:              13,
+		Purpose:             LdxpPurposeValuePackage,
+		SubscriptionOrderId: order.Id,
+		SubscriptionPlanId:  plan.Id,
+		Money:               3.90,
+		WorkerAmount:        3.90,
+		WorkerOrderNo:       "LD_VALUE_PACKAGE_DELETED_ANALYTICS",
+		Status:              LdxpStatusSuccess,
+		CreatedTime:         1782518550,
+	}).Error)
+
+	result, err := GetOrderManagementAnalytics(1782518400, 1782691199)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Summary.OrderCount)
+
+	require.NoError(t, MarkAdminOrderDeleted(OrderTypeSubscription, order.TradeNo, 101, "test analytics"))
+
+	result, err = GetOrderManagementAnalytics(1782518400, 1782691199)
+	require.NoError(t, err)
+	assert.Equal(t, 0, result.Summary.OrderCount)
+	assert.EqualValues(t, 0, result.Summary.SiteAmountCents)
+}
+
+func findOrderManagementRowBySessionId(t *testing.T, rows []OrderManagementOrderRow, sessionId string) OrderManagementOrderRow {
+	t.Helper()
+	for _, row := range rows {
+		if row.SessionId == sessionId {
+			return row
+		}
+	}
+	t.Fatalf("row %q not found", sessionId)
+	return OrderManagementOrderRow{}
 }
 
 func TestOrderManagementAffiliateStatsIncludesWithdrawalInfo(t *testing.T) {

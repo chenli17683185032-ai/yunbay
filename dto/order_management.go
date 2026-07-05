@@ -37,11 +37,18 @@ type OrderManagementAffiliateBrief struct {
 type OrderManagementOrderItem struct {
 	Id                 int                            `json:"id"`
 	OrderType          string                         `json:"order_type"`
+	BillingOrderType   string                         `json:"billing_order_type,omitempty"`
+	TradeNo            string                         `json:"trade_no,omitempty"`
 	SessionId          string                         `json:"session_id"`
 	UserId             int                            `json:"user_id"`
 	Username           string                         `json:"username"`
 	SiteAmount         float64                        `json:"site_amount"`
 	ExternalPaidAmount float64                        `json:"external_paid_amount"`
+	PaymentMethod      string                         `json:"payment_method,omitempty"`
+	PaymentProvider    string                         `json:"payment_provider,omitempty"`
+	OrderStatus        string                         `json:"order_status,omitempty"`
+	PlanId             int                            `json:"plan_id,omitempty"`
+	PlanTitle          string                         `json:"plan_title,omitempty"`
 	WorkerOrderNo      string                         `json:"worker_order_no"`
 	MailOrderNo        string                         `json:"mail_order_no"`
 	MailPaidAmount     float64                        `json:"mail_paid_amount"`

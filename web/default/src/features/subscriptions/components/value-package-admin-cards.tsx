@@ -18,9 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Edit, Plus, Sparkles } from 'lucide-react'
+import { Edit, Gift, Plus, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { quotaUnitsToDollars } from '@/lib/format'
+import { formatQuota, quotaUnitsToDollars } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -56,6 +56,21 @@ function hasPaymentConfig(plan: SubscriptionPlan): boolean {
     plan.ldxp_product_name &&
     Number(plan.ldxp_product_amount || 0) > 0
   )
+}
+
+function formatRemainingQuota(
+  stats: PlanRecord['stats'] | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
+) {
+  const quota = formatQuota(stats?.remaining_amount || 0)
+  const unlimited = stats?.unlimited_count || 0
+  if (unlimited > 0) {
+    return t('{{quota}} + {{count}} unlimited', {
+      quota,
+      count: unlimited,
+    })
+  }
+  return quota
 }
 
 function createTemplatePlan(
@@ -137,6 +152,11 @@ export function ValuePackageAdminCards() {
     setOpen(record.plan.id > 0 ? 'update' : 'create')
   }
 
+  const openRedemptions = (record: PlanRecord) => {
+    setCurrentRow(record)
+    setOpen('generate-redemptions')
+  }
+
   return (
     <TitledCard
       title={t('Value Package Cards')}
@@ -184,6 +204,31 @@ export function ValuePackageAdminCards() {
                   </>
                 ) : plan ? (
                   <>
+                    <div className='grid grid-cols-2 gap-2 rounded-lg border p-3'>
+                      <div className='space-y-1'>
+                        <div className='text-muted-foreground text-xs'>
+                          {t('Active Users')}
+                        </div>
+                        <div className='font-semibold'>
+                          {t(
+                            '{{users}} users / {{subscriptions}} subscriptions',
+                            {
+                              users: record?.stats?.active_user_count || 0,
+                              subscriptions:
+                                record?.stats?.active_subscription_count || 0,
+                            }
+                          )}
+                        </div>
+                      </div>
+                      <div className='space-y-1'>
+                        <div className='text-muted-foreground text-xs'>
+                          {t('Remaining Quota')}
+                        </div>
+                        <div className='font-semibold'>
+                          {formatRemainingQuota(record?.stats, t)}
+                        </div>
+                      </div>
+                    </div>
                     <div className='flex justify-between gap-3'>
                       <span className='text-muted-foreground'>
                         {t('Payment amount')}
@@ -250,11 +295,22 @@ export function ValuePackageAdminCards() {
                   </p>
                 )}
               </CardContent>
-              <CardFooter className='p-4'>
+              <CardFooter className='grid grid-cols-1 gap-2 p-4 sm:grid-cols-2'>
+                {plan && record ? (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    disabled={!complianceConfirmed}
+                    onClick={() => openRedemptions(record)}
+                  >
+                    <Gift data-icon='inline-start' />
+                    {t('Generate Codes')}
+                  </Button>
+                ) : null}
                 <Button
                   type='button'
                   variant={plan ? 'outline' : 'default'}
-                  className='w-full'
+                  className={!plan ? 'sm:col-span-2' : undefined}
                   disabled={!complianceConfirmed}
                   onClick={() =>
                     openPlan(record || { plan: createTemplatePlan(type) })

@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -99,6 +100,53 @@ func TestValuePackageBillingIgnoresWalletOnlyPreference(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 150, used5h)
 	require.EqualValues(t, 150, used7d)
+}
+
+func TestValuePackageBillingAppliesOneXGroupRatio(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "vp-billing-ratio-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 1000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	plan := model.SubscriptionPlan{Title: "month card", PriceAmount: 19.9, Currency: "CNY", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "plus", ConcurrencyLimit: 1, TotalAmount: 10000}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, StartTime: now - 10, EndTime: now + int64(time.Hour/time.Second), Status: model.UserSubscriptionStatusActive, Source: "test"}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                     user.Id,
+		RequestId:                  "vp-billing-ratio-request",
+		OriginModelName:            "gpt-plus",
+		IsPlayground:               true,
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+		PriceData: types.PriceData{
+			QuotaBeforeGroup:  1000,
+			QuotaToPreConsume: 300,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio:        0.3,
+				GroupSpecialRatio: -1,
+			},
+		},
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, relayInfo.PriceData.QuotaToPreConsume)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	require.Equal(t, BillingSourceSubscription, relayInfo.BillingSource)
+	require.Equal(t, 1000, session.GetPreConsumedQuota())
+	require.Equal(t, 1000, relayInfo.PriceData.QuotaToPreConsume)
+	require.Equal(t, 1.0, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.True(t, relayInfo.PriceData.SubscriptionRatioApplied)
+	require.True(t, relayInfo.PriceData.HasOriginalGroupRatioInfo)
+	require.Equal(t, 0.3, relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio)
+
+	var reloadedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 1000, reloadedSub.AmountUsed)
 }
 
 func TestValuePackageBillingSettleZeroActualQuotaClearsUsageReservation(t *testing.T) {
