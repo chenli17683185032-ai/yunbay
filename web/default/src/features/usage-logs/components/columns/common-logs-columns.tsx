@@ -72,7 +72,7 @@ function formatRatioCompact(ratio: number | undefined): string {
     : ratio.toFixed(4).replace(/\.?0+$/, '')
 }
 
-function getGroupRatioText(other: LogOtherData | null): string | null {
+export function getGroupRatioText(other: LogOtherData | null): string | null {
   const userGroupRatio = other?.user_group_ratio
   if (
     userGroupRatio != null &&
@@ -83,7 +83,12 @@ function getGroupRatioText(other: LogOtherData | null): string | null {
   }
 
   const groupRatio = other?.group_ratio
-  if (groupRatio != null && groupRatio !== 1 && Number.isFinite(groupRatio)) {
+  const isSubscriptionRatio = other?.subscription_ratio_applied === true
+  if (
+    groupRatio != null &&
+    Number.isFinite(groupRatio) &&
+    (groupRatio !== 1 || isSubscriptionRatio)
+  ) {
     return `${formatRatioCompact(groupRatio)}x`
   }
 

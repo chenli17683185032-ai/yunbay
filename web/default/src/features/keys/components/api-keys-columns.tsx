@@ -33,6 +33,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { API_KEY_STATUSES } from '../constants'
 import { getApiKeyDisplayGroup } from '../lib/api-key-display'
+import { type ValuePackageState } from '@/features/value-packages/types'
 import { type ApiKey } from '../types'
 import {
   ApiKeyCell,
@@ -67,9 +68,30 @@ function useGroupRatios(): Record<string, number> {
   return data ?? {}
 }
 
-export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
+function getActivePackageBillingRatio(
+  valuePackageState: ValuePackageState | null | undefined,
+  groupRatios: Record<string, number>
+): number | undefined {
+  const preference = valuePackageState?.preference
+  const plan = valuePackageState?.plan
+  const subscription = valuePackageState?.subscription
+  const packageGroup = plan?.model_group?.trim() ?? ''
+  if (!preference?.enabled || !plan || !subscription || !packageGroup) {
+    return undefined
+  }
+  const ratio = groupRatios[packageGroup]
+  return typeof ratio === 'number' && Number.isFinite(ratio) ? ratio : 1
+}
+
+export function useApiKeysColumns(
+  valuePackageState?: ValuePackageState | null
+): ColumnDef<ApiKey>[] {
   const { t } = useTranslation()
   const groupRatios = useGroupRatios()
+  const activePackageRatio = getActivePackageBillingRatio(
+    valuePackageState,
+    groupRatios
+  )
   return [
     {
       id: 'select',
@@ -194,7 +216,11 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
       header: t('Group'),
       cell: ({ row }) => {
         const apiKey = row.original
-        const displayGroup = getApiKeyDisplayGroup(apiKey, groupRatios)
+        const displayGroup = getApiKeyDisplayGroup(
+          apiKey,
+          groupRatios,
+          activePackageRatio
+        )
         const group = displayGroup.group
         const ratio = displayGroup.ratio
 
@@ -225,7 +251,22 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
             </Tooltip>
           )
         }
-        return <GroupBadge group={group} ratio={ratio} />
+        return (
+          <Tooltip>
+            <TooltipTrigger render={<span className='inline-flex' />}>
+              <GroupBadge group={group} ratio={ratio} />
+            </TooltipTrigger>
+            {displayGroup.isEffective && (
+              <TooltipContent>
+                <span className='text-xs'>
+                  {t(
+                    'Package billing is active; this API key keeps its model routing group, while billing uses the active package ratio.'
+                  )}
+                </span>
+              </TooltipContent>
+            )}
+          </Tooltip>
+        )
       },
       size: 160,
       meta: { mobileHidden: true },

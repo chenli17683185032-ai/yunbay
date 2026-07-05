@@ -42,6 +42,8 @@ import {
   useDataTable,
 } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
+import { getValuePackageSelf } from '@/features/value-packages/api'
+import { valuePackageSelfQueryKey } from '@/features/value-packages/query-keys'
 import { getApiKeys, searchApiKeys } from '../api'
 import {
   API_KEY_STATUS,
@@ -181,7 +183,16 @@ function ApiKeysMobileList({
 export function ApiKeysTable() {
   const { t } = useTranslation()
   const { refreshTrigger } = useApiKeys()
-  const columns = useApiKeysColumns()
+  const { data: valuePackageState } = useQuery({
+    queryKey: valuePackageSelfQueryKey,
+    staleTime: 10_000,
+    refetchOnWindowFocus: true,
+    queryFn: async () => {
+      const response = await getValuePackageSelf()
+      return response.success ? response.data || null : null
+    },
+  })
+  const columns = useApiKeysColumns(valuePackageState)
 
   const {
     globalFilter,

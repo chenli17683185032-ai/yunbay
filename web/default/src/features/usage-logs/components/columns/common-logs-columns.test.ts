@@ -16,27 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ApiKey } from '../types'
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { getGroupRatioText } from './common-logs-columns'
 
-type ApiKeyDisplayGroupInput = Pick<
-  ApiKey,
-  'group' | 'effective_group' | 'effective_group_ratio' | 'cross_group_retry'
->
+test('common log token metadata displays 1x when subscription ratio is applied', () => {
+  assert.equal(
+    getGroupRatioText({
+      group_ratio: 1,
+      user_group_ratio: -1,
+      subscription_ratio_applied: true,
+    }),
+    '1x'
+  )
+})
 
-export function getApiKeyDisplayGroup(
-  apiKey: ApiKeyDisplayGroupInput,
-  groupRatios: Record<string, number>,
-  activePackageRatio?: number
-): { group: string; ratio?: number; isEffective: boolean } {
-  const storedGroup = apiKey.group?.trim() ?? ''
-  const group = storedGroup
-  const isEffective = activePackageRatio != null
-
-  if (group === 'auto') {
-    return { group, isEffective }
-  }
-
-  const ratio = isEffective ? activePackageRatio : groupRatios[group]
-
-  return { group, ratio, isEffective }
-}
+test('common log token metadata still hides plain group ratio 1x without package billing', () => {
+  assert.equal(
+    getGroupRatioText({
+      group_ratio: 1,
+      user_group_ratio: -1,
+    }),
+    null
+  )
+})
