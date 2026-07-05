@@ -52,3 +52,20 @@ test('API key display falls back to stored group ratio without active package', 
   assert.equal(display.ratio, 0.3)
   assert.equal(display.isEffective, false)
 })
+
+test('API key display shows active package billing ratio for auto group', () => {
+  const display = getApiKeyDisplayGroup(
+    {
+      group: 'auto',
+      effective_group: '',
+      effective_group_ratio: undefined,
+      cross_group_retry: true,
+    },
+    { auto: 1 },
+    1
+  )
+
+  assert.equal(display.group, 'auto')
+  assert.equal(display.ratio, 1)
+  assert.equal(display.isEffective, true)
+})

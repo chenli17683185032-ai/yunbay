@@ -16,23 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ApiKey } from '../types'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
-type ApiKeyDisplayGroupInput = Pick<
-  ApiKey,
-  'group' | 'effective_group' | 'effective_group_ratio' | 'cross_group_retry'
->
+const currentDir = dirname(fileURLToPath(import.meta.url))
+const source = readFileSync(resolve(currentDir, 'api-keys-columns.tsx'), 'utf8')
 
-export function getApiKeyDisplayGroup(
-  apiKey: ApiKeyDisplayGroupInput,
-  groupRatios: Record<string, number>,
-  activePackageRatio?: number
-): { group: string; ratio?: number; isEffective: boolean } {
-  const storedGroup = apiKey.group?.trim() ?? ''
-  const group = storedGroup
-  const isEffective = activePackageRatio != null
-
-  const ratio = isEffective ? activePackageRatio : groupRatios[group]
-
-  return { group, ratio, isEffective }
-}
+test('API key columns read package billing ratio from backend state helper', () => {
+  assert.match(source, /getActiveValuePackageBillingRatio\(valuePackageState\)/)
+  assert.doesNotMatch(source, /groupRatios\[packageGroup\]/)
+  assert.match(source, /<GroupBadge group='auto' ratio=\{ratio\} \/>/)
+})
