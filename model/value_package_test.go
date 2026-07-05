@@ -1284,3 +1284,28 @@ func TestReserveValuePackageUsageToTargetReplacesExistingRequestQuota(t *testing
 	require.EqualValues(t, 20, used5h)
 	require.EqualValues(t, 20, used7d)
 }
+
+func TestDecreaseUserQuotaIfEnoughDoesNotOverdraw(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3701, UserGroupVIP)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("quota", 5).Error)
+
+	err := DecreaseUserQuotaIfEnough(user.Id, 10)
+
+	require.Error(t, err)
+	var reloaded User
+	require.NoError(t, DB.First(&reloaded, user.Id).Error)
+	require.EqualValues(t, 5, reloaded.Quota)
+}
+
+func TestDecreaseUserQuotaIfEnoughConsumesWhenEnough(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3702, UserGroupVIP)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("quota", 15).Error)
+
+	require.NoError(t, DecreaseUserQuotaIfEnough(user.Id, 10))
+
+	var reloaded User
+	require.NoError(t, DB.First(&reloaded, user.Id).Error)
+	require.EqualValues(t, 5, reloaded.Quota)
+}

@@ -2053,6 +2053,16 @@ func RecordValuePackageUsage(record *ValuePackageUsageRecord) error {
 	return recordValuePackageUsageTx(DB, record)
 }
 
+// ReserveValuePackageUsageToTarget reserves a value-package request to an absolute target quota.
+// targetQuota is the same request's desired total usage, not a delta. If a
+// ValuePackageUsageRecord already exists for (user_subscription_id, request_id),
+// the record uses replacement semantics: only the difference between the old
+// quota and targetQuota is applied to UserSubscription.AmountUsed and rolling
+// window checks compare the replaced target instead of double-counting the
+// existing request quota. This function updates ValuePackageUsageRecord and
+// UserSubscription.AmountUsed atomically, but intentionally does not update
+// SubscriptionPreConsumeRecord.PreConsumed; realtime mid-stream/final target
+// reserves must not interfere with the existing pre-consume refund contract.
 func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscriptionId int, targetQuota int64) (*SubscriptionPreConsumeResult, error) {
 	if strings.TrimSpace(requestId) == "" {
 		return nil, errors.New("requestId is empty")

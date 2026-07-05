@@ -413,14 +413,13 @@ func TestRealtimeValuePackageReserveRealtimeConcurrentDeltas(t *testing.T) {
 	require.NotNil(t, session)
 	relayInfo.Billing = session
 
-	minTarget := relayInfo.FinalPreConsumedQuota
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := session.ReserveRealtime(10, minTarget)
+			_, err := session.ReserveRealtime(10)
 			errCh <- err
 		}()
 	}
@@ -438,4 +437,208 @@ func TestRealtimeValuePackageReserveRealtimeConcurrentDeltas(t *testing.T) {
 	require.EqualValues(t, 20, used5h)
 	require.EqualValues(t, 20, used7d)
 	require.EqualValues(t, 20, relayInfo.RealtimeReservedQuota)
+}
+
+func TestWalletRealtimeReserveDoesNotOverdrawUserQuota(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "wallet-realtime-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 15}
+	require.NoError(t, model.DB.Create(&user).Error)
+	token := model.Token{UserId: user.Id, Key: "wallet-realtime-token", Status: common.TokenStatusEnabled, UnlimitedQuota: true, RemainQuota: 100000}
+	require.NoError(t, model.DB.Create(&token).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		RequestId:        "wallet-realtime-request",
+		UserId:           user.Id,
+		TokenId:          token.Id,
+		TokenKey:         token.Key,
+		TokenUnlimited:   true,
+		UserQuota:        user.Quota,
+		UsingGroup:       "default",
+		UserGroup:        model.UserGroupVIP,
+		BillingUserGroup: model.UserGroupVIP,
+		OriginModelName:  "gpt-4.1",
+		UserSetting:      dto.UserSetting{BillingPreference: "wallet_only"},
+		PriceData: types.PriceData{
+			ModelRatio:        1,
+			QuotaToPreConsume: 10,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1},
+		},
+	}
+	session, apiErr := NewBillingSession(ctx, relayInfo, 10)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	relayInfo.Billing = session
+
+	err := PreWssConsumeQuota(ctx, relayInfo, &dto.RealtimeUsage{TotalTokens: 20, InputTokens: 20, InputTokenDetails: dto.InputTokenDetails{TextTokens: 20}})
+	require.Error(t, err)
+
+	var reloaded model.User
+	require.NoError(t, model.DB.First(&reloaded, user.Id).Error)
+	require.EqualValues(t, 5, reloaded.Quota)
+	require.EqualValues(t, 0, relayInfo.RealtimeActualQuota)
+	require.EqualValues(t, 0, relayInfo.RealtimeReservedQuota)
+}
+
+func TestRealtimeValuePackageSettlePositiveDeltaEnforcesRollingLimitAtomically(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "vp-realtime-settle-limit-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 100000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	token := model.Token{UserId: user.Id, Key: "vp-realtime-settle-limit-token", Status: common.TokenStatusEnabled, UnlimitedQuota: true, RemainQuota: 100000}
+	require.NoError(t, model.DB.Create(&token).Error)
+	plan := model.SubscriptionPlan{Title: "Realtime Settle Limited Month", PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "month-card", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 100000, Limit5hAmount: 10, Limit7dAmount: 100000, ConcurrencyLimit: 1}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 100000, Status: model.UserSubscriptionStatusActive, StartTime: now - 10, EndTime: now + 86400}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		RequestId:                  "vp-realtime-settle-limit-request",
+		UserId:                     user.Id,
+		TokenId:                    token.Id,
+		TokenKey:                   token.Key,
+		TokenUnlimited:             true,
+		UserQuota:                  user.Quota,
+		UsingGroup:                 "default",
+		UserGroup:                  model.UserGroupVIP,
+		BillingUserGroup:           "month-card",
+		ValuePackageBillingGroup:   "month-card",
+		OriginModelName:            "gpt-4.1",
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+		PriceData: types.PriceData{
+			ModelRatio:        1,
+			QuotaToPreConsume: 1,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1},
+		},
+	}
+	session, apiErr := NewBillingSession(ctx, relayInfo, 1)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	relayInfo.Billing = session
+
+	err := SettleBilling(ctx, relayInfo, 20)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), model.ValuePackageQuotaExhaustedUserMessage)
+
+	var reloadedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 1, reloadedSub.AmountUsed)
+	used5h, used7d, err := model.GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, used5h)
+	require.EqualValues(t, 1, used7d)
+}
+
+func TestRealtimeValuePackageReserveFailureDoesNotAdvanceActualQuota(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "vp-realtime-failure-state-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 100000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	token := model.Token{UserId: user.Id, Key: "vp-realtime-failure-state-token", Status: common.TokenStatusEnabled, UnlimitedQuota: true, RemainQuota: 100000}
+	require.NoError(t, model.DB.Create(&token).Error)
+	plan := model.SubscriptionPlan{Title: "Realtime Failure State Month", PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "month-card", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 100000, Limit5hAmount: 10, Limit7dAmount: 100000, ConcurrencyLimit: 1}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 100000, Status: model.UserSubscriptionStatusActive, StartTime: now - 10, EndTime: now + 86400}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		RequestId:                  "vp-realtime-failure-state-request",
+		UserId:                     user.Id,
+		TokenId:                    token.Id,
+		TokenKey:                   token.Key,
+		TokenUnlimited:             true,
+		UserQuota:                  user.Quota,
+		UsingGroup:                 "default",
+		UserGroup:                  model.UserGroupVIP,
+		BillingUserGroup:           "month-card",
+		ValuePackageBillingGroup:   "month-card",
+		OriginModelName:            "gpt-4.1",
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+		PriceData: types.PriceData{
+			ModelRatio:        1,
+			QuotaToPreConsume: 1,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1},
+		},
+	}
+	session, apiErr := NewBillingSession(ctx, relayInfo, 1)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	relayInfo.Billing = session
+
+	err := PreWssConsumeQuota(ctx, relayInfo, &dto.RealtimeUsage{TotalTokens: 20, InputTokens: 20, InputTokenDetails: dto.InputTokenDetails{TextTokens: 20}})
+	require.Error(t, err)
+	require.EqualValues(t, 0, relayInfo.RealtimeActualQuota)
+	require.EqualValues(t, 0, relayInfo.RealtimeReservedQuota)
+}
+
+func TestRealtimeValuePackagePreWssConcurrentDeltas(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "vp-realtime-prewss-concurrent-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 100000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	token := model.Token{UserId: user.Id, Key: "vp-realtime-prewss-concurrent-token", Status: common.TokenStatusEnabled, UnlimitedQuota: true, RemainQuota: 100000}
+	require.NoError(t, model.DB.Create(&token).Error)
+	plan := model.SubscriptionPlan{Title: "Realtime PreWss Concurrent Month", PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "month-card", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 100000, Limit5hAmount: 100000, Limit7dAmount: 100000, ConcurrencyLimit: 1}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 100000, Status: model.UserSubscriptionStatusActive, StartTime: now - 10, EndTime: now + 86400}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		RequestId:                  "vp-realtime-prewss-concurrent-request",
+		UserId:                     user.Id,
+		TokenId:                    token.Id,
+		TokenKey:                   token.Key,
+		TokenUnlimited:             true,
+		UserQuota:                  user.Quota,
+		UsingGroup:                 "default",
+		UserGroup:                  model.UserGroupVIP,
+		BillingUserGroup:           "month-card",
+		ValuePackageBillingGroup:   "month-card",
+		OriginModelName:            "gpt-4.1",
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+		PriceData: types.PriceData{
+			ModelRatio:        1,
+			QuotaToPreConsume: 1,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1},
+		},
+	}
+	session, apiErr := NewBillingSession(ctx, relayInfo, 1)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	relayInfo.Billing = session
+
+	var wg sync.WaitGroup
+	errCh := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- PreWssConsumeQuota(ctx, relayInfo, &dto.RealtimeUsage{TotalTokens: 10, InputTokens: 10, InputTokenDetails: dto.InputTokenDetails{TextTokens: 10}})
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	var reloadedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 20, reloadedSub.AmountUsed)
+	used5h, used7d, err := model.GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
+	require.NoError(t, err)
+	require.EqualValues(t, 20, used5h)
+	require.EqualValues(t, 20, used7d)
 }

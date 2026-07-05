@@ -87,7 +87,7 @@ func calculateAudioQuota(info QuotaInfo) int {
 }
 
 type realtimeBillingReservor interface {
-	ReserveRealtime(deltaQuota int, minTarget int) (int, error)
+	ReserveRealtime(deltaQuota int) (int, error)
 }
 
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
@@ -137,7 +137,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	}
 
 	if reservor, ok := relayInfo.Billing.(realtimeBillingReservor); ok {
-		reserved, err := reservor.ReserveRealtime(quota, relayInfo.FinalPreConsumedQuota)
+		reserved, err := reservor.ReserveRealtime(quota)
 		if err != nil {
 			return err
 		}

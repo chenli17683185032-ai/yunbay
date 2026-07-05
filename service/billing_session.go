@@ -51,7 +51,11 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
-		if err := s.funding.Settle(delta); err != nil {
+		if funding, ok := s.funding.(*SubscriptionFunding); ok && funding.valuePackageSubscriptionId > 0 && delta > 0 {
+			if _, err := model.ReserveValuePackageUsageToTarget(funding.requestId, funding.userId, funding.valuePackageSubscriptionId, int64(actualQuota)); err != nil {
+				return err
+			}
+		} else if err := s.funding.Settle(delta); err != nil {
 			return err
 		}
 		s.fundingSettled = true
@@ -212,13 +216,14 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 	return nil
 }
 
-func (s *BillingSession) ReserveRealtime(deltaQuota int, minTarget int) (int, error) {
+func (s *BillingSession) ReserveRealtime(deltaQuota int) (int, error) {
 	if s == nil {
 		return 0, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	currentActual := s.relayInfo.RealtimeActualQuota
 	currentTarget := s.relayInfo.RealtimeReservedQuota
 	if deltaQuota <= 0 {
 		return currentTarget, nil
@@ -227,15 +232,17 @@ func (s *BillingSession) ReserveRealtime(deltaQuota int, minTarget int) (int, er
 		return currentTarget, nil
 	}
 
-	s.relayInfo.RealtimeActualQuota += deltaQuota
-	target := s.relayInfo.RealtimeActualQuota
-	if minTarget > target {
-		target = minTarget
+	nextActual := currentActual + deltaQuota
+	target := nextActual
+	if s.preConsumedQuota > target {
+		target = s.preConsumedQuota
 	}
-	if s.relayInfo.RealtimeReservedQuota >= target {
-		return s.relayInfo.RealtimeReservedQuota, nil
+	if currentTarget >= target {
+		s.relayInfo.RealtimeActualQuota = nextActual
+		return currentTarget, nil
 	}
 	if target <= s.preConsumedQuota {
+		s.relayInfo.RealtimeActualQuota = nextActual
 		s.relayInfo.RealtimeReservedQuota = target
 		return target, nil
 	}
@@ -263,6 +270,7 @@ func (s *BillingSession) ReserveRealtime(deltaQuota int, minTarget int) (int, er
 		funding.subscriptionId = res.UserSubscriptionId
 		funding.AmountTotal = res.AmountTotal
 		s.syncRelayInfo()
+		s.relayInfo.RealtimeActualQuota = nextActual
 		s.relayInfo.RealtimeReservedQuota = target
 		return target, nil
 	}
@@ -279,6 +287,7 @@ func (s *BillingSession) ReserveRealtime(deltaQuota int, minTarget int) (int, er
 	s.tokenConsumed += extraDelta
 	s.extraReserved += extraDelta
 	s.syncRelayInfo()
+	s.relayInfo.RealtimeActualQuota = nextActual
 	s.relayInfo.RealtimeReservedQuota = target
 	return target, nil
 }
@@ -338,7 +347,7 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 func (s *BillingSession) reserveFunding(delta int) error {
 	switch funding := s.funding.(type) {
 	case *WalletFunding:
-		if err := model.DecreaseUserQuota(funding.userId, delta, false); err != nil {
+		if err := model.DecreaseUserQuotaIfEnough(funding.userId, delta); err != nil {
 			return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 		}
 		funding.consumed += delta
