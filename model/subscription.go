@@ -60,6 +60,8 @@ const (
 
 const ValuePackageQuotaExhaustedUserMessage = "当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用"
 
+const ValuePackageEffectiveBillingRatio = 1.0
+
 const (
 	UserSubscriptionStatusActive    = "active"
 	UserSubscriptionStatusExpired   = "expired"
@@ -1358,11 +1360,22 @@ type ValuePackageUsageSummary struct {
 	ExhaustedMessage string  `json:"exhausted_message"`
 }
 
+type ValuePackageBillingState struct {
+	Active             bool    `json:"active"`
+	RoutingGroup       string  `json:"routing_group"`
+	PackageGroup       string  `json:"package_group"`
+	EffectiveRatio     float64 `json:"effective_ratio"`
+	OriginalGroupRatio float64 `json:"original_group_ratio"`
+	PlanTitle          string  `json:"plan_title"`
+	PlanId             int     `json:"plan_id"`
+}
+
 type ValuePackageState struct {
 	Preference   UserValuePackagePreference `json:"preference"`
 	Subscription *UserSubscription          `json:"subscription,omitempty"`
 	Plan         *SubscriptionPlan          `json:"plan,omitempty"`
 	Usage        *ValuePackageUsageSummary  `json:"usage,omitempty"`
+	Billing      *ValuePackageBillingState  `json:"billing,omitempty"`
 }
 
 type ValuePackageUsageRow struct {
@@ -1544,6 +1557,24 @@ func backfillDefaultEnabledValuePackagePreferencesTx(tx *gorm.DB, now int64) err
 	return nil
 }
 
+func buildValuePackageBillingState(pref *UserValuePackagePreference, sub *UserSubscription, plan *SubscriptionPlan) *ValuePackageBillingState {
+	if pref == nil || sub == nil || plan == nil || !pref.Enabled || !plan.IsValuePackage() {
+		return &ValuePackageBillingState{Active: false}
+	}
+	packageGroup := strings.TrimSpace(plan.ModelGroup)
+	if packageGroup == "" {
+		return &ValuePackageBillingState{Active: false}
+	}
+	return &ValuePackageBillingState{
+		Active:         true,
+		RoutingGroup:   "",
+		PackageGroup:   packageGroup,
+		EffectiveRatio: ValuePackageEffectiveBillingRatio,
+		PlanTitle:      plan.Title,
+		PlanId:         plan.Id,
+	}
+}
+
 func GetActiveValuePackageForRelay(userId int) (*ValuePackageState, error) {
 	state, err := loadValuePackageStateTx(DB, userId, false)
 	if err != nil {
@@ -1585,6 +1616,7 @@ func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*Value
 				return nil, err
 			}
 			state := &ValuePackageState{Preference: *prefPtr, Subscription: sub, Plan: plan}
+			state.Billing = buildValuePackageBillingState(&state.Preference, state.Subscription, state.Plan)
 			if includeUsage {
 				usage, err := buildValuePackageUsageSummaryTx(tx, userId, sub, plan, now)
 				if err != nil {
@@ -1629,6 +1661,7 @@ func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*Value
 	}
 	state.Subscription = &sub
 	state.Plan = plan
+	state.Billing = buildValuePackageBillingState(&state.Preference, state.Subscription, state.Plan)
 	if !includeUsage {
 		return state, nil
 	}
@@ -1933,6 +1966,7 @@ func ActivateValuePackage(userId int, userSubscriptionId int) (*ValuePackageStat
 			return err
 		}
 		state = &ValuePackageState{Preference: *pref, Subscription: &sub, Plan: plan, Usage: usage}
+		state.Billing = buildValuePackageBillingState(&state.Preference, state.Subscription, state.Plan)
 		return nil
 	})
 	return state, err

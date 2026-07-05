@@ -1086,3 +1086,25 @@ func TestAdminUpdateSubscriptionPlanStatusReturnsErrorForMissingPlan(t *testing.
 	require.Equal(t, false, body["success"], rec.Body.String())
 	assert.Contains(t, body["message"], "套餐不存在")
 }
+
+func TestGetValuePackageSelfIncludesBillingState(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeMonth, model.ValuePackageLevelMonth)
+	user := createLdxpControllerTestUser(t, "vp_billing_state_user")
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: common.GetTimestamp() - 1000, EndTime: common.GetTimestamp() + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	_, err := model.ActivateValuePackage(user.Id, sub.Id)
+	require.NoError(t, err)
+
+	rec := valuePackageControllerRequest(GetValuePackageSelf, http.MethodGet, "/value-packages/self", nil, user.Id)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var body map[string]interface{}
+	require.NoError(t, common.Unmarshal(rec.Body.Bytes(), &body))
+	data := body["data"].(map[string]interface{})
+	billing := data["billing"].(map[string]interface{})
+	require.Equal(t, true, billing["active"])
+	require.Equal(t, plan.ModelGroup, billing["package_group"])
+	require.Equal(t, float64(1), billing["effective_ratio"])
+	require.Equal(t, float64(plan.Id), billing["plan_id"])
+}

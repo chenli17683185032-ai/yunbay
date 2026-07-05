@@ -148,11 +148,22 @@ export interface ValuePackagePlan extends SubscriptionPlanLike {
   concurrency_limit: ValuePackageConcurrencyLimit
 }
 
+export interface ValuePackageBillingState {
+  active: boolean
+  routing_group?: string
+  package_group?: string
+  effective_ratio?: number
+  original_group_ratio?: number
+  plan_title?: string
+  plan_id?: number
+}
+
 export interface ValuePackageState {
   preference: UserValuePackagePreference
   subscription?: UserSubscription | null
   plan?: ValuePackagePlan | null
   usage?: ValuePackageUsageSummary | null
+  billing?: ValuePackageBillingState | null
 }
 
 export type ValuePackagePlanRecord = ValuePackagePlan

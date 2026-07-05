@@ -1191,3 +1191,25 @@ func TestSubscriptionNormalizeDefaultsKeepsStandardPlansUSD(t *testing.T) {
 
 	require.Equal(t, "USD", plan.Currency)
 }
+
+func TestGetValuePackageStateIncludesAuthoritativeBillingState(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3501, UserGroupVIP)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.ModelGroup = "month-card"
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, month, now-10, now+3600)
+	_, err := ActivateValuePackage(user.Id, sub.Id)
+	require.NoError(t, err)
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state.Billing)
+	require.True(t, state.Billing.Active)
+	require.Equal(t, "month-card", state.Billing.PackageGroup)
+	require.Equal(t, float64(1), state.Billing.EffectiveRatio)
+	require.Equal(t, month.Id, state.Billing.PlanId)
+	require.Equal(t, month.Title, state.Billing.PlanTitle)
+}
