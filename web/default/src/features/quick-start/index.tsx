@@ -275,7 +275,11 @@ export function QuickStart() {
     setIsRedeemingCode(true)
     try {
       const result = await redeemQuickStartCode(redemptionCode, {
-        redeemTopupCode,
+        redeemTopupCode: (request) =>
+          redeemTopupCode(request, {
+            skipBusinessError: true,
+            skipErrorHandler: true,
+          }),
         refreshSelf: async () => {
           const response = await getSelf()
           if (response?.success && response.data) {
