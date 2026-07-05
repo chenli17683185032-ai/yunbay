@@ -20,7 +20,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getApiKeyDisplayGroup } from './api-key-display'
 
-test('API key display uses active package effective group and ratio', () => {
+test('API key display ignores active package effective group and shows stored token group', () => {
   const display = getApiKeyDisplayGroup(
     {
       group: 'gpt-plus',
@@ -31,9 +31,9 @@ test('API key display uses active package effective group and ratio', () => {
     { 'gpt-plus': 0.3, 'month-card': 0.8 }
   )
 
-  assert.equal(display.group, 'month-card')
-  assert.equal(display.ratio, 1)
-  assert.equal(display.isEffective, true)
+  assert.equal(display.group, 'gpt-plus')
+  assert.equal(display.ratio, 0.3)
+  assert.equal(display.isEffective, false)
 })
 
 test('API key display falls back to stored group ratio without active package', () => {

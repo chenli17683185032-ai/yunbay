@@ -425,7 +425,7 @@ func TestGetAllTokensMasksKeyInResponse(t *testing.T) {
 	}
 }
 
-func TestGetAllTokensIncludesActiveValuePackageEffectiveGroup(t *testing.T) {
+func TestGetAllTokensDoesNotExposeValuePackageAsTokenGroup(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	userID := 1
 	token := seedToken(t, db, userID, "package-token", "vpkg1234token5678")
@@ -487,11 +487,11 @@ func TestGetAllTokensIncludesActiveValuePackageEffectiveGroup(t *testing.T) {
 	if page.Items[0].Group != "gpt-plus" {
 		t.Fatalf("stored token group should remain gpt-plus, got %q", page.Items[0].Group)
 	}
-	if page.Items[0].EffectiveGroup != "month-card" {
-		t.Fatalf("expected effective package group month-card, got %q", page.Items[0].EffectiveGroup)
+	if page.Items[0].EffectiveGroup != "" {
+		t.Fatalf("token list must not expose value-package group as API key group, got effective_group %q", page.Items[0].EffectiveGroup)
 	}
-	if page.Items[0].EffectiveGroupRatio == nil || *page.Items[0].EffectiveGroupRatio != 1 {
-		t.Fatalf("expected effective package group ratio 1, got %#v", page.Items[0].EffectiveGroupRatio)
+	if page.Items[0].EffectiveGroupRatio != nil {
+		t.Fatalf("token list must not expose value-package ratio as API key group ratio, got %#v", page.Items[0].EffectiveGroupRatio)
 	}
 }
 

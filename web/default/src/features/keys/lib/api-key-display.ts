@@ -28,17 +28,14 @@ export function getApiKeyDisplayGroup(
   groupRatios: Record<string, number>
 ): { group: string; ratio?: number; isEffective: boolean } {
   const storedGroup = apiKey.group?.trim() ?? ''
-  const effectiveGroup = apiKey.effective_group?.trim() ?? ''
-  const group = effectiveGroup || storedGroup
-  const isEffective = effectiveGroup !== '' && effectiveGroup !== storedGroup
+  const group = storedGroup
+  const isEffective = false
 
   if (group === 'auto') {
     return { group, isEffective }
   }
 
-  const effectiveRatio = apiKey.effective_group_ratio
-  const ratio =
-    typeof effectiveRatio === 'number' ? effectiveRatio : groupRatios[group]
+  const ratio = groupRatios[group]
 
   return { group, ratio, isEffective }
 }

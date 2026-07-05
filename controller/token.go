@@ -9,50 +9,24 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 )
 
-type tokenEffectiveGroupView struct {
-	group string
-	ratio *float64
-}
-
-func getActiveValuePackageTokenView(userId int) (*tokenEffectiveGroupView, error) {
-	state, err := model.GetActiveValuePackageForRelay(userId)
-	if err != nil {
-		return nil, err
-	}
-	if state == nil || state.Plan == nil {
-		return nil, nil
-	}
-	group := strings.TrimSpace(state.Plan.ModelGroup)
-	if group == "" {
-		return nil, nil
-	}
-	ratio := service.GetUserGroupRatio(group, group)
-	return &tokenEffectiveGroupView{group: group, ratio: &ratio}, nil
-}
-
-func buildMaskedTokenResponse(token *model.Token, effectiveGroup *tokenEffectiveGroupView) *model.Token {
+func buildMaskedTokenResponse(token *model.Token) *model.Token {
 	if token == nil {
 		return nil
 	}
 	maskedToken := *token
 	maskedToken.Key = token.GetMaskedKey()
-	if effectiveGroup != nil {
-		maskedToken.EffectiveGroup = effectiveGroup.group
-		maskedToken.EffectiveGroupRatio = effectiveGroup.ratio
-	}
 	return &maskedToken
 }
 
-func buildMaskedTokenResponses(tokens []*model.Token, effectiveGroup *tokenEffectiveGroupView) []*model.Token {
+func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 	maskedTokens := make([]*model.Token, 0, len(tokens))
 	for _, token := range tokens {
-		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token, effectiveGroup))
+		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
 	return maskedTokens
 }
@@ -65,14 +39,9 @@ func GetAllTokens(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	effectiveGroup, err := getActiveValuePackageTokenView(userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	total, _ := model.CountUserTokens(userId)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens, effectiveGroup))
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -88,13 +57,8 @@ func SearchTokens(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	effectiveGroup, err := getActiveValuePackageTokenView(userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(buildMaskedTokenResponses(tokens, effectiveGroup))
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
 	common.ApiSuccess(c, pageInfo)
 }
 
@@ -110,12 +74,7 @@ func GetToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	effectiveGroup, err := getActiveValuePackageTokenView(userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	common.ApiSuccess(c, buildMaskedTokenResponse(token, effectiveGroup))
+	common.ApiSuccess(c, buildMaskedTokenResponse(token))
 }
 
 func GetTokenKey(c *gin.Context) {
@@ -349,7 +308,7 @@ func UpdateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    buildMaskedTokenResponse(cleanToken, nil),
+		"data":    buildMaskedTokenResponse(cleanToken),
 	})
 }
 
