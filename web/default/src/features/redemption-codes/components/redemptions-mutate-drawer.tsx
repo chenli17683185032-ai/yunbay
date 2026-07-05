@@ -97,6 +97,7 @@ export function RedemptionsMutateDrawer({
   const { triggerRefresh } = useRedemptions()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [planRecords, setPlanRecords] = useState<PlanRecord[]>([])
+  const [plansLoaded, setPlansLoaded] = useState(false)
   const { copyToClipboard } = useCopyToClipboard()
   const redemptionKindOptions = getRedemptionKindOptions(t).filter((option) => {
     if (isUpdate) return true
@@ -122,9 +123,14 @@ export function RedemptionsMutateDrawer({
 
   // Load existing data when updating
   useEffect(() => {
+    let isActive = true
+
     if (open && isUpdate && currentRow) {
+      setPlanRecords([])
+      setPlansLoaded(false)
       // For update, fetch fresh data
       getRedemption(currentRow.id).then((result) => {
+        if (!isActive) return
         if (result.success && result.data) {
           form.reset(transformRedemptionToFormDefaults(result.data))
         }
@@ -132,13 +138,35 @@ export function RedemptionsMutateDrawer({
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
-      getAdminPlans().then((result) => {
-        if (result.success && result.data) {
-          setPlanRecords(result.data)
-        }
-      })
+      setPlanRecords([])
+      setPlansLoaded(false)
+      getAdminPlans()
+        .then((result) => {
+          if (!isActive) return
+          if (result.success && result.data) {
+            setPlanRecords(result.data)
+          } else {
+            toast.error(result.message || t('Request failed'))
+          }
+        })
+        .catch((error: unknown) => {
+          if (!isActive) return
+          toast.error(
+            error instanceof Error ? error.message : t('Request failed')
+          )
+        })
+        .finally(() => {
+          if (isActive) setPlansLoaded(true)
+        })
+    } else if (!open) {
+      setPlanRecords([])
+      setPlansLoaded(false)
     }
-  }, [open, isUpdate, currentRow, form])
+
+    return () => {
+      isActive = false
+    }
+  }, [open, isUpdate, currentRow, form, t])
 
   const onSubmit = async (data: RedemptionFormValues) => {
     setIsSubmitting(true)
@@ -265,6 +293,8 @@ export function RedemptionsMutateDrawer({
         onOpenChange(v)
         if (!v) {
           form.reset()
+          setPlanRecords([])
+          setPlansLoaded(false)
         }
       }}
     >
@@ -370,7 +400,9 @@ export function RedemptionsMutateDrawer({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
-                      {valuePackagePlanOptions.length === 0 ? (
+                      {!isUpdate &&
+                      plansLoaded &&
+                      valuePackagePlanOptions.length === 0 ? (
                         <p className='text-muted-foreground rounded-md border border-dashed px-3 py-2 text-xs'>
                           {t(
                             'No enabled day, week, or month packages are available. Enable a package plan first.'

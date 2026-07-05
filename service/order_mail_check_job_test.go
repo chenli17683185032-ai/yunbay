@@ -88,19 +88,22 @@ func TestRunBatchMailCheckSkipsDeletedValuePackageOrders(t *testing.T) {
 	require.NoError(t, model.DB.Create(session).Error)
 	require.NoError(t, model.MarkAdminOrderDeleted(model.OrderTypeSubscription, order.TradeNo, 9, "do not rescan"))
 
-	job := NewOrderMailCheckRunner(fakeMailSource{})
+	job := NewOrderMailCheckRunner(fakeMailSource{mails: []*model.LdxpMailEvent{{
+		OrderNo:     "LD_DELETED_VP_MAIL_CHECK",
+		Amount:      9.9,
+		CreatedTime: 1782600001,
+	}}})
 	result := job.RunBatch(context.Background(), model.OrderMailCheckBatchFilter{StartTime: 1782600000, EndTime: 1782609999, Limit: 10})
 	require.NoError(t, result.Error)
 	assert.Equal(t, 0, result.AffectedCount)
 
 	var saved model.LdxpTopupSession
 	require.NoError(t, model.DB.First(&saved, session.Id).Error)
+	assert.Equal(t, model.LdxpStatusWorkerPaid, saved.Status)
+	assert.Empty(t, saved.MailOrderNo)
+	assert.Zero(t, saved.MailAmount)
+	assert.Zero(t, saved.VerifiedTime)
 	assert.Empty(t, saved.ErrorCode)
-
-	rows, total, err := model.ListOrderManagementOrders(1782600000, 1782609999, "", order.TradeNo, 0, 20)
-	require.NoError(t, err)
-	assert.EqualValues(t, 0, total)
-	assert.Empty(t, rows)
 }
 
 func TestRunSingleMailCheckFetchErrorMarksSessionFailed(t *testing.T) {

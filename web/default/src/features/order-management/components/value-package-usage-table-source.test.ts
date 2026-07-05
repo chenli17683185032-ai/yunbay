@@ -45,8 +45,10 @@ test('value package usage table keeps per-user rolling quota columns', async () 
     '15000'
   )
 
-  assert.match(source, /5h|5 小时|used_5h/)
-  assert.match(source, /7d|7 天|used_7d/)
+  assert.match(source, /used_5h/)
+  assert.match(source, /limit_5h/)
+  assert.match(source, /used_7d/)
+  assert.match(source, /limit_7d/)
   assert.match(source, /total_remaining/)
   assert.match(pageSource, /refetchInterval:\s*15000/)
 })
