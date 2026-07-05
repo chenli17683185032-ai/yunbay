@@ -50,6 +50,21 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	if info.PriceData.SubscriptionRatioApplied {
 		other["subscription_ratio_applied"] = true
 	}
+	if info.ValuePackageSubscriptionId != 0 {
+		other["value_package_subscription_id"] = info.ValuePackageSubscriptionId
+	}
+	if info.ValuePackagePlanId != 0 {
+		other["value_package_plan_id"] = info.ValuePackagePlanId
+	}
+	if info.ValuePackageModelGroup != "" {
+		other["value_package_model_group"] = info.ValuePackageModelGroup
+	}
+	if info.ValuePackagePackageType != "" {
+		other["value_package_package_type"] = info.ValuePackagePackageType
+	}
+	if info.PriceData.SubscriptionRatioApplied {
+		other["value_package_effective_ratio"] = info.PriceData.GroupRatioInfo.GroupRatio
+	}
 	if info.PriceData.HasOriginalGroupRatioInfo {
 		other["original_group_ratio"] = info.PriceData.OriginalGroupRatioInfo.GroupRatio
 		other["original_user_group_ratio"] = info.PriceData.OriginalGroupRatioInfo.GroupSpecialRatio
@@ -135,6 +150,7 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 		other["group_ratio"] = bc.GroupRatio
 		if bc.SubscriptionRatioApplied {
 			other["subscription_ratio_applied"] = true
+			other["value_package_effective_ratio"] = bc.GroupRatio
 		}
 		if bc.HasOriginalGroupRatio {
 			other["original_group_ratio"] = bc.OriginalGroupRatio

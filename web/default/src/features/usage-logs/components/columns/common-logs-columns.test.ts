@@ -27,7 +27,7 @@ test('common log token metadata displays 1x when subscription ratio is applied',
       user_group_ratio: -1,
       subscription_ratio_applied: true,
     }),
-    '1x'
+    'Package 1x'
   )
 })
 

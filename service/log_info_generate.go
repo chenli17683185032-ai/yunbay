@@ -130,6 +130,21 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo.PriceData.SubscriptionRatioApplied {
 		other["subscription_ratio_applied"] = true
 	}
+	if relayInfo.ValuePackageSubscriptionId != 0 {
+		other["value_package_subscription_id"] = relayInfo.ValuePackageSubscriptionId
+	}
+	if relayInfo.ValuePackagePlanId != 0 {
+		other["value_package_plan_id"] = relayInfo.ValuePackagePlanId
+	}
+	if relayInfo.ValuePackageModelGroup != "" {
+		other["value_package_model_group"] = relayInfo.ValuePackageModelGroup
+	}
+	if relayInfo.ValuePackagePackageType != "" {
+		other["value_package_package_type"] = relayInfo.ValuePackagePackageType
+	}
+	if relayInfo.PriceData.SubscriptionRatioApplied {
+		other["value_package_effective_ratio"] = relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	}
 	if relayInfo.PriceData.HasOriginalGroupRatioInfo {
 		other["original_group_ratio"] = relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio
 		other["original_user_group_ratio"] = relayInfo.PriceData.OriginalGroupRatioInfo.GroupSpecialRatio

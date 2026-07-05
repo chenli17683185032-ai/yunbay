@@ -212,7 +212,12 @@ function BillingBreakdown(props: {
   const effectiveGR = isUserGR ? userGR : other.group_ratio
   if (effectiveGR != null && Number.isFinite(effectiveGR)) {
     rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
+      label:
+        other.subscription_ratio_applied === true
+          ? t('Package Effective Ratio')
+          : isUserGR
+            ? t('User Exclusive Ratio')
+            : t('Group Ratio'),
       value: `${formatRatio(effectiveGR)}x`,
     })
   }
@@ -1053,6 +1058,27 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 <DetailRow
                   label={t('Plan')}
                   value={`#${other.subscription_plan_id} ${other.subscription_plan_title || ''}`.trim()}
+                />
+              )}
+              {other.value_package_model_group && (
+                <DetailRow
+                  label={t('Package Billing Group')}
+                  value={other.value_package_model_group}
+                  mono
+                />
+              )}
+              {other.value_package_effective_ratio != null && (
+                <DetailRow
+                  label={t('Package Effective Ratio')}
+                  value={`${formatRatio(other.value_package_effective_ratio)}x`}
+                  mono
+                />
+              )}
+              {other.original_group_ratio != null && (
+                <DetailRow
+                  label={t('Original Routing Group Ratio')}
+                  value={`${formatRatio(other.original_group_ratio)}x`}
+                  mono
                 />
               )}
               {other.subscription_id && (

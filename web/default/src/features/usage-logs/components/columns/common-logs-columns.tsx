@@ -89,7 +89,8 @@ export function getGroupRatioText(other: LogOtherData | null): string | null {
     Number.isFinite(groupRatio) &&
     (groupRatio !== 1 || isSubscriptionRatio)
   ) {
-    return `${formatRatioCompact(groupRatio)}x`
+    const ratioText = `${formatRatioCompact(groupRatio)}x`
+    return isSubscriptionRatio ? `Package ${ratioText}` : ratioText
   }
 
   return null

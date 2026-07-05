@@ -149,6 +149,11 @@ export interface LogOtherData {
   group_ratio?: number
   user_group_ratio?: number
   subscription_ratio_applied?: boolean
+  value_package_subscription_id?: number
+  value_package_plan_id?: number
+  value_package_model_group?: string
+  value_package_package_type?: string
+  value_package_effective_ratio?: number
   original_group_ratio?: number
   original_user_group_ratio?: number
   cache_ratio?: number
