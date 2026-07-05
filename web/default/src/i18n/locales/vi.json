@@ -5051,6 +5051,17 @@
     "我们不生产水，我们只是大自然的搬运工。为中国的 token 出海贡献一份力量。": "Chúng tôi không tạo ra nước. Chúng tôi chỉ vận chuyển nó từ tự nhiên. Chúng tôi góp một dòng chảy nhỏ cho token Trung Quốc vươn ra thế giới.",
     "无需担心掉线。": "无需担心掉线。",
     "永续的 Vibe Coding 助手": "Trợ lý Vibe Coding bền vững",
-    "永续的 Vibe Coding 助手，无需再担心掉线。": "Trợ lý Vibe Coding bền vững, không cần lo bị ngắt kết nối."
+    "永续的 Vibe Coding 助手，无需再担心掉线。": "Trợ lý Vibe Coding bền vững, không cần lo bị ngắt kết nối.",
+    "Auto-refresh every 15 seconds": "Tự động làm mới mỗi 15 giây",
+    "Expires at": "Hết hạn lúc",
+    "5-hour remaining": "Còn lại trong 5 giờ",
+    "7-day remaining": "Còn lại trong 7 ngày",
+    "No active value package users": "Chưa có người dùng gói giá trị đang hoạt động",
+    "Package": "Gói",
+    "Package total remaining": "Tổng còn lại của gói",
+    "Realtime 5-hour and 7-day remaining quota for active day, week, and month card users.": "Hiển thị theo thời gian thực hạn mức còn lại trong 5 giờ và 7 ngày cho người dùng thẻ ngày, tuần và tháng đang hoạt động.",
+    "Used: {{used}} / {{limit}}": "Đã dùng: {{used}} / {{limit}}",
+    "Users who enable day, week, or month cards will appear here with synced 5-hour and 7-day usage.": "Người dùng bật thẻ ngày, tuần hoặc tháng sẽ xuất hiện ở đây cùng mức sử dụng 5 giờ và 7 ngày đã đồng bộ.",
+    "Value Package Realtime Usage": "Mức sử dụng gói giá trị theo thời gian thực"
   }
 }

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1364,6 +1365,14 @@ type ValuePackageState struct {
 	Usage        *ValuePackageUsageSummary  `json:"usage,omitempty"`
 }
 
+type ValuePackageUsageRow struct {
+	UserId       int                       `json:"user_id"`
+	Username     string                    `json:"username"`
+	Subscription UserSubscription          `json:"subscription"`
+	Plan         SubscriptionPlan          `json:"plan"`
+	Usage        *ValuePackageUsageSummary `json:"usage"`
+}
+
 func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
 	var plans []SubscriptionPlan
 	if err := DB.Where("enabled = ? AND plan_kind = ?", true, SubscriptionPlanKindValuePackage).
@@ -1380,6 +1389,82 @@ func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
 
 func GetValuePackageState(userId int) (*ValuePackageState, error) {
 	return getValuePackageStateTx(DB, userId)
+}
+
+func ListActiveValuePackageUsageRows(now int64) ([]ValuePackageUsageRow, error) {
+	return listActiveValuePackageUsageRowsTx(DB, now)
+}
+
+func listActiveValuePackageUsageRowsTx(tx *gorm.DB, now int64) ([]ValuePackageUsageRow, error) {
+	if tx == nil {
+		tx = DB
+	}
+	if now <= 0 {
+		now = getDBTimestampTx(tx)
+	}
+
+	var prefs []UserValuePackagePreference
+	if err := tx.Where("enabled = ? AND active_user_subscription_id > ?", true, 0).
+		Order("active_user_subscription_id asc").Find(&prefs).Error; err != nil {
+		return nil, err
+	}
+
+	rows := make([]ValuePackageUsageRow, 0, len(prefs))
+	for _, pref := range prefs {
+		var sub UserSubscription
+		subResult := tx.Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", pref.ActiveUserSubscriptionId, pref.UserId, UserSubscriptionStatusActive, now).Limit(1).Find(&sub)
+		if subResult.Error != nil {
+			return nil, subResult.Error
+		}
+		if subResult.RowsAffected == 0 {
+			continue
+		}
+
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			continue
+		}
+
+		var user User
+		userResult := tx.Select("id", "username", "display_name").Where("id = ?", pref.UserId).Limit(1).Find(&user)
+		if userResult.Error != nil {
+			return nil, userResult.Error
+		}
+		if userResult.RowsAffected == 0 {
+			continue
+		}
+
+		usage, err := buildValuePackageUsageSummaryTx(tx, pref.UserId, &sub, plan, now)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, ValuePackageUsageRow{
+			UserId:       pref.UserId,
+			Username:     user.Username,
+			Subscription: sub,
+			Plan:         *plan,
+			Usage:        usage,
+		})
+	}
+
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].Plan.PackageLevel != rows[j].Plan.PackageLevel {
+			return rows[i].Plan.PackageLevel < rows[j].Plan.PackageLevel
+		}
+		if rows[i].Username != rows[j].Username {
+			return rows[i].Username < rows[j].Username
+		}
+		return rows[i].UserId < rows[j].UserId
+	})
+
+	return rows, nil
 }
 
 func GetActiveValuePackageForRelay(userId int) (*ValuePackageState, error) {

@@ -20,17 +20,19 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const sourcePath = new URL('./value-package-status-cards.tsx', import.meta.url)
+const sourcePath = new URL('./value-package-usage-table.tsx', import.meta.url)
 
-test('order management value package status cards show realtime users and quota', async () => {
+test('order management value package usage table shows per-user realtime 5h and 7d windows', async () => {
   const source = await readFile(sourcePath, 'utf8')
 
-  assert.match(source, /ValuePackageStatusCards/)
-  assert.match(source, /plan_kind === 'value_package'/)
-  assert.match(source, /Active Users/)
-  assert.match(source, /Remaining Quota/)
-  assert.match(source, /active_user_count/)
-  assert.match(source, /active_subscription_count/)
-  assert.match(source, /remaining_amount/)
-  assert.match(source, /unlimited_count/)
+  assert.match(source, /ValuePackageUsageTable/)
+  assert.match(source, /TableHeader/)
+  assert.match(source, /5-hour remaining/)
+  assert.match(source, /7-day remaining/)
+  assert.match(source, /used_5h/)
+  assert.match(source, /limit_5h/)
+  assert.match(source, /used_7d/)
+  assert.match(source, /limit_7d/)
+  assert.match(source, /formatQuota/)
+  assert.match(source, /Unlimited/)
 })

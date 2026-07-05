@@ -23,22 +23,23 @@ import test from 'node:test'
 const sourcePath = new URL('./index.tsx', import.meta.url)
 const apiSourcePath = new URL('./api.ts', import.meta.url)
 
-test('order management page mounts value package realtime stats and refreshes them', async () => {
+test('order management page mounts value package realtime usage table and refreshes it', async () => {
   const source = await readFile(sourcePath, 'utf8')
 
-  assert.match(source, /ValuePackageStatusCards/)
-  assert.match(source, /getOrderManagementValuePackagePlans/)
-  assert.match(source, /orderManagementKeys\.valuePackages/)
-  assert.match(source, /queryKey: orderManagementKeys\.valuePackages\(\)/)
+  assert.match(source, /ValuePackageUsageTable/)
+  assert.match(source, /getOrderManagementValuePackageUsage/)
+  assert.match(source, /orderManagementKeys\.valuePackageUsage/)
+  assert.match(source, /queryKey: orderManagementKeys\.valuePackageUsage\(\)/)
+  assert.match(source, /refetchInterval:\s*15_000/)
   assert.match(
     source,
-    /invalidateQueries\(\{\s*queryKey: orderManagementKeys\.valuePackages\(\)/s
+    /invalidateQueries\(\{\s*queryKey: orderManagementKeys\.valuePackageUsage\(\)/s
   )
 })
 
-test('order management API reuses admin subscription plans endpoint for value package stats', async () => {
+test('order management API uses dedicated value package usage endpoint', async () => {
   const source = await readFile(apiSourcePath, 'utf8')
 
-  assert.match(source, /getOrderManagementValuePackagePlans/)
-  assert.match(source, /\/api\/subscription\/admin\/plans/)
+  assert.match(source, /getOrderManagementValuePackageUsage/)
+  assert.match(source, /\/api\/order-management\/admin\/value-package-usage/)
 })

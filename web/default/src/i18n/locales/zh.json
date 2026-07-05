@@ -5051,6 +5051,17 @@
     "我们不生产水，我们只是大自然的搬运工。为中国的 token 出海贡献一份力量。": "我们不生产水，我们只是大自然的搬运工。为中国的 token 出海贡献一份力量。",
     "无需担心掉线。": "无需担心掉线。",
     "永续的 Vibe Coding 助手": "永续的 Vibe Coding 助手",
-    "永续的 Vibe Coding 助手，无需再担心掉线。": "永续的 Vibe Coding 助手，无需再担心掉线。"
+    "永续的 Vibe Coding 助手，无需再担心掉线。": "永续的 Vibe Coding 助手，无需再担心掉线。",
+    "Auto-refresh every 15 seconds": "每 15 秒自动刷新",
+    "Expires at": "到期时间",
+    "5-hour remaining": "5 小时剩余",
+    "7-day remaining": "7 天剩余",
+    "No active value package users": "暂无正在使用超值套餐的用户",
+    "Package": "套餐",
+    "Package total remaining": "套餐总剩余",
+    "Realtime 5-hour and 7-day remaining quota for active day, week, and month card users.": "实时显示正在使用日卡、周卡、月卡用户的 5 小时和 7 天剩余额度。",
+    "Used: {{used}} / {{limit}}": "已用：{{used}} / {{limit}}",
+    "Users who enable day, week, or month cards will appear here with synced 5-hour and 7-day usage.": "开启日卡、周卡或月卡的用户会显示在这里，并同步展示 5 小时和 7 天用量。",
+    "Value Package Realtime Usage": "超值套餐实时用量"
   }
 }

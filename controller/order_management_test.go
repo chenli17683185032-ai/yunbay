@@ -204,6 +204,11 @@ type adminOrderManagementOrdersResponse struct {
 	} `json:"data"`
 }
 
+type adminOrderManagementValuePackageUsageResponse struct {
+	Success bool                         `json:"success"`
+	Data    []model.ValuePackageUsageRow `json:"data"`
+}
+
 func TestAdminDeleteOrderRejectsInvalidType(t *testing.T) {
 	setupOrderManagementControllerTestDB(t)
 	ctx, recorder := newOrderManagementContext(http.MethodDelete, "/api/order-management/admin/billing-orders/invoice/A", `{}`)
@@ -425,4 +430,53 @@ func TestAdminOrderManagementOrdersReturnsValuePackageBillingFields(t *testing.T
 	assert.Equal(t, "月卡", item.PlanTitle)
 	assert.Equal(t, model.PaymentMethodLDXP, item.PaymentMethod)
 	assert.Equal(t, common.TopUpStatusSuccess, item.OrderStatus)
+}
+
+func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	now := common.GetTimestamp()
+	user := &model.User{Id: 8891, Username: "vp-admin-usage", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, AffCode: "vp-admin-usage-aff"}
+	require.NoError(t, model.DB.Create(user).Error)
+	plan := &model.SubscriptionPlan{
+		Title:           "日卡",
+		Enabled:         true,
+		PlanKind:        model.SubscriptionPlanKindValuePackage,
+		PackageType:     model.ValuePackageTypeDay,
+		PackageLevel:    model.ValuePackageLevelDay,
+		Currency:        "CNY",
+		DurationUnit:    model.SubscriptionDurationDay,
+		DurationValue:   1,
+		ModelGroup:      "day-card",
+		TotalAmount:     2000,
+		Limit5hAmount:   500,
+		Limit7dAmount:   1000,
+		PriceAmount:     3.9,
+		AllowBalancePay: nil,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 350, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive, Source: "test"}
+	require.NoError(t, model.DB.Create(sub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id}).Error)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "admin-usage-5h", Quota: 50, CreatedAt: now - 1800}))
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "admin-usage-7d", Quota: 70, CreatedAt: now - 6*3600}))
+
+	ctx, recorder := newOrderManagementContext(http.MethodGet, "/api/order-management/admin/value-package-usage", "")
+
+	AdminOrderManagementValuePackageUsage(ctx)
+
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	var response adminOrderManagementValuePackageUsageResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.True(t, response.Success)
+	require.Len(t, response.Data, 1)
+	row := response.Data[0]
+	assert.Equal(t, user.Id, row.UserId)
+	assert.Equal(t, user.Username, row.Username)
+	assert.Equal(t, sub.Id, row.Subscription.Id)
+	assert.Equal(t, model.ValuePackageTypeDay, row.Plan.PackageType)
+	require.NotNil(t, row.Usage)
+	assert.EqualValues(t, 50, row.Usage.Used5h)
+	assert.EqualValues(t, 120, row.Usage.Used7d)
+	assert.EqualValues(t, 500, row.Usage.Limit5h)
+	assert.EqualValues(t, 1000, row.Usage.Limit7d)
 }

@@ -29,7 +29,7 @@ import {
   deleteBillingOrder,
   getOrderAnalytics,
   getOrderManagementOrders,
-  getOrderManagementValuePackagePlans,
+  getOrderManagementValuePackageUsage,
   startBatchMailCheck,
   startSingleMailCheck,
 } from './api'
@@ -38,7 +38,7 @@ import { OrderAnalyticsCards } from './components/order-analytics-cards'
 import { OrderDetailsTable } from './components/order-details-table'
 import { OrderTrendChart } from './components/order-trend-chart'
 import { RangeToolbar } from './components/range-toolbar'
-import { ValuePackageStatusCards } from './components/value-package-status-cards'
+import { ValuePackageUsageTable } from './components/value-package-usage-table'
 import { buildOrderManagementRangeParams } from './lib/range'
 import type { DateRangeKey, MailCheckStatus } from './types'
 
@@ -71,7 +71,7 @@ const orderManagementKeys = {
     ['order-management', 'orders', params] as const,
   affiliate: (params: Record<string, unknown>) =>
     ['order-management', 'affiliate', params] as const,
-  valuePackages: () => ['order-management', 'value-packages'] as const,
+  valuePackageUsage: () => ['order-management', 'value-package-usage'] as const,
 }
 
 function isDateRangeKey(value: unknown): value is DateRangeKey {
@@ -154,15 +154,16 @@ export function OrderManagement() {
     placeholderData: (previousData) => previousData,
   })
 
-  const valuePackagesQuery = useQuery({
-    queryKey: orderManagementKeys.valuePackages(),
+  const valuePackageUsageQuery = useQuery({
+    queryKey: orderManagementKeys.valuePackageUsage(),
     queryFn: async () => {
-      const result = await getOrderManagementValuePackagePlans()
+      const result = await getOrderManagementValuePackageUsage()
       if (!result.success)
         throw new Error(result.message || t('Request failed'))
       return result.data || []
     },
     placeholderData: (previousData) => previousData,
+    refetchInterval: 15_000,
   })
 
   const invalidateOrderManagement = useCallback(async () => {
@@ -177,7 +178,7 @@ export function OrderManagement() {
         queryKey: ['order-management', 'affiliate'],
       }),
       queryClient.invalidateQueries({
-        queryKey: orderManagementKeys.valuePackages(),
+        queryKey: orderManagementKeys.valuePackageUsage(),
       }),
     ])
   }, [queryClient])
@@ -316,7 +317,7 @@ export function OrderManagement() {
           disabled={
             ordersQuery.isFetching ||
             analyticsQuery.isFetching ||
-            valuePackagesQuery.isFetching
+            valuePackageUsageQuery.isFetching
           }
           onClick={() => void invalidateOrderManagement()}
         >
@@ -346,9 +347,9 @@ export function OrderManagement() {
             isLoading={analyticsQuery.isLoading}
           />
 
-          <ValuePackageStatusCards
-            records={valuePackagesQuery.data}
-            isLoading={valuePackagesQuery.isLoading}
+          <ValuePackageUsageTable
+            rows={valuePackageUsageQuery.data}
+            isLoading={valuePackageUsageQuery.isLoading}
           />
 
           <OrderTrendChart

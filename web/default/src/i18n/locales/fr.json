@@ -5051,6 +5051,17 @@
     "我们不生产水，我们只是大自然的搬运工。为中国的 token 出海贡献一份力量。": "Nous ne produisons pas l’eau. Nous la déplaçons depuis la nature. Nous apportons un modeste courant au token chinois qui va vers le monde.",
     "无需担心掉线。": "无需担心掉线。",
     "永续的 Vibe Coding 助手": "Assistant Vibe Coding persistant",
-    "永续的 Vibe Coding 助手，无需再担心掉线。": "Un assistant Vibe Coding persistant, sans craindre les déconnexions."
+    "永续的 Vibe Coding 助手，无需再担心掉线。": "Un assistant Vibe Coding persistant, sans craindre les déconnexions.",
+    "Auto-refresh every 15 seconds": "Actualisation automatique toutes les 15 secondes",
+    "Expires at": "Expire le",
+    "5-hour remaining": "Restant sur 5 heures",
+    "7-day remaining": "Restant sur 7 jours",
+    "No active value package users": "Aucun utilisateur de forfait avantage actif",
+    "Package": "Forfait",
+    "Package total remaining": "Total restant du forfait",
+    "Realtime 5-hour and 7-day remaining quota for active day, week, and month card users.": "Quota restant en temps réel sur 5 heures et 7 jours pour les utilisateurs actifs des cartes jour, semaine et mois.",
+    "Used: {{used}} / {{limit}}": "Utilisé : {{used}} / {{limit}}",
+    "Users who enable day, week, or month cards will appear here with synced 5-hour and 7-day usage.": "Les utilisateurs qui activent une carte jour, semaine ou mois apparaîtront ici avec leur usage synchronisé sur 5 heures et 7 jours.",
+    "Value Package Realtime Usage": "Utilisation en temps réel des forfaits avantage"
   }
 }

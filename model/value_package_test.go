@@ -899,6 +899,56 @@ func TestRecordValuePackageUsageUpsertsBySubscriptionAndRequest(t *testing.T) {
 	require.EqualValues(t, 45, used7d)
 }
 
+func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	now := common.GetTimestamp()
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 10000
+	day.Limit5hAmount = 1000
+	day.Limit7dAmount = 5000
+	require.NoError(t, DB.Save(&day).Error)
+	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+
+	activeUser := createValuePackageUser(t, 3501, UserGroupTiyan)
+	activeSub := createActiveValuePackageSub(t, activeUser.Id, day, now-100, now+86400)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", activeSub.Id).Updates(map[string]any{"amount_used": int64(700)}).Error)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: activeUser.Id, Enabled: true, ActiveUserSubscriptionId: activeSub.Id}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: activeUser.Id, UserSubscriptionId: activeSub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "active-5h", Quota: 100, CreatedAt: now - 3600}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: activeUser.Id, UserSubscriptionId: activeSub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "active-7d", Quota: 200, CreatedAt: now - 6*3600}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: activeUser.Id, UserSubscriptionId: activeSub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "active-old", Quota: 999, CreatedAt: now - 8*24*3600}))
+
+	disabledUser := createValuePackageUser(t, 3502, UserGroupTiyan)
+	disabledSub := createActiveValuePackageSub(t, disabledUser.Id, week, now-100, now+86400)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: disabledUser.Id, Enabled: false, ActiveUserSubscriptionId: disabledSub.Id}).Error)
+
+	otherActiveUser := createValuePackageUser(t, 3503, UserGroupTiyan)
+	otherActiveSub := createActiveValuePackageSub(t, otherActiveUser.Id, month, now-100, now+86400)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: otherActiveUser.Id, Enabled: true, ActiveUserSubscriptionId: activeSub.Id}).Error)
+	_ = otherActiveSub
+
+	expiredUser := createValuePackageUser(t, 3504, UserGroupTiyan)
+	expiredSub := createActiveValuePackageSub(t, expiredUser.Id, day, now-86400, now-1)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: expiredUser.Id, Enabled: true, ActiveUserSubscriptionId: expiredSub.Id}).Error)
+
+	rows, err := ListActiveValuePackageUsageRows(now)
+
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	row := rows[0]
+	require.Equal(t, activeUser.Id, row.UserId)
+	require.Equal(t, activeUser.Username, row.Username)
+	require.Equal(t, activeSub.Id, row.Subscription.Id)
+	require.Equal(t, day.Id, row.Plan.Id)
+	require.NotNil(t, row.Usage)
+	require.EqualValues(t, 100, row.Usage.Used5h)
+	require.EqualValues(t, 300, row.Usage.Used7d)
+	require.EqualValues(t, 1000, row.Usage.Limit5h)
+	require.EqualValues(t, 5000, row.Usage.Limit7d)
+	require.EqualValues(t, 700, row.Usage.TotalUsed)
+	require.EqualValues(t, 9300, row.Usage.TotalRemaining)
+}
+
 func TestRefundSubscriptionPreConsumeRevokesValuePackageUsageReservation(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3312, UserGroupTiyan)

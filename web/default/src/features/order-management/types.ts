@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type {
   PlanRecord,
+  SubscriptionPlan,
   SubscriptionPlanStats,
+  UserSubscription,
 } from '@/features/subscriptions/types'
 
 export type MailCheckStatus =
@@ -182,6 +184,31 @@ export interface AffiliateStatsResponse {
   summary: AffiliateStatsSummary
   items: AffiliateStatsItem[]
   total: number
+}
+
+
+export interface OrderManagementValuePackageUsageSummary {
+  total_used: number
+  total_limit: number
+  total_remaining: number
+  total_percent: number
+  used_5h: number
+  limit_5h: number
+  percent_5h: number
+  used_7d: number
+  limit_7d: number
+  percent_7d: number
+  exhausted: boolean
+  exhausted_reason: string
+  exhausted_message: string
+}
+
+export interface OrderManagementValuePackageUsageRow {
+  user_id: number
+  username: string
+  subscription: UserSubscription
+  plan: SubscriptionPlan
+  usage: OrderManagementValuePackageUsageSummary | null
 }
 
 export type OrderManagementValuePackagePlanRecord = PlanRecord

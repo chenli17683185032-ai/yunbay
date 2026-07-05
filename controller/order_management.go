@@ -177,6 +177,15 @@ func AdminOrderManagementOrders(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func AdminOrderManagementValuePackageUsage(c *gin.Context) {
+	rows, err := model.ListActiveValuePackageUsageRows(common.GetTimestamp())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, rows)
+}
+
 func AdminOrderManagementMailCheck(c *gin.Context) {
 	req := dto.MailCheckRequest{}
 	if _, err := decodeOptionalJSONBody(c, &req); err != nil {
