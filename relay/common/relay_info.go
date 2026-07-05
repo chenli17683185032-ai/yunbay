@@ -92,6 +92,8 @@ type RelayInfo struct {
 	UserId            int
 	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
 	UserGroup         string // 用户所在分组
+	RealUserGroup     string // 真实用户分组，套餐计费不覆盖该值
+	BillingUserGroup  string // 用于计费倍率查询的用户分组
 	TokenUnlimited    bool
 	StartTime         time.Time
 	FirstResponseTime time.Time
@@ -146,6 +148,7 @@ type RelayInfo struct {
 	// ValuePackage* fields identify the active value-package entitlement enforced by middleware.
 	ValuePackageSubscriptionId int
 	ValuePackagePlanId         int
+	ValuePackageBillingGroup   string
 	ValuePackageModelGroup     string
 	ValuePackagePackageType    string
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
@@ -464,8 +467,11 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		reqId = common.GetTimeString() + common.GetRandomString(8)
 	}
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-	if valuePackageGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup)); valuePackageGroup != "" {
-		userGroup = valuePackageGroup
+	realUserGroup := userGroup
+	valuePackageGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup))
+	billingUserGroup := realUserGroup
+	if valuePackageGroup != "" {
+		billingUserGroup = valuePackageGroup
 	}
 	info := &RelayInfo{
 		Request: request,
@@ -474,11 +480,14 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserId:                     common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		UsingGroup:                 common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
 		UserGroup:                  userGroup,
+		RealUserGroup:              realUserGroup,
+		BillingUserGroup:           billingUserGroup,
 		UserQuota:                  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
 		UserEmail:                  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 		ValuePackageSubscriptionId: common.GetContextKeyInt(c, constant.ContextKeyValuePackageSubscriptionId),
 		ValuePackagePlanId:         common.GetContextKeyInt(c, constant.ContextKeyValuePackagePlanId),
-		ValuePackageModelGroup:     common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup),
+		ValuePackageBillingGroup:   valuePackageGroup,
+		ValuePackageModelGroup:     valuePackageGroup,
 		ValuePackagePackageType:    common.GetContextKeyString(c, constant.ContextKeyValuePackagePackageType),
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
@@ -630,6 +639,19 @@ func (info *RelayInfo) AppendRequestConversion(format types.RelayFormat) {
 		return
 	}
 	info.RequestConversionChain = append(info.RequestConversionChain, format)
+}
+
+func (info *RelayInfo) BillingRatioUserGroup() string {
+	if info == nil {
+		return ""
+	}
+	if group := strings.TrimSpace(info.BillingUserGroup); group != "" {
+		return group
+	}
+	if group := strings.TrimSpace(info.ValuePackageBillingGroup); group != "" {
+		return group
+	}
+	return strings.TrimSpace(info.UserGroup)
 }
 
 func (info *RelayInfo) GetFinalRequestRelayFormat() types.RelayFormat {

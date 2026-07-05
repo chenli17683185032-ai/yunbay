@@ -87,3 +87,34 @@ func TestModelPriceHelperAllowsUnpricedChannelProbe(t *testing.T) {
 	require.True(t, priceData.FreeModel)
 	require.Zero(t, priceData.QuotaToPreConsume)
 }
+
+func TestHandleGroupRatioUsesBillingUserGroupWithoutMutatingRoutingGroup(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldGroupRatios := ratio_setting.GroupRatio2JSONString()
+	oldGroupGroupRatios := ratio_setting.GroupGroupRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"gpt-plus":0.3}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"month-card":{"gpt-plus":1}}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldGroupRatios))
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(oldGroupGroupRatios))
+	})
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	info := &relaycommon.RelayInfo{
+		UserGroup:                "vip",
+		RealUserGroup:            "vip",
+		BillingUserGroup:         "month-card",
+		ValuePackageBillingGroup: "month-card",
+		UsingGroup:               "gpt-plus",
+	}
+
+	ratio := HandleGroupRatio(ctx, info)
+
+	require.Equal(t, "vip", info.UserGroup)
+	require.Equal(t, "gpt-plus", info.UsingGroup)
+	require.True(t, ratio.HasSpecialRatio)
+	require.Equal(t, 1.0, ratio.GroupRatio)
+	require.Equal(t, 1.0, ratio.GroupSpecialRatio)
+}

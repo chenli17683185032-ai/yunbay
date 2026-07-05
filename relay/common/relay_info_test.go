@@ -44,7 +44,7 @@ func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
 }
 
-func TestGenRelayInfoUsesValuePackageGroupOnlyForBillingIdentity(t *testing.T) {
+func TestGenRelayInfoKeepsUserGroupAndSetsValuePackageBillingGroup(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
@@ -61,10 +61,13 @@ func TestGenRelayInfoUsesValuePackageGroupOnlyForBillingIdentity(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, info)
+	require.Equal(t, "vip", info.UserGroup)
+	require.Equal(t, "vip", info.RealUserGroup)
 	require.Equal(t, "gpt-plus", info.UsingGroup)
-	require.Equal(t, "month-card", info.UserGroup)
-	require.Equal(t, 123, info.ValuePackageSubscriptionId)
-	require.Equal(t, 456, info.ValuePackagePlanId)
+	require.Equal(t, "gpt-plus", info.TokenGroup)
+	require.Equal(t, "month-card", info.BillingUserGroup)
+	require.Equal(t, "month-card", info.ValuePackageBillingGroup)
 	require.Equal(t, "month-card", info.ValuePackageModelGroup)
 	require.Equal(t, "month", info.ValuePackagePackageType)
+	require.Equal(t, "month-card", info.BillingRatioUserGroup())
 }
