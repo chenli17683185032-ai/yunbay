@@ -23,6 +23,7 @@ import type {
   PlanPayload,
   UserSubscriptionRecord,
   CreateUserSubscriptionRequest,
+  CreateSubscriptionRedemptionsRequest,
   SubscriptionPayResponse,
   SubscriptionPayRequest,
   SelfSubscriptionData,
@@ -59,6 +60,17 @@ export async function patchPlanStatus(
   const res = await api.patch(`/api/subscription/admin/plans/${id}`, {
     enabled,
   })
+  return res.data
+}
+
+export async function createSubscriptionRedemptions(
+  planId: number,
+  data: CreateSubscriptionRedemptionsRequest
+): Promise<ApiResponse<string[]>> {
+  const res = await api.post(
+    `/api/subscription/admin/plans/${planId}/redemptions`,
+    data
+  )
   return res.data
 }
 

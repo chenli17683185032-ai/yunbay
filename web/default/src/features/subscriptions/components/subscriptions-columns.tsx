@@ -158,6 +158,44 @@ export function useSubscriptionsColumns(): ColumnDef<PlanRecord>[] {
         size: 140,
       },
       {
+        id: 'active_users',
+        header: t('Active Users'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => {
+          const stats = row.original.stats
+          return (
+            <span className='text-muted-foreground'>
+              {t('{{users}} users / {{subscriptions}} subscriptions', {
+                users: stats?.active_user_count || 0,
+                subscriptions: stats?.active_subscription_count || 0,
+              })}
+            </span>
+          )
+        },
+        size: 160,
+      },
+      {
+        id: 'remaining_amount',
+        header: t('Remaining Quota'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => {
+          const stats = row.original.stats
+          const quotaText = formatQuota(stats?.remaining_amount || 0)
+          const unlimitedCount = stats?.unlimited_count || 0
+          return (
+            <span className='text-muted-foreground'>
+              {unlimitedCount > 0
+                ? t('{{quota}} + {{count}} unlimited', {
+                    quota: quotaText,
+                    count: unlimitedCount,
+                  })
+                : quotaText}
+            </span>
+          )
+        },
+        size: 180,
+      },
+      {
         id: 'total_amount',
         header: t('Received amount'),
         meta: { mobileHidden: true },

@@ -62,8 +62,16 @@ export const subscriptionPlanSchema = z.object({
 
 export type SubscriptionPlan = z.infer<typeof subscriptionPlanSchema>
 
+export interface SubscriptionPlanStats {
+  active_user_count: number
+  active_subscription_count: number
+  remaining_amount: number
+  unlimited_count: number
+}
+
 export interface PlanRecord {
   plan: SubscriptionPlan
+  stats?: SubscriptionPlanStats
 }
 
 // ============================================================================
@@ -131,6 +139,12 @@ export interface CreateUserSubscriptionRequest {
   plan_id: number
 }
 
+export interface CreateSubscriptionRedemptionsRequest {
+  name: string
+  count: number
+  expired_time: number
+}
+
 // ============================================================================
 // Self Subscription Data (user-facing)
 // ============================================================================
@@ -145,4 +159,8 @@ export interface SelfSubscriptionData {
 // Dialog Types
 // ============================================================================
 
-export type SubscriptionsDialogType = 'create' | 'update' | 'toggle-status'
+export type SubscriptionsDialogType =
+  | 'create'
+  | 'update'
+  | 'toggle-status'
+  | 'generate-redemptions'

@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { SubscriptionRedemptionsDialog } from './dialogs/subscription-redemptions-dialog'
 import { ToggleStatusDialog } from './dialogs/toggle-status-dialog'
 import { SubscriptionsMutateDrawer } from './subscriptions-mutate-drawer'
 import { useSubscriptions } from './subscriptions-provider'
@@ -32,6 +33,11 @@ export function SubscriptionsDialogs() {
         currentRow={currentRow || undefined}
       />
       <ToggleStatusDialog />
+      <SubscriptionRedemptionsDialog
+        open={open === 'generate-redemptions'}
+        onOpenChange={(state) => setOpen(state ? 'generate-redemptions' : null)}
+        record={currentRow}
+      />
     </>
   )
 }
