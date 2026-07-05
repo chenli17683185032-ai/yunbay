@@ -120,6 +120,13 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo == nil || other == nil {
 		return
 	}
+	appendBillingInfoFromPriceData(relayInfo, relayInfo.PriceData, other)
+}
+
+func appendBillingInfoFromPriceData(relayInfo *relaycommon.RelayInfo, priceData types.PriceData, other map[string]interface{}) {
+	if relayInfo == nil || other == nil {
+		return
+	}
 	// billing_source: "wallet" or "subscription"
 	if relayInfo.BillingSource != "" {
 		other["billing_source"] = relayInfo.BillingSource
@@ -127,7 +134,7 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo.UserSetting.BillingPreference != "" {
 		other["billing_preference"] = relayInfo.UserSetting.BillingPreference
 	}
-	if relayInfo.PriceData.SubscriptionRatioApplied {
+	if priceData.SubscriptionRatioApplied {
 		other["subscription_ratio_applied"] = true
 	}
 	if relayInfo.ValuePackageSubscriptionId != 0 {
@@ -142,12 +149,12 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other map[string]interf
 	if relayInfo.ValuePackagePackageType != "" {
 		other["value_package_package_type"] = relayInfo.ValuePackagePackageType
 	}
-	if relayInfo.PriceData.SubscriptionRatioApplied {
-		other["value_package_effective_ratio"] = relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	if priceData.SubscriptionRatioApplied {
+		other["value_package_effective_ratio"] = priceData.GroupRatioInfo.GroupRatio
 	}
-	if relayInfo.PriceData.HasOriginalGroupRatioInfo {
-		other["original_group_ratio"] = relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio
-		other["original_user_group_ratio"] = relayInfo.PriceData.OriginalGroupRatioInfo.GroupSpecialRatio
+	if priceData.HasOriginalGroupRatioInfo {
+		other["original_group_ratio"] = priceData.OriginalGroupRatioInfo.GroupRatio
+		other["original_user_group_ratio"] = priceData.OriginalGroupRatioInfo.GroupSpecialRatio
 	}
 	if relayInfo.BillingSource == "subscription" {
 		if relayInfo.SubscriptionId != 0 {
@@ -283,13 +290,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData types.Price
 	if priceData.GroupRatioInfo.HasSpecialRatio {
 		other["user_group_ratio"] = priceData.GroupRatioInfo.GroupSpecialRatio
 	}
-	if priceData.SubscriptionRatioApplied {
-		other["subscription_ratio_applied"] = true
-	}
-	if priceData.HasOriginalGroupRatioInfo {
-		other["original_group_ratio"] = priceData.OriginalGroupRatioInfo.GroupRatio
-		other["original_user_group_ratio"] = priceData.OriginalGroupRatioInfo.GroupSpecialRatio
-	}
+	appendBillingInfoFromPriceData(relayInfo, priceData, other)
 	appendRequestPath(nil, relayInfo, other)
 	return other
 }

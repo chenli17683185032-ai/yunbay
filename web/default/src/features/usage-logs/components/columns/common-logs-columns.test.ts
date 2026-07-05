@@ -20,7 +20,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getGroupRatioText } from './common-logs-columns'
 
-test('common log token metadata displays 1x when subscription ratio is applied', () => {
+test('common log token metadata displays Package 1x when subscription ratio is applied', () => {
   assert.equal(
     getGroupRatioText({
       group_ratio: 1,
@@ -28,6 +28,20 @@ test('common log token metadata displays 1x when subscription ratio is applied',
       subscription_ratio_applied: true,
     }),
     'Package 1x'
+  )
+})
+
+test('common log token metadata uses provided package label', () => {
+  assert.equal(
+    getGroupRatioText(
+      {
+        group_ratio: 1,
+        user_group_ratio: -1,
+        subscription_ratio_applied: true,
+      },
+      '套餐'
+    ),
+    '套餐 1x'
   )
 })
 

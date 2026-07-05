@@ -72,7 +72,10 @@ function formatRatioCompact(ratio: number | undefined): string {
     : ratio.toFixed(4).replace(/\.?0+$/, '')
 }
 
-export function getGroupRatioText(other: LogOtherData | null): string | null {
+export function getGroupRatioText(
+  other: LogOtherData | null,
+  packageLabel = 'Package'
+): string | null {
   const userGroupRatio = other?.user_group_ratio
   if (
     userGroupRatio != null &&
@@ -90,7 +93,7 @@ export function getGroupRatioText(other: LogOtherData | null): string | null {
     (groupRatio !== 1 || isSubscriptionRatio)
   ) {
     const ratioText = `${formatRatioCompact(groupRatio)}x`
-    return isSubscriptionRatio ? `Package ${ratioText}` : ratioText
+    return isSubscriptionRatio ? `${packageLabel} ${ratioText}` : ratioText
   }
 
   return null
@@ -487,7 +490,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       if (!group) group = other?.group || ''
 
       const metaParts: string[] = []
-      const groupRatioText = getGroupRatioText(other)
+      const groupRatioText = getGroupRatioText(other, t('Package'))
       if (group) {
         metaParts.push(sensitiveVisible ? group : '••••')
       }

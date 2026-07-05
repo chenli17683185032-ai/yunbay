@@ -321,3 +321,38 @@ func TestQuotaWithGroupRatioMatchesTaskPipelineStepwiseOtherRatios(t *testing.T)
 
 	assert.Equal(t, 748, quotaWithGroupRatio(priceData, 1))
 }
+
+func TestGenerateMjOtherInfoIncludesValuePackageBillingAudit(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		ValuePackageSubscriptionId: 123,
+		ValuePackagePlanId:         456,
+		ValuePackageModelGroup:     "month-card",
+		ValuePackagePackageType:    "month",
+	}
+	priceData := types.PriceData{
+		ModelPrice: 0.02,
+		GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio:        1,
+			GroupSpecialRatio: -1,
+			HasSpecialRatio:   false,
+		},
+		SubscriptionRatioApplied:  true,
+		HasOriginalGroupRatioInfo: true,
+		OriginalGroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio:        0.3,
+			GroupSpecialRatio: -1,
+			HasSpecialRatio:   false,
+		},
+	}
+
+	other := GenerateMjOtherInfo(relayInfo, priceData)
+
+	assert.Equal(t, true, other["subscription_ratio_applied"])
+	assert.Equal(t, 0.3, other["original_group_ratio"])
+	assert.Equal(t, -1.0, other["original_user_group_ratio"])
+	assert.Equal(t, 123, other["value_package_subscription_id"])
+	assert.Equal(t, 456, other["value_package_plan_id"])
+	assert.Equal(t, "month-card", other["value_package_model_group"])
+	assert.Equal(t, "month", other["value_package_package_type"])
+	assert.Equal(t, 1.0, other["value_package_effective_ratio"])
+}
