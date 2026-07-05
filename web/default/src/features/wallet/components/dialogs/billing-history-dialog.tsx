@@ -195,9 +195,11 @@ export function BillingHistoryDialog({
               <div className='space-y-3'>
                 {records.map((record) => {
                   const statusConfig = getStatusConfig(record.status)
+                  const orderType =
+                    'order_type' in record ? record.order_type : 'topup'
                   return (
                     <div
-                      key={record.id}
+                      key={`${orderType}:${record.trade_no}`}
                       className='hover:bg-muted/50 rounded-lg border p-3 transition-colors sm:p-4'
                     >
                       {/* Header Row */}
@@ -220,12 +222,7 @@ export function BillingHistoryDialog({
                               )}
                             </Button>
                             <StatusBadge
-                              label={getOrderTypeLabel(
-                                'order_type' in record
-                                  ? record.order_type
-                                  : 'topup',
-                                t
-                              )}
+                              label={getOrderTypeLabel(orderType, t)}
                               variant='neutral'
                               size='sm'
                               copyable={false}
@@ -311,16 +308,13 @@ export function BillingHistoryDialog({
                             variant='destructive'
                             onClick={() =>
                               setDeleteTarget({
-                                orderType:
-                                  'order_type' in record
-                                    ? record.order_type
-                                    : 'topup',
+                                orderType,
                                 tradeNo: record.trade_no,
                               })
                             }
                             disabled={deleting}
                           >
-                            <Trash2 className='mr-1 h-3 w-3' />
+                            <Trash2 data-icon='inline-start' />
                             {t('Hide Order')}
                           </Button>
                         </div>
@@ -415,12 +409,12 @@ export function BillingHistoryDialog({
               {t('Cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
+              variant='destructive'
               onClick={async () => {
                 if (!deleteTarget) return
                 const success = await handleDeleteOrder(
                   deleteTarget.orderType,
-                  deleteTarget.tradeNo,
-                  'test order'
+                  deleteTarget.tradeNo
                 )
                 if (success) setDeleteTarget(null)
               }}
