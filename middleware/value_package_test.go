@@ -353,6 +353,68 @@ func TestValuePackageConcurrencyLimiter(t *testing.T) {
 	require.False(t, exists)
 }
 
+func TestValuePackageRedisConcurrencyLimiterReclaimsRecentlyStaleSlot(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	oldRedisEnabled := common.RedisEnabled
+	oldRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RDB = oldRDB
+		common.RedisEnabled = oldRedisEnabled
+	})
+
+	key := valuePackageConcurrencyRedisKey(9201)
+	staleScore := time.Now().Add(-3 * time.Minute).Unix()
+	require.NoError(t, common.RDB.ZAdd(common.RDB.Context(), key, &redis.Z{Score: float64(staleScore), Member: "stale-token"}).Err())
+	require.NoError(t, common.RDB.Expire(common.RDB.Context(), key, 30*time.Minute).Err())
+
+	release, ok, err := acquireValuePackageSlot(9201, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, release)
+	release()
+	require.False(t, redisServer.Exists(key))
+}
+
+func TestRefreshValuePackageRedisSlotUpdatesOnlyExistingSlot(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	oldRedisEnabled := common.RedisEnabled
+	oldRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RDB = oldRDB
+		common.RedisEnabled = oldRedisEnabled
+	})
+
+	key := valuePackageConcurrencyRedisKey(9202)
+	oldScore := time.Now().Add(-time.Minute).Unix()
+	require.NoError(t, common.RDB.ZAdd(common.RDB.Context(), key, &redis.Z{Score: float64(oldScore), Member: "live-token"}).Err())
+	require.NoError(t, common.RDB.Expire(common.RDB.Context(), key, 5*time.Second).Err())
+
+	refreshed, err := refreshValuePackageRedisSlot(key, "live-token", 30)
+	require.NoError(t, err)
+	require.True(t, refreshed)
+	score, err := common.RDB.ZScore(common.RDB.Context(), key, "live-token").Result()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, int64(score), time.Now().Add(-2*time.Second).Unix())
+	redisServer.FastForward(6 * time.Second)
+	require.True(t, redisServer.Exists(key))
+
+	removed, err := common.RDB.ZRem(common.RDB.Context(), key, "live-token").Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, removed)
+	refreshed, err = refreshValuePackageRedisSlot(key, "live-token", 30)
+	require.NoError(t, err)
+	require.False(t, refreshed)
+	exists, err := common.RDB.Exists(common.RDB.Context(), key).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 0, exists)
+}
+
 func TestValuePackageRedisConcurrencyLimiter(t *testing.T) {
 	redisServer := miniredis.RunT(t)
 	oldRedisEnabled := common.RedisEnabled

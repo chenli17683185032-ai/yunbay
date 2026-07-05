@@ -19,7 +19,8 @@ type valuePackageConcurrencyCounter struct {
 	count int
 }
 
-const valuePackageConcurrencySlotTTL = 30 * time.Minute
+const valuePackageConcurrencySlotTTL = 2 * time.Minute
+const valuePackageConcurrencySlotRefreshInterval = 30 * time.Second
 
 const valuePackageConcurrencyRedisAcquireScript = `
 local key = KEYS[1]
@@ -50,6 +51,23 @@ else
   redis.call('EXPIRE', key, ttl)
 end
 return count
+`
+
+const valuePackageConcurrencyRedisRefreshScript = `
+local key = KEYS[1]
+local token = ARGV[1]
+local now = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+if redis.call('ZSCORE', key, token) then
+  redis.call('ZADD', key, now, token)
+  redis.call('EXPIRE', key, ttl)
+  return 1
+end
+local count = redis.call('ZCARD', key)
+if count == 0 then
+  redis.call('DEL', key)
+end
+return 0
 `
 
 // valuePackageConcurrencyCounters is the fallback limiter used when Redis is
@@ -136,6 +154,8 @@ func acquireValuePackageRedisSlot(userSubscriptionId int, limit int) (func(), bo
 
 	var mu sync.Mutex
 	released := false
+	stopRefresh := make(chan struct{})
+	go keepValuePackageRedisSlotFresh(key, token, ttlSeconds, stopRefresh)
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
@@ -143,10 +163,41 @@ func acquireValuePackageRedisSlot(userSubscriptionId int, limit int) (func(), bo
 			return
 		}
 		released = true
+		close(stopRefresh)
 		if err := releaseValuePackageRedisSlot(key, token, ttlSeconds); err != nil {
 			common.SysError(fmt.Sprintf("failed to release value package concurrency slot: %v", err))
 		}
 	}, true, nil
+}
+
+func keepValuePackageRedisSlotFresh(key string, token string, ttlSeconds int64, stop <-chan struct{}) {
+	ticker := time.NewTicker(valuePackageConcurrencySlotRefreshInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			refreshed, err := refreshValuePackageRedisSlot(key, token, ttlSeconds)
+			if err != nil {
+				common.SysError(fmt.Sprintf("failed to refresh value package concurrency slot: %v", err))
+				continue
+			}
+			if !refreshed {
+				return
+			}
+		case <-stop:
+			return
+		}
+	}
+}
+
+func refreshValuePackageRedisSlot(key string, token string, ttlSeconds int64) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	refreshed, err := common.RDB.Eval(ctx, valuePackageConcurrencyRedisRefreshScript, []string{key}, token, time.Now().Unix(), ttlSeconds).Int()
+	if err != nil {
+		return false, err
+	}
+	return refreshed == 1, nil
 }
 
 func releaseValuePackageRedisSlot(key string, token string, ttlSeconds int64) error {
