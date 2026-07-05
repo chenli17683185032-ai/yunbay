@@ -1229,3 +1229,58 @@ func TestGetValuePackageStateIncludesAuthoritativeBillingState(t *testing.T) {
 	require.Equal(t, month.Id, state.Billing.PlanId)
 	require.Equal(t, month.Title, state.Billing.PlanTitle)
 }
+
+func TestReserveValuePackageUsageToTargetEnforcesRollingLimitAtomically(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3601, UserGroupVIP)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.ModelGroup = "month-card"
+	month.TotalAmount = 1000
+	month.Limit5hAmount = 10
+	month.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, month, now-10, now+3600)
+	_, err := PreConsumeValuePackageSubscription("reserve-target-limit", user.Id, sub.Id, 1)
+	require.NoError(t, err)
+
+	_, err = ReserveValuePackageUsageToTarget("reserve-target-limit", user.Id, sub.Id, 20)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), ValuePackageQuotaExhaustedUserMessage)
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
+	require.EqualValues(t, 1, reloaded.AmountUsed)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
+	require.NoError(t, err)
+	require.EqualValues(t, 1, used5h)
+	require.EqualValues(t, 1, used7d)
+}
+
+func TestReserveValuePackageUsageToTargetReplacesExistingRequestQuota(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3602, UserGroupVIP)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.ModelGroup = "month-card"
+	month.TotalAmount = 1000
+	month.Limit5hAmount = 25
+	month.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, month, now-10, now+3600)
+	_, err := PreConsumeValuePackageSubscription("reserve-target-replace", user.Id, sub.Id, 10)
+	require.NoError(t, err)
+
+	res, err := ReserveValuePackageUsageToTarget("reserve-target-replace", user.Id, sub.Id, 20)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 10, res.AmountUsedBefore)
+	require.EqualValues(t, 20, res.AmountUsedAfter)
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
+	require.EqualValues(t, 20, reloaded.AmountUsed)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
+	require.NoError(t, err)
+	require.EqualValues(t, 20, used5h)
+	require.EqualValues(t, 20, used7d)
+}

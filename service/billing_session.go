@@ -212,6 +212,77 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 	return nil
 }
 
+func (s *BillingSession) ReserveRealtime(deltaQuota int, minTarget int) (int, error) {
+	if s == nil {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	currentTarget := s.relayInfo.RealtimeReservedQuota
+	if deltaQuota <= 0 {
+		return currentTarget, nil
+	}
+	if s.settled || s.refunded {
+		return currentTarget, nil
+	}
+
+	s.relayInfo.RealtimeActualQuota += deltaQuota
+	target := s.relayInfo.RealtimeActualQuota
+	if minTarget > target {
+		target = minTarget
+	}
+	if s.relayInfo.RealtimeReservedQuota >= target {
+		return s.relayInfo.RealtimeReservedQuota, nil
+	}
+	if target <= s.preConsumedQuota {
+		s.relayInfo.RealtimeReservedQuota = target
+		return target, nil
+	}
+
+	extraDelta := target - s.preConsumedQuota
+	funding, isSubscription := s.funding.(*SubscriptionFunding)
+	if isSubscription && funding.valuePackageSubscriptionId > 0 {
+		previousTarget := s.preConsumedQuota
+		if err := s.reserveToken(extraDelta); err != nil {
+			return currentTarget, err
+		}
+		res, err := model.ReserveValuePackageUsageToTarget(funding.requestId, funding.userId, funding.valuePackageSubscriptionId, int64(target))
+		if err != nil {
+			if !s.relayInfo.IsPlayground {
+				if rollbackErr := model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, extraDelta); rollbackErr != nil {
+					common.SysLog(fmt.Sprintf("error rolling back realtime token reserve (userId=%d, tokenId=%d, amount=%d, fundingErr=%s): %s",
+						s.relayInfo.UserId, s.relayInfo.TokenId, extraDelta, err.Error(), rollbackErr.Error()))
+				}
+			}
+			return currentTarget, err
+		}
+		s.preConsumedQuota = target
+		s.tokenConsumed += extraDelta
+		s.extraReserved += target - previousTarget
+		funding.subscriptionId = res.UserSubscriptionId
+		funding.AmountTotal = res.AmountTotal
+		s.syncRelayInfo()
+		s.relayInfo.RealtimeReservedQuota = target
+		return target, nil
+	}
+
+	if err := s.reserveFunding(extraDelta); err != nil {
+		return currentTarget, err
+	}
+	if err := s.reserveToken(extraDelta); err != nil {
+		s.rollbackFundingReserve(extraDelta)
+		return currentTarget, err
+	}
+
+	s.preConsumedQuota += extraDelta
+	s.tokenConsumed += extraDelta
+	s.extraReserved += extraDelta
+	s.syncRelayInfo()
+	s.relayInfo.RealtimeReservedQuota = target
+	return target, nil
+}
+
 // ---------------------------------------------------------------------------
 // PreConsume — 统一预扣费入口（含信任额度旁路）
 // ---------------------------------------------------------------------------

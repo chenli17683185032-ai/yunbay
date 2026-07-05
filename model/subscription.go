@@ -2053,6 +2053,120 @@ func RecordValuePackageUsage(record *ValuePackageUsageRecord) error {
 	return recordValuePackageUsageTx(DB, record)
 }
 
+func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscriptionId int, targetQuota int64) (*SubscriptionPreConsumeResult, error) {
+	if strings.TrimSpace(requestId) == "" {
+		return nil, errors.New("requestId is empty")
+	}
+	if userId <= 0 {
+		return nil, errors.New("invalid userId")
+	}
+	if userSubscriptionId <= 0 {
+		return nil, errors.New("invalid userSubscriptionId")
+	}
+	if targetQuota < 0 {
+		return nil, errors.New("targetQuota must be non-negative")
+	}
+	now := GetDBTimestamp()
+	returnValue := &SubscriptionPreConsumeResult{}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var sub UserSubscription
+		if err := withUpdateLock(tx).
+			Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", userSubscriptionId, userId, UserSubscriptionStatusActive, now).
+			First(&sub).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("no active subscription")
+			}
+			return err
+		}
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			return errors.New("subscription is not value package")
+		}
+
+		var existing ValuePackageUsageRecord
+		currentQuota := int64(0)
+		currentCreatedAt := int64(0)
+		query := tx.Where("user_subscription_id = ? AND request_id = ?", userSubscriptionId, requestId).Limit(1).Find(&existing)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected > 0 {
+			currentQuota = existing.Quota
+			currentCreatedAt = existing.CreatedAt
+		}
+
+		usedBefore := sub.AmountUsed
+		delta := targetQuota - currentQuota
+		if delta == 0 {
+			returnValue.UserSubscriptionId = sub.Id
+			returnValue.PreConsumed = targetQuota
+			returnValue.AmountTotal = sub.AmountTotal
+			returnValue.AmountUsedBefore = usedBefore
+			returnValue.AmountUsedAfter = sub.AmountUsed
+			return nil
+		}
+
+		if delta > 0 {
+			if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < delta {
+				return fmt.Errorf("subscription quota insufficient: %s, need=%d", ValuePackageQuotaExhaustedUserMessage, delta)
+			}
+			used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
+			if err != nil {
+				return err
+			}
+			adjusted5h := used5h
+			if currentCreatedAt >= now-5*3600 {
+				adjusted5h -= currentQuota
+			}
+			adjusted7d := used7d
+			if currentCreatedAt >= now-7*24*3600 {
+				adjusted7d -= currentQuota
+			}
+			if plan.Limit5hAmount > 0 && adjusted5h+targetQuota > plan.Limit5hAmount {
+				return fmt.Errorf("subscription quota insufficient: %s, 5h rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
+			}
+			if plan.Limit7dAmount > 0 && adjusted7d+targetQuota > plan.Limit7dAmount {
+				return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
+			}
+		}
+
+		if err := recordValuePackageUsageTx(tx, &ValuePackageUsageRecord{
+			UserId:             userId,
+			UserSubscriptionId: sub.Id,
+			PlanId:             plan.Id,
+			PackageType:        plan.PackageType,
+			ModelGroup:         plan.ModelGroup,
+			RequestId:          requestId,
+			Quota:              targetQuota,
+			CreatedAt:          now,
+		}); err != nil {
+			return err
+		}
+		sub.AmountUsed += delta
+		if sub.AmountUsed < 0 {
+			sub.AmountUsed = 0
+		}
+		if err := tx.Save(&sub).Error; err != nil {
+			return err
+		}
+		returnValue.UserSubscriptionId = sub.Id
+		returnValue.PreConsumed = targetQuota
+		returnValue.AmountTotal = sub.AmountTotal
+		returnValue.AmountUsedBefore = usedBefore
+		returnValue.AmountUsedAfter = sub.AmountUsed
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return returnValue, nil
+}
+
 func recordValuePackageUsageTx(tx *gorm.DB, record *ValuePackageUsageRecord) error {
 	if tx == nil {
 		return errors.New("db is nil")

@@ -86,18 +86,13 @@ func calculateAudioQuota(info QuotaInfo) int {
 	return int(quota.Round(0).IntPart())
 }
 
+type realtimeBillingReservor interface {
+	ReserveRealtime(deltaQuota int, minTarget int) (int, error)
+}
+
 func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.RealtimeUsage) error {
 	if relayInfo.UsePrice {
 		return nil
-	}
-	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
-	if err != nil {
-		return err
-	}
-
-	token, err := model.GetTokenByKey(strings.TrimPrefix(relayInfo.TokenKey, "sk-"), false)
-	if err != nil {
-		return err
 	}
 
 	modelName := relayInfo.OriginModelName
@@ -137,6 +132,28 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	}
 
 	quota := calculateAudioQuota(quotaInfo)
+	if quota <= 0 {
+		return nil
+	}
+
+	if reservor, ok := relayInfo.Billing.(realtimeBillingReservor); ok {
+		reserved, err := reservor.ReserveRealtime(quota, relayInfo.FinalPreConsumedQuota)
+		if err != nil {
+			return err
+		}
+		logger.LogInfo(ctx, "realtime streaming reserve quota success, quota: "+fmt.Sprintf("%d", reserved))
+		return nil
+	}
+
+	userQuota, err := model.GetUserQuota(relayInfo.UserId, false)
+	if err != nil {
+		return err
+	}
+
+	token, err := model.GetTokenByKey(strings.TrimPrefix(relayInfo.TokenKey, "sk-"), false)
+	if err != nil {
+		return err
+	}
 
 	if userQuota < quota {
 		return fmt.Errorf("user quota is not enough, user quota: %s, need quota: %s", logger.FormatQuota(userQuota), logger.FormatQuota(quota))
@@ -144,31 +161,6 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 
 	if !token.UnlimitedQuota && token.RemainQuota < quota {
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
-	}
-
-	if quota <= 0 {
-		return nil
-	}
-
-	relayInfo.RealtimeActualQuota += quota
-	reserveTarget := relayInfo.RealtimeActualQuota
-	if relayInfo.FinalPreConsumedQuota > reserveTarget {
-		reserveTarget = relayInfo.FinalPreConsumedQuota
-	}
-	if relayInfo.RealtimeReservedQuota >= reserveTarget {
-		return nil
-	}
-
-	if relayInfo.Billing != nil {
-		if err := relayInfo.Billing.Reserve(reserveTarget); err != nil {
-			return err
-		}
-		relayInfo.RealtimeReservedQuota = reserveTarget
-		if err := recordValuePackageUsageForRelay(relayInfo, reserveTarget); err != nil {
-			return err
-		}
-		logger.LogInfo(ctx, "realtime streaming reserve quota success, quota: "+fmt.Sprintf("%d", reserveTarget))
-		return nil
 	}
 
 	err = PostConsumeQuota(relayInfo, quota, 0, false)
