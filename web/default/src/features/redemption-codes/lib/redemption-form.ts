@@ -152,7 +152,10 @@ export function transformRedemptionToFormDefaults(
 ): RedemptionFormValues {
   return {
     name: redemption.name,
-    quota_dollars: quotaUnitsToDollars(redemption.quota),
+    quota_dollars:
+      redemption.type === 'subscription'
+        ? 0
+        : quotaUnitsToDollars(redemption.quota),
     expired_time:
       redemption.expired_time > 0
         ? new Date(redemption.expired_time * 1000)

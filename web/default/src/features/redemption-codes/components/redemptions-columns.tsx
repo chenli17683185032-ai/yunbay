@@ -95,6 +95,39 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       size: 180,
     },
     {
+      accessorFn: (row) => row.type || 'quota',
+      id: 'type',
+      header: t('Type'),
+      cell: ({ row }) => {
+        const type = row.original.type || 'quota'
+        return (
+          <StatusBadge
+            label={
+              type === 'subscription' ? t('Subscription Code') : t('Quota Code')
+            }
+            variant={type === 'subscription' ? 'info' : 'neutral'}
+            copyable={false}
+          />
+        )
+      },
+      size: 130,
+    },
+    {
+      id: 'plan',
+      header: t('Plan'),
+      cell: ({ row }) => {
+        const redemption = row.original
+        return redemption.type === 'subscription' ? (
+          <span className='text-muted-foreground'>
+            {redemption.plan_title || `#${redemption.plan_id || '-'}`}
+          </span>
+        ) : (
+          <span className='text-muted-foreground'>-</span>
+        )
+      },
+      size: 140,
+    },
+    {
       accessorKey: 'status',
       header: t('Status'),
       meta: { mobileBadge: true },
@@ -220,6 +253,10 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       accessorKey: 'quota',
       header: t('Quota'),
       cell: ({ row }) => {
+        const redemption = row.original
+        if (redemption.type === 'subscription') {
+          return <span className='text-muted-foreground'>-</span>
+        }
         const quota = row.getValue('quota') as number
         return (
           <StatusBadge
