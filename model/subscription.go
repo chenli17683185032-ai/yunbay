@@ -1402,6 +1402,9 @@ func listActiveValuePackageUsageRowsTx(tx *gorm.DB, now int64) ([]ValuePackageUs
 	if now <= 0 {
 		now = getDBTimestampTx(tx)
 	}
+	if err := backfillDefaultEnabledValuePackagePreferencesTx(tx, now); err != nil {
+		return nil, err
+	}
 
 	var prefs []UserValuePackagePreference
 	if err := tx.Where("enabled = ? AND active_user_subscription_id > ?", true, 0).
@@ -1467,6 +1470,80 @@ func listActiveValuePackageUsageRowsTx(tx *gorm.DB, now int64) ([]ValuePackageUs
 	return rows, nil
 }
 
+func backfillDefaultEnabledValuePackagePreferencesTx(tx *gorm.DB, now int64) error {
+	if tx == nil {
+		tx = DB
+	}
+	if now <= 0 {
+		now = getDBTimestampTx(tx)
+	}
+	var subs []UserSubscription
+	if err := tx.Where("status = ? AND end_time > ?", UserSubscriptionStatusActive, now).
+		Order("user_id asc, end_time desc, id desc").
+		Find(&subs).Error; err != nil {
+		return err
+	}
+	candidateUsers := make(map[int]struct{})
+	for _, sub := range subs {
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			continue
+		}
+		candidateUsers[sub.UserId] = struct{}{}
+	}
+	for userId := range candidateUsers {
+		var pref UserValuePackagePreference
+		if err := tx.Where("user_id = ?", userId).First(&pref).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				bestSub, _, err := getHighestActiveValuePackageTx(tx, userId, now)
+				if err != nil {
+					return err
+				}
+				if bestSub == nil {
+					continue
+				}
+				if _, err := upsertValuePackagePreferenceTx(tx, userId, true, bestSub.Id); err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+		if pref.Enabled || pref.ActiveUserSubscriptionId <= 0 || pref.CreatedAt <= 0 || pref.UpdatedAt <= 0 || pref.CreatedAt != pref.UpdatedAt {
+			continue
+		}
+		var sub UserSubscription
+		subResult := tx.Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", pref.ActiveUserSubscriptionId, userId, UserSubscriptionStatusActive, now).Limit(1).Find(&sub)
+		if subResult.Error != nil {
+			return subResult.Error
+		}
+		if subResult.RowsAffected == 0 {
+			continue
+		}
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if plan.IsValuePackage() {
+			if _, err := upsertValuePackagePreferenceTx(tx, userId, true, sub.Id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func GetActiveValuePackageForRelay(userId int) (*ValuePackageState, error) {
 	state, err := loadValuePackageStateTx(DB, userId, false)
 	if err != nil {
@@ -1495,7 +1572,27 @@ func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*Value
 	var pref UserValuePackagePreference
 	if err := tx.Where("user_id = ?", userId).First(&pref).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return &ValuePackageState{Preference: UserValuePackagePreference{UserId: userId}}, nil
+			now := getDBTimestampTx(tx)
+			sub, plan, err := getHighestActiveValuePackageTx(tx, userId, now)
+			if err != nil {
+				return nil, err
+			}
+			if sub == nil || plan == nil {
+				return &ValuePackageState{Preference: UserValuePackagePreference{UserId: userId}}, nil
+			}
+			prefPtr, err := upsertValuePackagePreferenceTx(tx, userId, true, sub.Id)
+			if err != nil {
+				return nil, err
+			}
+			state := &ValuePackageState{Preference: *prefPtr, Subscription: sub, Plan: plan}
+			if includeUsage {
+				usage, err := buildValuePackageUsageSummaryTx(tx, userId, sub, plan, now)
+				if err != nil {
+					return nil, err
+				}
+				state.Usage = usage
+			}
+			return state, nil
 		}
 		return nil, err
 	}
@@ -1521,6 +1618,14 @@ func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*Value
 	normalizeValuePackagePlan(plan)
 	if !plan.IsValuePackage() {
 		return state, nil
+	}
+	if !pref.Enabled && pref.CreatedAt > 0 && pref.UpdatedAt > 0 && pref.CreatedAt == pref.UpdatedAt {
+		prefPtr, err := upsertValuePackagePreferenceTx(tx, userId, true, sub.Id)
+		if err != nil {
+			return nil, err
+		}
+		pref = *prefPtr
+		state.Preference = pref
 	}
 	state.Subscription = &sub
 	state.Plan = plan
@@ -1746,7 +1851,7 @@ func ensureValuePackagePreferenceAfterPurchaseTx(tx *gorm.DB, userId int, comple
 	if userId <= 0 || completedSubId <= 0 {
 		return errors.New("invalid value package preference args")
 	}
-	_, err := upsertValuePackagePreferenceTx(tx, userId, false, completedSubId)
+	_, err := upsertValuePackagePreferenceTx(tx, userId, true, completedSubId)
 	return err
 }
 
@@ -1867,16 +1972,20 @@ func upsertValuePackagePreferenceTx(tx *gorm.DB, userId int, enabled bool, activ
 		return nil, errors.New("tx is nil")
 	}
 	now := common.GetTimestamp()
+	updateTime := now
+	if !enabled {
+		updateTime = now + 1
+	}
 	pref := UserValuePackagePreference{
 		UserId:                   userId,
 		Enabled:                  enabled,
 		ActiveUserSubscriptionId: activeSubId,
 		CreatedAt:                now,
-		UpdatedAt:                now,
+		UpdatedAt:                updateTime,
 	}
 	updates := map[string]interface{}{
 		"enabled":    enabled,
-		"updated_at": now,
+		"updated_at": updateTime,
 	}
 	if activeSubId > 0 || !enabled {
 		updates["active_user_subscription_id"] = activeSubId

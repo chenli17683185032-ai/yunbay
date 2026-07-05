@@ -103,7 +103,7 @@ func TestRedeemSubscriptionCodeCreatesValuePackageSubscription(t *testing.T) {
 
 	var pref UserValuePackagePreference
 	require.NoError(t, DB.Where("user_id = ?", 26).First(&pref).Error)
-	assert.False(t, pref.Enabled)
+	assert.True(t, pref.Enabled)
 	assert.Equal(t, subs[0].Id, pref.ActiveUserSubscriptionId)
 
 	var saved Redemption

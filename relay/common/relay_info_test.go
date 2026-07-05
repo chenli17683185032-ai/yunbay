@@ -1,9 +1,14 @@
 package common
 
 import (
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,4 +42,29 @@ func TestRelayInfoGetFinalRequestRelayFormatFallsBackToRelayFormat(t *testing.T)
 func TestRelayInfoGetFinalRequestRelayFormatNilReceiver(t *testing.T) {
 	var info *RelayInfo
 	require.Equal(t, types.RelayFormat(""), info.GetFinalRequestRelayFormat())
+}
+
+func TestGenRelayInfoUsesValuePackageGroupOnlyForBillingIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "vip")
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "gpt-plus")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "gpt-plus")
+	common.SetContextKey(ctx, constant.ContextKeyValuePackageSubscriptionId, 123)
+	common.SetContextKey(ctx, constant.ContextKeyValuePackagePlanId, 456)
+	common.SetContextKey(ctx, constant.ContextKeyValuePackageModelGroup, "month-card")
+	common.SetContextKey(ctx, constant.ContextKeyValuePackagePackageType, "month")
+
+	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAI, &dto.GeneralOpenAIRequest{Model: "gpt-5.5"}, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	require.Equal(t, "gpt-plus", info.UsingGroup)
+	require.Equal(t, "month-card", info.UserGroup)
+	require.Equal(t, 123, info.ValuePackageSubscriptionId)
+	require.Equal(t, 456, info.ValuePackagePlanId)
+	require.Equal(t, "month-card", info.ValuePackageModelGroup)
+	require.Equal(t, "month", info.ValuePackagePackageType)
 }

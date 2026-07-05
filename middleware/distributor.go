@@ -93,25 +93,21 @@ func Distribute() func(c *gin.Context) {
 				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
 				// check path is /pg/chat/completions
 				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
-					if valuePackageGroup := common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup); valuePackageGroup != "" {
-						usingGroup = valuePackageGroup
-					} else {
-						playgroundRequest := &dto.PlayGroundRequest{}
-						err = common.UnmarshalBodyReusable(c, playgroundRequest)
-						if err != nil {
-							abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()}))
-							return
-						}
-						userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-						resolvedGroup, ok := resolvePlaygroundUsingGroup(userGroup, playgroundRequest.Group)
-						if !ok {
-							abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
-							return
-						}
-						usingGroup = resolvedGroup
-						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
-						common.SetContextKey(c, constant.ContextKeyTokenGroup, usingGroup)
+					playgroundRequest := &dto.PlayGroundRequest{}
+					err = common.UnmarshalBodyReusable(c, playgroundRequest)
+					if err != nil {
+						abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()}))
+						return
 					}
+					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+					resolvedGroup, ok := resolvePlaygroundUsingGroup(userGroup, playgroundRequest.Group)
+					if !ok {
+						abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+						return
+					}
+					usingGroup = resolvedGroup
+					common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+					common.SetContextKey(c, constant.ContextKeyTokenGroup, usingGroup)
 				}
 
 				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {

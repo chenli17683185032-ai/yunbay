@@ -277,7 +277,7 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 	require.Equal(t, UserGroupTiyan, reloaded.Group)
 	state, err := GetValuePackageState(user.Id)
 	require.NoError(t, err)
-	require.False(t, state.Preference.Enabled)
+	require.True(t, state.Preference.Enabled)
 	require.Equal(t, completed.Id, state.Preference.ActiveUserSubscriptionId)
 	require.NotNil(t, state.Subscription)
 	require.Equal(t, completed.Id, state.Subscription.Id)
@@ -315,7 +315,7 @@ func TestCompleteValuePackagePurchaseCoversLowerPlanAndCountsVIPTopup(t *testing
 	require.Equal(t, 30.0, topUp.Money)
 	state, err := GetValuePackageState(user.Id)
 	require.NoError(t, err)
-	require.False(t, state.Preference.Enabled)
+	require.True(t, state.Preference.Enabled)
 	require.Equal(t, completed.Id, state.Preference.ActiveUserSubscriptionId)
 	require.NotNil(t, state.Subscription)
 	require.Equal(t, completed.Id, state.Subscription.Id)
@@ -347,6 +347,30 @@ func TestActivateAndDeactivateValuePackageDoesNotStopClock(t *testing.T) {
 	var reloaded UserSubscription
 	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
 	require.Equal(t, sub.EndTime, reloaded.EndTime)
+}
+
+func TestDeactivateValuePackageDoesNotGetAutoEnabledOnNextStateLoad(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3008, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-100, now+3600)
+	activated, err := ActivateValuePackage(user.Id, sub.Id)
+	require.NoError(t, err)
+	require.True(t, activated.Preference.Enabled)
+
+	deactivated, err := DeactivateValuePackage(user.Id)
+	require.NoError(t, err)
+	require.False(t, deactivated.Preference.Enabled)
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.False(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
 }
 
 func TestValuePackageRollingUsageWindows(t *testing.T) {
@@ -524,7 +548,7 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	require.Equal(t, first.Id, state.Preference.ActiveUserSubscriptionId)
 }
 
-func TestCompleteValuePackageOrderCreatesDisabledPreferenceForPaidButNotActivatedPackage(t *testing.T) {
+func TestCompleteValuePackageOrderCreatesEnabledPreferenceByDefault(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3111, UserGroupTiyan)
 	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
@@ -538,10 +562,90 @@ func TestCompleteValuePackageOrderCreatesDisabledPreferenceForPaidButNotActivate
 
 	state, err := GetValuePackageState(user.Id)
 	require.NoError(t, err)
-	require.False(t, state.Preference.Enabled)
+	require.True(t, state.Preference.Enabled)
 	require.Equal(t, completed.Id, state.Preference.ActiveUserSubscriptionId)
 	require.NotNil(t, state.Subscription)
 	require.Equal(t, completed.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
+}
+
+func TestGetValuePackageStateAutoEnablesExistingActivePackageWithoutPreference(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3114, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.True(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
+
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.True(t, pref.Enabled)
+	require.Equal(t, sub.Id, pref.ActiveUserSubscriptionId)
+}
+
+func TestGetValuePackageStateAutoEnablesLegacyDefaultDisabledPreference(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3116, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	legacyCreatedAt := now - 100
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: false, ActiveUserSubscriptionId: sub.Id}).Error)
+	require.NoError(t, DB.Model(&UserValuePackagePreference{}).Where("user_id = ?", user.Id).Updates(map[string]any{
+		"created_at": legacyCreatedAt,
+		"updated_at": legacyCreatedAt,
+	}).Error)
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.True(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
+	require.NotNil(t, state.Plan)
+	require.Equal(t, day.Id, state.Plan.Id)
+
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.True(t, pref.Enabled)
+	require.Equal(t, sub.Id, pref.ActiveUserSubscriptionId)
+}
+
+func TestGetValuePackageStateDoesNotAutoEnableManuallyDisabledPackage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3115, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
+	legacyCreatedAt := now - 100
+	manualDisabledAt := now
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: false, ActiveUserSubscriptionId: sub.Id}).Error)
+	require.NoError(t, DB.Model(&UserValuePackagePreference{}).Where("user_id = ?", user.Id).Updates(map[string]any{
+		"created_at": legacyCreatedAt,
+		"updated_at": manualDisabledAt,
+	}).Error)
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.False(t, state.Preference.Enabled)
+	require.Equal(t, sub.Id, state.Preference.ActiveUserSubscriptionId)
+	require.NotNil(t, state.Subscription)
+	require.Equal(t, sub.Id, state.Subscription.Id)
 	require.NotNil(t, state.Plan)
 	require.Equal(t, day.Id, state.Plan.Id)
 }
@@ -921,6 +1025,10 @@ func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T)
 	disabledUser := createValuePackageUser(t, 3502, UserGroupTiyan)
 	disabledSub := createActiveValuePackageSub(t, disabledUser.Id, week, now-100, now+86400)
 	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: disabledUser.Id, Enabled: false, ActiveUserSubscriptionId: disabledSub.Id}).Error)
+	require.NoError(t, DB.Model(&UserValuePackagePreference{}).Where("user_id = ?", disabledUser.Id).Updates(map[string]any{
+		"created_at": now - 100,
+		"updated_at": now,
+	}).Error)
 
 	otherActiveUser := createValuePackageUser(t, 3503, UserGroupTiyan)
 	otherActiveSub := createActiveValuePackageSub(t, otherActiveUser.Id, month, now-100, now+86400)
@@ -931,10 +1039,21 @@ func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T)
 	expiredSub := createActiveValuePackageSub(t, expiredUser.Id, day, now-86400, now-1)
 	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: expiredUser.Id, Enabled: true, ActiveUserSubscriptionId: expiredSub.Id}).Error)
 
+	noPrefUser := createValuePackageUser(t, 3505, UserGroupTiyan)
+	noPrefSub := createActiveValuePackageSub(t, noPrefUser.Id, week, now-100, now+86400)
+
+	legacyDefaultUser := createValuePackageUser(t, 3506, UserGroupTiyan)
+	legacyDefaultSub := createActiveValuePackageSub(t, legacyDefaultUser.Id, month, now-100, now+86400)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: legacyDefaultUser.Id, Enabled: false, ActiveUserSubscriptionId: legacyDefaultSub.Id}).Error)
+	require.NoError(t, DB.Model(&UserValuePackagePreference{}).Where("user_id = ?", legacyDefaultUser.Id).Updates(map[string]any{
+		"created_at": now - 100,
+		"updated_at": now - 100,
+	}).Error)
+
 	rows, err := ListActiveValuePackageUsageRows(now)
 
 	require.NoError(t, err)
-	require.Len(t, rows, 1)
+	require.Len(t, rows, 3)
 	row := rows[0]
 	require.Equal(t, activeUser.Id, row.UserId)
 	require.Equal(t, activeUser.Username, row.Username)
@@ -947,6 +1066,23 @@ func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T)
 	require.EqualValues(t, 5000, row.Usage.Limit7d)
 	require.EqualValues(t, 700, row.Usage.TotalUsed)
 	require.EqualValues(t, 9300, row.Usage.TotalRemaining)
+
+	require.Equal(t, noPrefUser.Id, rows[1].UserId)
+	require.Equal(t, noPrefSub.Id, rows[1].Subscription.Id)
+	require.Equal(t, week.Id, rows[1].Plan.Id)
+
+	require.Equal(t, legacyDefaultUser.Id, rows[2].UserId)
+	require.Equal(t, legacyDefaultSub.Id, rows[2].Subscription.Id)
+	require.Equal(t, month.Id, rows[2].Plan.Id)
+
+	var noPref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", noPrefUser.Id).First(&noPref).Error)
+	require.True(t, noPref.Enabled)
+	require.Equal(t, noPrefSub.Id, noPref.ActiveUserSubscriptionId)
+	var legacyDefault UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", legacyDefaultUser.Id).First(&legacyDefault).Error)
+	require.True(t, legacyDefault.Enabled)
+	require.Equal(t, legacyDefaultSub.Id, legacyDefault.ActiveUserSubscriptionId)
 }
 
 func TestRefundSubscriptionPreConsumeRevokesValuePackageUsageReservation(t *testing.T) {

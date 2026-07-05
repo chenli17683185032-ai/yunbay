@@ -21,8 +21,6 @@ type valuePackageConcurrencyCounter struct {
 
 const valuePackageConcurrencySlotTTL = 30 * time.Minute
 
-const valuePackageOriginalUserGroupContextKey = "value_package_original_user_group"
-
 const valuePackageConcurrencyRedisAcquireScript = `
 local key = KEYS[1]
 local token = ARGV[1]
@@ -241,13 +239,6 @@ func applyValuePackageGroupScope(c *gin.Context, state *model.ValuePackageState)
 	if modelGroup == "" {
 		return
 	}
-	originalUserGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-	if originalUserGroup != "" {
-		c.Set(valuePackageOriginalUserGroupContextKey, originalUserGroup)
-	}
-	common.SetContextKey(c, constant.ContextKeyUserGroup, modelGroup)
-	common.SetContextKey(c, constant.ContextKeyUsingGroup, modelGroup)
-	common.SetContextKey(c, constant.ContextKeyTokenGroup, modelGroup)
 	common.SetContextKey(c, constant.ContextKeyValuePackageSubscriptionId, state.Subscription.Id)
 	common.SetContextKey(c, constant.ContextKeyValuePackagePlanId, state.Plan.Id)
 	common.SetContextKey(c, constant.ContextKeyValuePackageModelGroup, modelGroup)

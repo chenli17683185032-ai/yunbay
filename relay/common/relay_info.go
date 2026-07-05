@@ -463,13 +463,17 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	if reqId == "" {
 		reqId = common.GetTimeString() + common.GetRandomString(8)
 	}
+	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	if valuePackageGroup := strings.TrimSpace(common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup)); valuePackageGroup != "" {
+		userGroup = valuePackageGroup
+	}
 	info := &RelayInfo{
 		Request: request,
 
 		RequestId:                  reqId,
 		UserId:                     common.GetContextKeyInt(c, constant.ContextKeyUserId),
 		UsingGroup:                 common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
-		UserGroup:                  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+		UserGroup:                  userGroup,
 		UserQuota:                  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
 		UserEmail:                  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 		ValuePackageSubscriptionId: common.GetContextKeyInt(c, constant.ContextKeyValuePackageSubscriptionId),
