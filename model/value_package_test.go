@@ -674,6 +674,10 @@ func TestGetValuePackageStateKeepsActiveSubscriptionWhenPlanDisabled(t *testing.
 	require.NotNil(t, state.Plan)
 	require.Equal(t, day.Id, state.Plan.Id)
 	require.False(t, state.Plan.Enabled)
+	require.NotNil(t, state.Billing)
+	require.True(t, state.Billing.Active)
+	require.Equal(t, day.ModelGroup, state.Billing.PackageGroup)
+	require.Equal(t, ValuePackageEffectiveBillingRatio, state.Billing.EffectiveRatio)
 }
 
 func TestAdminBindSubscriptionRejectsValuePackagePlan(t *testing.T) {
@@ -1190,6 +1194,18 @@ func TestSubscriptionNormalizeDefaultsKeepsStandardPlansUSD(t *testing.T) {
 	plan.NormalizeDefaults()
 
 	require.Equal(t, "USD", plan.Currency)
+}
+
+func TestGetValuePackageStateIncludesInactiveBillingStateWithoutActiveSubscription(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3502, UserGroupTiyan)
+
+	state, err := GetValuePackageState(user.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.Billing)
+	require.False(t, state.Billing.Active)
 }
 
 func TestGetValuePackageStateIncludesAuthoritativeBillingState(t *testing.T) {

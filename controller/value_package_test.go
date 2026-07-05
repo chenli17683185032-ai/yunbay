@@ -1099,12 +1099,18 @@ func TestGetValuePackageSelfIncludesBillingState(t *testing.T) {
 	rec := valuePackageControllerRequest(GetValuePackageSelf, http.MethodGet, "/value-packages/self", nil, user.Id)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	var body map[string]interface{}
+	var body struct {
+		Success bool                    `json:"success"`
+		Data    model.ValuePackageState `json:"data"`
+	}
 	require.NoError(t, common.Unmarshal(rec.Body.Bytes(), &body))
-	data := body["data"].(map[string]interface{})
-	billing := data["billing"].(map[string]interface{})
-	require.Equal(t, true, billing["active"])
-	require.Equal(t, plan.ModelGroup, billing["package_group"])
-	require.Equal(t, float64(1), billing["effective_ratio"])
-	require.Equal(t, float64(plan.Id), billing["plan_id"])
+	require.True(t, body.Success)
+	require.NotNil(t, body.Data.Billing)
+	require.True(t, body.Data.Billing.Active)
+	require.Equal(t, "", body.Data.Billing.RoutingGroup)
+	require.Equal(t, plan.ModelGroup, body.Data.Billing.PackageGroup)
+	require.Equal(t, float64(1), body.Data.Billing.EffectiveRatio)
+	require.Equal(t, float64(0), body.Data.Billing.OriginalGroupRatio)
+	require.Equal(t, plan.Title, body.Data.Billing.PlanTitle)
+	require.Equal(t, plan.Id, body.Data.Billing.PlanId)
 }

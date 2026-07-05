@@ -1375,7 +1375,7 @@ type ValuePackageState struct {
 	Subscription *UserSubscription          `json:"subscription,omitempty"`
 	Plan         *SubscriptionPlan          `json:"plan,omitempty"`
 	Usage        *ValuePackageUsageSummary  `json:"usage,omitempty"`
-	Billing      *ValuePackageBillingState  `json:"billing,omitempty"`
+	Billing      *ValuePackageBillingState  `json:"billing"`
 }
 
 type ValuePackageUsageRow struct {
@@ -1557,13 +1557,23 @@ func backfillDefaultEnabledValuePackagePreferencesTx(tx *gorm.DB, now int64) err
 	return nil
 }
 
+func inactiveValuePackageBillingState() *ValuePackageBillingState {
+	return &ValuePackageBillingState{Active: false}
+}
+
+func newValuePackageState(pref UserValuePackagePreference) *ValuePackageState {
+	return &ValuePackageState{Preference: pref, Billing: inactiveValuePackageBillingState()}
+}
+
 func buildValuePackageBillingState(pref *UserValuePackagePreference, sub *UserSubscription, plan *SubscriptionPlan) *ValuePackageBillingState {
+	// Active subscription billing intentionally does not depend on plan.Enabled:
+	// disabling a plan should not revoke already purchased active packages.
 	if pref == nil || sub == nil || plan == nil || !pref.Enabled || !plan.IsValuePackage() {
-		return &ValuePackageBillingState{Active: false}
+		return inactiveValuePackageBillingState()
 	}
 	packageGroup := strings.TrimSpace(plan.ModelGroup)
 	if packageGroup == "" {
-		return &ValuePackageBillingState{Active: false}
+		return inactiveValuePackageBillingState()
 	}
 	return &ValuePackageBillingState{
 		Active:         true,
@@ -1595,7 +1605,7 @@ func getValuePackageStateTx(tx *gorm.DB, userId int) (*ValuePackageState, error)
 
 func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*ValuePackageState, error) {
 	if userId <= 0 {
-		return &ValuePackageState{}, nil
+		return newValuePackageState(UserValuePackagePreference{}), nil
 	}
 	if tx == nil {
 		tx = DB
@@ -1609,13 +1619,15 @@ func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*Value
 				return nil, err
 			}
 			if sub == nil || plan == nil {
-				return &ValuePackageState{Preference: UserValuePackagePreference{UserId: userId}}, nil
+				return newValuePackageState(UserValuePackagePreference{UserId: userId}), nil
 			}
 			prefPtr, err := upsertValuePackagePreferenceTx(tx, userId, true, sub.Id)
 			if err != nil {
 				return nil, err
 			}
-			state := &ValuePackageState{Preference: *prefPtr, Subscription: sub, Plan: plan}
+			state := newValuePackageState(*prefPtr)
+			state.Subscription = sub
+			state.Plan = plan
 			state.Billing = buildValuePackageBillingState(&state.Preference, state.Subscription, state.Plan)
 			if includeUsage {
 				usage, err := buildValuePackageUsageSummaryTx(tx, userId, sub, plan, now)
@@ -1628,7 +1640,7 @@ func loadValuePackageStateTx(tx *gorm.DB, userId int, includeUsage bool) (*Value
 		}
 		return nil, err
 	}
-	state := &ValuePackageState{Preference: pref}
+	state := newValuePackageState(pref)
 	if pref.ActiveUserSubscriptionId <= 0 {
 		return state, nil
 	}
