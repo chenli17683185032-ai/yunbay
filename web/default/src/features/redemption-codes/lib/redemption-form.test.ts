@@ -111,6 +111,8 @@ test('edit defaults preserve type metadata from API data', () => {
     key: 'abc',
     status: 1,
     quota: 500000,
+    type: 'quota',
+    plan_id: 0,
     created_time: 0,
     redeemed_time: 0,
     expired_time: 0,
