@@ -15,3 +15,9 @@ test('redemption drawer can create subscription value package redemption codes',
   assert.match(source, /plan_id/)
   assert.match(source, /Value package plan/)
 })
+
+test('redemption drawer explains when no enabled value package plans exist', () => {
+  assert.match(source, /No enabled day, week, or month packages are available/)
+  assert.match(source, /plan_kind === 'value_package'/)
+  assert.match(source, /plan\.enabled/)
+})

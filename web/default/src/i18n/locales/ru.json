@@ -2826,6 +2826,7 @@
     "No description available.": "Описание отсутствует.",
     "No discount tiers configured. Click \"Add discount tier\" to get started.": "Не настроены уровни скидок. Нажмите \"Добавить уровень скидки\", чтобы начать.",
     "No duplicate keys found": "Дубликаты ключей не найдены",
+    "No enabled day, week, or month packages are available. Enable a package plan first.": "Нет доступных включенных пакетов на день, неделю или месяц. Сначала включите пакетный план.",
     "No enabled tokens available": "Нет доступных активных токенов",
     "No endpoints configured. Switch to JSON mode or add rows to define endpoints.": "Конечные точки не настроены. Переключитесь в режим JSON или добавьте строки для определения конечных точек.",
     "No FAQ entries available": "Нет доступных записей FAQ",

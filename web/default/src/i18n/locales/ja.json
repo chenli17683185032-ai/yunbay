@@ -2826,6 +2826,7 @@
     "No description available.": "説明はありません。",
     "No discount tiers configured. Click \"Add discount tier\" to get started.": "割引ティアは設定されていません。「割引ティアを追加」をクリックして開始してください。",
     "No duplicate keys found": "重複キーが見つかりませんでした",
+    "No enabled day, week, or month packages are available. Enable a package plan first.": "有効な日、週、月パッケージはありません。先にパッケージプランを有効にしてください。",
     "No enabled tokens available": "有効なトークンがありません",
     "No endpoints configured. Switch to JSON mode or add rows to define endpoints.": "エンドポイントが設定されていません。JSONモードに切り替えるか、エンドポイントを定義するために行を追加してください。",
     "No FAQ entries available": "FAQエントリがありません",

@@ -2826,6 +2826,7 @@
     "No description available.": "Chưa có mô tả.",
     "No discount tiers configured. Click \"Add discount tier\" to get started.": "Chưa cấu hình cấp chiết khấu nào. Nhấp vào \"Thêm cấp chiết khấu\" để bắt đầu.",
     "No duplicate keys found": "Không tìm thấy khóa trùng lặp",
+    "No enabled day, week, or month packages are available. Enable a package plan first.": "Không có gói ngày, tuần hoặc tháng nào đang bật. Hãy bật một gói trước.",
     "No enabled tokens available": "Không có token nào được kích hoạt",
     "No endpoints configured. Switch to JSON mode or add rows to define endpoints.": "Chưa cấu hình endpoint nào. Chuyển sang chế độ JSON hoặc thêm hàng để định nghĩa endpoint.",
     "No FAQ entries available": "Không có mục FAQ nào.",

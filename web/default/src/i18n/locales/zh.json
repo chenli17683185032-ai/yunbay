@@ -2826,6 +2826,7 @@
     "No description available.": "暂无描述。",
     "No discount tiers configured. Click \"Add discount tier\" to get started.": "未配置折扣等级。点击“添加折扣等级”即可开始使用。",
     "No duplicate keys found": "未发现重复密钥",
+    "No enabled day, week, or month packages are available. Enable a package plan first.": "暂无可用的已启用日卡、周卡或月卡套餐。请先启用一个套餐方案。",
     "No enabled tokens available": "当前没有可用的启用令牌",
     "No endpoints configured. Switch to JSON mode or add rows to define endpoints.": "未配置端点。切换到 JSON 模式或添加行来定义端点。",
     "No FAQ entries available": "暂无 FAQ 条目",

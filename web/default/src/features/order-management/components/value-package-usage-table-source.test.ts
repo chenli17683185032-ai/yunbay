@@ -21,6 +21,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const sourcePath = new URL('./value-package-usage-table.tsx', import.meta.url)
+const pageSourcePath = new URL('../index.tsx', import.meta.url)
 
 test('order management value package usage table shows per-user realtime 5h and 7d windows', async () => {
   const source = await readFile(sourcePath, 'utf8')
@@ -35,4 +36,17 @@ test('order management value package usage table shows per-user realtime 5h and 
   assert.match(source, /limit_7d/)
   assert.match(source, /formatQuota/)
   assert.match(source, /Unlimited/)
+})
+
+test('value package usage table keeps per-user rolling quota columns', async () => {
+  const source = await readFile(sourcePath, 'utf8')
+  const pageSource = (await readFile(pageSourcePath, 'utf8')).replaceAll(
+    '15_000',
+    '15000'
+  )
+
+  assert.match(source, /5h|5 小时|used_5h/)
+  assert.match(source, /7d|7 天|used_7d/)
+  assert.match(source, /total_remaining/)
+  assert.match(pageSource, /refetchInterval:\s*15000/)
 })

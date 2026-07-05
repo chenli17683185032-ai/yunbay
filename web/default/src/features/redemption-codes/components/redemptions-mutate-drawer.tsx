@@ -370,6 +370,13 @@ export function RedemptionsMutateDrawer({
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      {valuePackagePlanOptions.length === 0 ? (
+                        <p className='text-muted-foreground rounded-md border border-dashed px-3 py-2 text-xs'>
+                          {t(
+                            'No enabled day, week, or month packages are available. Enable a package plan first.'
+                          )}
+                        </p>
+                      ) : null}
                       <FormDescription>
                         {t(
                           'Create redemption codes for day, week, or month cards.'

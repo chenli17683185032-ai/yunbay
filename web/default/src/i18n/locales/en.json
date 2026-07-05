@@ -2826,6 +2826,7 @@
     "No description available.": "No description available.",
     "No discount tiers configured. Click \"Add discount tier\" to get started.": "No discount tiers configured. Click \"Add discount tier\" to get started.",
     "No duplicate keys found": "No duplicate keys found",
+    "No enabled day, week, or month packages are available. Enable a package plan first.": "No enabled day, week, or month packages are available. Enable a package plan first.",
     "No enabled tokens available": "No enabled tokens available",
     "No endpoints configured. Switch to JSON mode or add rows to define endpoints.": "No endpoints configured. Switch to JSON mode or add rows to define endpoints.",
     "No FAQ entries available": "No FAQ entries available",

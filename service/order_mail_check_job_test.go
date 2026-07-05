@@ -96,6 +96,11 @@ func TestRunBatchMailCheckSkipsDeletedValuePackageOrders(t *testing.T) {
 	var saved model.LdxpTopupSession
 	require.NoError(t, model.DB.First(&saved, session.Id).Error)
 	assert.Empty(t, saved.ErrorCode)
+
+	rows, total, err := model.ListOrderManagementOrders(1782600000, 1782609999, "", order.TradeNo, 0, 20)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, total)
+	assert.Empty(t, rows)
 }
 
 func TestRunSingleMailCheckFetchErrorMarksSessionFailed(t *testing.T) {

@@ -2826,6 +2826,7 @@
     "No description available.": "Aucune description disponible.",
     "No discount tiers configured. Click \"Add discount tier\" to get started.": "Aucun niveau de réduction configuré. Cliquez sur « Ajouter un niveau de réduction » pour commencer.",
     "No duplicate keys found": "Aucune clé dupliquée trouvée",
+    "No enabled day, week, or month packages are available. Enable a package plan first.": "Aucun forfait jour, semaine ou mois activé n'est disponible. Activez d'abord un forfait.",
     "No enabled tokens available": "Aucun token activé disponible",
     "No endpoints configured. Switch to JSON mode or add rows to define endpoints.": "Aucun point de terminaison configuré. Passez en mode JSON ou ajoutez des lignes pour définir les points de terminaison.",
     "No FAQ entries available": "Aucune entrée FAQ disponible",
