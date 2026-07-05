@@ -139,6 +139,7 @@ func setupOrderManagementControllerTestDB(t *testing.T) {
 		&model.Log{},
 		&model.TopUp{},
 		&model.Redemption{},
+		&model.AffiliateCommission{},
 		&model.OrderDeletionMark{},
 		&model.SubscriptionPlan{},
 		&model.SubscriptionOrder{},

@@ -40,7 +40,7 @@ func setupValuePackageTestDB(t *testing.T) *gorm.DB {
 	if subscriptionPlanInfoCache != nil {
 		_ = subscriptionPlanInfoCache.Purge()
 	}
-	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &UserValuePackagePreference{}, &ValuePackageUsageRecord{}, &SubscriptionPreConsumeRecord{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &UserValuePackagePreference{}, &ValuePackageUsageRecord{}, &SubscriptionPreConsumeRecord{}, &AffiliateCommission{}, &AffiliateWithdrawal{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -702,6 +702,38 @@ func TestCompleteValuePackageOrderUsesActualPaymentMethodForOrderAndTopUp(t *tes
 	require.Equal(t, orderAfter.PaymentProvider, topup.PaymentProvider)
 	require.Zero(t, topup.Amount)
 	require.Equal(t, orderAfter.Money, topup.Money)
+}
+
+func TestCompleteValuePackageOrderCreatesAffiliateCommissionForInviter(t *testing.T) {
+	setupValuePackageTestDB(t)
+	inviter := createValuePackageUser(t, 3110, UserGroupVIP)
+	invitee := createValuePackageUser(t, 3111, UserGroupTiyan)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", inviter.Id).Error)
+	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 28.8)
+	now := common.GetTimestamp()
+	order := SubscriptionOrder{UserId: invitee.Id, PlanId: week.Id, Money: week.PriceAmount, TradeNo: "vp-affiliate-week-order", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
+	require.NoError(t, DB.Create(&order).Error)
+
+	completed, err := CompleteValuePackageOrder(order.TradeNo, "payload", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+
+	var topup TopUp
+	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&topup).Error)
+	var commission AffiliateCommission
+	require.NoError(t, DB.Where("topup_id = ?", topup.Id).First(&commission).Error)
+	require.Equal(t, inviter.Id, commission.InviterUserId)
+	require.Equal(t, invitee.Id, commission.InviteeUserId)
+	require.Equal(t, order.TradeNo, commission.TradeNo)
+	require.Equal(t, 28.8, commission.BaseMoney)
+	require.Equal(t, 4.32, commission.CommissionMoney)
+	require.Equal(t, AffiliateCommissionStatusAvailable, commission.Status)
+
+	_, err = CompleteValuePackageOrder(order.TradeNo, "payload-retry", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	var count int64
+	require.NoError(t, DB.Model(&AffiliateCommission{}).Where("topup_id = ?", topup.Id).Count(&count).Error)
+	require.Equal(t, int64(1), count)
 }
 
 func TestActivateAndDeactivateValuePackagePreferenceUpsertIsRepeatable(t *testing.T) {

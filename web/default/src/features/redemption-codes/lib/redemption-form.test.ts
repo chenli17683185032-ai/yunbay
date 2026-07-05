@@ -31,6 +31,8 @@ const t = ((key: string) => key) as TFunction
 
 const validBase: RedemptionFormValues = {
   name: 'batch',
+  type: 'quota',
+  plan_id: 0,
   quota_dollars: 10,
   expired_time: undefined,
   count: 1,
@@ -132,4 +134,26 @@ test('edit defaults preserve type metadata from API data', () => {
   assert.equal(defaults.count_as_topup, true)
   assert.equal(defaults.batch_id, 'batch-1')
   assert.equal(defaults.source, 'ldxp')
+})
+
+test('subscription value package payload keeps selected plan and zero quota', () => {
+  const schema = getRedemptionFormSchema(t)
+  const result = schema.safeParse({
+    ...validBase,
+    type: 'subscription',
+    plan_id: 42,
+    quota_dollars: 0,
+    kind: 'coupon',
+    amount: 0,
+    money: 0,
+    count_as_topup: false,
+  })
+
+  assert.equal(result.success, true)
+  if (!result.success) throw new Error('expected subscription form to be valid')
+
+  const payload = transformFormDataToPayload(result.data)
+  assert.equal(payload.type, 'subscription')
+  assert.equal(payload.plan_id, 42)
+  assert.equal(payload.quota, 0)
 })

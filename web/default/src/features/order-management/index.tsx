@@ -29,6 +29,7 @@ import {
   deleteBillingOrder,
   getOrderAnalytics,
   getOrderManagementOrders,
+  getOrderManagementValuePackagePlans,
   startBatchMailCheck,
   startSingleMailCheck,
 } from './api'
@@ -37,6 +38,7 @@ import { OrderAnalyticsCards } from './components/order-analytics-cards'
 import { OrderDetailsTable } from './components/order-details-table'
 import { OrderTrendChart } from './components/order-trend-chart'
 import { RangeToolbar } from './components/range-toolbar'
+import { ValuePackageStatusCards } from './components/value-package-status-cards'
 import { buildOrderManagementRangeParams } from './lib/range'
 import type { DateRangeKey, MailCheckStatus } from './types'
 
@@ -69,6 +71,7 @@ const orderManagementKeys = {
     ['order-management', 'orders', params] as const,
   affiliate: (params: Record<string, unknown>) =>
     ['order-management', 'affiliate', params] as const,
+  valuePackages: () => ['order-management', 'value-packages'] as const,
 }
 
 function isDateRangeKey(value: unknown): value is DateRangeKey {
@@ -151,6 +154,17 @@ export function OrderManagement() {
     placeholderData: (previousData) => previousData,
   })
 
+  const valuePackagesQuery = useQuery({
+    queryKey: orderManagementKeys.valuePackages(),
+    queryFn: async () => {
+      const result = await getOrderManagementValuePackagePlans()
+      if (!result.success)
+        throw new Error(result.message || t('Request failed'))
+      return result.data || []
+    },
+    placeholderData: (previousData) => previousData,
+  })
+
   const invalidateOrderManagement = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({
@@ -161,6 +175,9 @@ export function OrderManagement() {
       }),
       queryClient.invalidateQueries({
         queryKey: ['order-management', 'affiliate'],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: orderManagementKeys.valuePackages(),
       }),
     ])
   }, [queryClient])
@@ -296,7 +313,11 @@ export function OrderManagement() {
           type='button'
           variant='outline'
           size='sm'
-          disabled={ordersQuery.isFetching || analyticsQuery.isFetching}
+          disabled={
+            ordersQuery.isFetching ||
+            analyticsQuery.isFetching ||
+            valuePackagesQuery.isFetching
+          }
           onClick={() => void invalidateOrderManagement()}
         >
           <HugeiconsIcon
@@ -323,6 +344,11 @@ export function OrderManagement() {
           <OrderAnalyticsCards
             summary={analyticsQuery.data?.summary}
             isLoading={analyticsQuery.isLoading}
+          />
+
+          <ValuePackageStatusCards
+            records={valuePackagesQuery.data}
+            isLoading={valuePackagesQuery.isLoading}
           />
 
           <OrderTrendChart

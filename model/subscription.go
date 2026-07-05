@@ -876,7 +876,7 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if actualPaymentMethod != "" && order.PaymentMethod != actualPaymentMethod {
 			order.PaymentMethod = actualPaymentMethod
 		}
-		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
+		if _, err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
 			return err
 		}
 		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, order.UserId)
@@ -912,9 +912,9 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 	return nil
 }
 
-func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
+func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) (*TopUp, error) {
 	if tx == nil || order == nil {
-		return errors.New("invalid subscription order")
+		return nil, errors.New("invalid subscription order")
 	}
 	now := common.GetTimestamp()
 	var topup TopUp
@@ -931,25 +931,28 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 				CompleteTime:    now,
 				Status:          common.TopUpStatusSuccess,
 			}
-			return tx.Create(&topup).Error
+			if err := tx.Create(&topup).Error; err != nil {
+				return nil, err
+			}
+			return &topup, nil
 		}
-		return err
+		return nil, err
 	}
 	if topup.UserId != order.UserId {
-		return errors.New("topup user mismatch")
+		return nil, errors.New("topup user mismatch")
 	}
 	if topup.Amount > 0 {
-		return errors.New("existing topup is a balance recharge")
+		return nil, errors.New("existing topup is a balance recharge")
 	}
 	if topup.PaymentMethod == "" {
 		topup.PaymentMethod = order.PaymentMethod
 	} else if topup.PaymentMethod != order.PaymentMethod {
-		return ErrPaymentMethodMismatch
+		return nil, ErrPaymentMethodMismatch
 	}
 	if topup.PaymentProvider == "" {
 		topup.PaymentProvider = order.PaymentProvider
 	} else if topup.PaymentProvider != order.PaymentProvider {
-		return ErrPaymentMethodMismatch
+		return nil, ErrPaymentMethodMismatch
 	}
 	topup.Amount = 0
 	topup.Money = order.Money
@@ -958,7 +961,10 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	}
 	topup.CompleteTime = now
 	topup.Status = common.TopUpStatusSuccess
-	return tx.Save(&topup).Error
+	if err := tx.Save(&topup).Error; err != nil {
+		return nil, err
+	}
+	return &topup, nil
 }
 
 func ExpireSubscriptionOrder(tradeNo string, expectedPaymentProvider string) error {
@@ -1617,7 +1623,11 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		if actualPaymentMethod != "" {
 			order.PaymentMethod = actualPaymentMethod
 		}
-		if err := upsertSubscriptionTopUpTx(tx, &order); err != nil {
+		topUp, err := upsertSubscriptionTopUpTx(tx, &order)
+		if err != nil {
+			return err
+		}
+		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}
 		vipUpgraded, err = MaybeUpgradeUserToVIPTx(tx, order.UserId)

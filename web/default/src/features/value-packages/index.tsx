@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useState } from 'react'
 import { RefreshCw, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -29,6 +30,7 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SectionPageLayout } from '@/components/layout'
+import { useRedemption } from '@/features/wallet/hooks/use-redemption'
 import { ValuePackageCard } from './components/value-package-card'
 import { ValuePackagePaymentDialog } from './components/value-package-payment-dialog'
 import { ValuePackageStatusBanner } from './components/value-package-status-banner'
@@ -37,6 +39,22 @@ import { useValuePackages } from './hooks/use-value-packages'
 export function ValuePackages() {
   const { t } = useTranslation()
   const valuePackages = useValuePackages()
+  const { redeeming, redeemCode } = useRedemption()
+  const [redemptionCodes, setRedemptionCodes] = useState<
+    Record<number, string>
+  >({})
+
+  const handleRedemptionCodeChange = (planId: number, code: string) => {
+    setRedemptionCodes((previous) => ({ ...previous, [planId]: code }))
+  }
+
+  const handleRedeemCode = async (planId: number) => {
+    const code = redemptionCodes[planId]?.trim() || ''
+    const redeemed = await redeemCode(code)
+    if (!redeemed) return
+    setRedemptionCodes((previous) => ({ ...previous, [planId]: '' }))
+    await valuePackages.refresh()
+  }
 
   return (
     <>
@@ -101,6 +119,10 @@ export function ValuePackages() {
                     plan={plan}
                     state={valuePackages.state}
                     actionKey={valuePackages.actionKey}
+                    redemptionCode={redemptionCodes[plan.id] || ''}
+                    redeeming={redeeming}
+                    onRedemptionCodeChange={handleRedemptionCodeChange}
+                    onRedeemCode={handleRedeemCode}
                     onPurchase={valuePackages.purchase}
                     onActivate={valuePackages.activate}
                     onDeactivate={valuePackages.deactivate}

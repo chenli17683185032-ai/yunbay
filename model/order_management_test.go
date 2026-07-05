@@ -257,6 +257,53 @@ func TestOrderManagementOrdersIncludesUsernameAndAffiliateInfo(t *testing.T) {
 	assert.Equal(t, AffiliateCommissionStatusAvailable, rows[0].AffiliateStatus)
 }
 
+func TestOrderManagementValuePackageOrderShowsAffiliateInfo(t *testing.T) {
+	truncateTables(t)
+
+	require.NoError(t, DB.Create(&User{Id: 771, Username: "vp-inviter", Status: common.UserStatusEnabled, AffCode: "aff771"}).Error)
+	require.NoError(t, DB.Create(&User{Id: 881, Username: "vp-buyer", Status: common.UserStatusEnabled, AffCode: "aff881", InviterId: 771}).Error)
+	plan := &SubscriptionPlan{
+		Title:        "畅享周卡",
+		PlanKind:     SubscriptionPlanKindValuePackage,
+		PackageType:  ValuePackageTypeWeek,
+		PackageLevel: ValuePackageLevelWeek,
+		TotalAmount:  0,
+	}
+	require.NoError(t, DB.Create(plan).Error)
+	order := &SubscriptionOrder{UserId: 881, PlanId: plan.Id, Money: 28.8, TradeNo: "vp-order-affiliate-row", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusSuccess, CreateTime: 1782604700, CompleteTime: 1782604800}
+	require.NoError(t, DB.Create(order).Error)
+	topup := &TopUp{UserId: 881, Amount: 0, Money: 28.8, TradeNo: order.TradeNo, PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, CreateTime: order.CreateTime, CompleteTime: order.CompleteTime, Status: common.TopUpStatusSuccess}
+	require.NoError(t, DB.Create(topup).Error)
+	require.NoError(t, DB.Create(&AffiliateCommission{CommissionId: "affc_vp_order_row", InviterUserId: 771, InviteeUserId: 881, TopupId: topup.Id, TradeNo: order.TradeNo, BaseMoney: 28.8, Rate: AffiliateCommissionRate, CommissionMoney: 4.32, Status: AffiliateCommissionStatusAvailable, CreatedTime: 1782604800}).Error)
+
+	var reloadedOrder SubscriptionOrder
+	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&reloadedOrder).Error)
+	session := &LdxpTopupSession{
+		SessionId:           "vp_affiliate_row_session",
+		UserId:              881,
+		Purpose:             LdxpPurposeValuePackage,
+		SubscriptionOrderId: reloadedOrder.Id,
+		SubscriptionPlanId:  plan.Id,
+		Money:               28.8,
+		WorkerAmount:        28.8,
+		WorkerOrderNo:       "LDVP-AFF",
+		MailOrderNo:         "LDVP-AFF",
+		MailAmount:          28.8,
+		Status:              LdxpStatusSuccess,
+		CreatedTime:         1782604800,
+	}
+	require.NoError(t, DB.Create(session).Error)
+
+	rows, total, err := ListOrderManagementOrders(1782518400, 1782691199, "", "vp-order-affiliate-row", 0, 20)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, rows, 1)
+	require.Equal(t, OrderTypeSubscription, rows[0].BillingOrderType)
+	require.Equal(t, 771, rows[0].AffiliateInviterId)
+	require.Equal(t, int64(432), rows[0].AffiliateCommissionCents)
+	require.Equal(t, AffiliateCommissionStatusAvailable, rows[0].AffiliateStatus)
+}
+
 func TestAffiliateSourceOrdersIncludesInviteeUsernameAndSessionStatus(t *testing.T) {
 	truncateTables(t)
 

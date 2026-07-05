@@ -37,6 +37,8 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import {
@@ -50,6 +52,10 @@ interface ValuePackageCardProps {
   plan: ValuePackagePlan
   state: ValuePackageState | null
   actionKey?: string | null
+  redemptionCode: string
+  redeeming?: boolean
+  onRedemptionCodeChange: (planId: number, code: string) => void
+  onRedeemCode: (planId: number) => void
   onPurchase: (plan: ValuePackagePlan) => void
   onActivate: (userSubscriptionId: number) => void
   onDeactivate: () => void
@@ -203,6 +209,10 @@ export function ValuePackageCard({
   plan,
   state,
   actionKey,
+  redemptionCode,
+  redeeming = false,
+  onRedemptionCodeChange,
+  onRedeemCode,
   onPurchase,
   onActivate,
   onDeactivate,
@@ -217,7 +227,8 @@ export function ValuePackageCard({
   const isBusy =
     actionKey === `purchase-${plan.id}` ||
     actionKey === `activate-${cardState.userSubscriptionId || 0}` ||
-    actionKey === 'deactivate'
+    actionKey === 'deactivate' ||
+    actionKey === `redeem-${plan.id}`
   const requiresPayment =
     cardState.kind === 'purchase' || cardState.kind === 'expired'
   const disabled =
@@ -240,6 +251,19 @@ export function ValuePackageCard({
   const exhaustedMessage =
     usage?.exhausted_message ||
     '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
+
+  const handleRedeemCode = () => {
+    onRedeemCode(plan.id)
+  }
+
+  const handleRedemptionKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      handleRedeemCode()
+    }
+  }
 
   const handleAction = () => {
     if (disabled) {
@@ -378,6 +402,40 @@ export function ValuePackageCard({
             </li>
           ))}
         </ul>
+
+        <div className='rounded-lg border p-3'>
+          <Label
+            htmlFor={`value-package-redemption-${plan.id}`}
+            className='text-muted-foreground text-xs font-medium'
+          >
+            {t('Redeem Code')}
+          </Label>
+          <div className='mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-2'>
+            <Input
+              id={`value-package-redemption-${plan.id}`}
+              value={redemptionCode}
+              onChange={(event) =>
+                onRedemptionCodeChange(plan.id, event.target.value)
+              }
+              onKeyDown={handleRedemptionKeyDown}
+              placeholder={t('Enter your redemption code or card key')}
+              disabled={redeeming}
+              className='h-9 min-w-0'
+            />
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              disabled={redeeming || redemptionCode.trim() === ''}
+              onClick={handleRedeemCode}
+            >
+              {redeeming ? (
+                <Loader2 className='animate-spin' data-icon='inline-start' />
+              ) : null}
+              {t('Redeem')}
+            </Button>
+          </div>
+        </div>
 
         {cardState.kind === 'running' || cardState.kind === 'start' ? (
           <Alert className='mt-auto'>

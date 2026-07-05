@@ -401,6 +401,10 @@ func ListOrderManagementOrders(startTime, endTime int64, mailStatus string, keyw
 	topupIDs := make([]int, 0, len(pageSessions))
 	for _, session := range pageSessions {
 		userIDs = append(userIDs, session.UserId)
+		billing := billingBySessionId[session.Id]
+		if billing.TradeNo != "" {
+			tradeNos = append(tradeNos, billing.TradeNo)
+		}
 		if session.MailMessageId != "" {
 			tradeNos = append(tradeNos, session.MailMessageId)
 		}
@@ -855,6 +859,14 @@ func findCommissionForSession(maps *orderManagementCommissionMaps, session LdxpT
 	if session.MailMessageId != "" {
 		if commission, ok := maps.byTradeNo[session.MailMessageId]; ok {
 			return commission, true
+		}
+	}
+	if session.Purpose == LdxpPurposeValuePackage && session.SubscriptionOrderId > 0 {
+		var order SubscriptionOrder
+		if err := DB.Select("trade_no").Where("id = ?", session.SubscriptionOrderId).First(&order).Error; err == nil && order.TradeNo != "" {
+			if commission, ok := maps.byTradeNo[order.TradeNo]; ok {
+				return commission, true
+			}
 		}
 	}
 	return AffiliateCommission{}, false

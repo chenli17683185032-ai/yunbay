@@ -43,7 +43,9 @@ export function getRedemptionFormSchema(t: TFunction) {
         .string()
         .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
         .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
-      quota_dollars: z.number().positive(t('Quota must be a positive number')),
+      type: z.enum(['quota', 'subscription']).default('quota'),
+      plan_id: z.number().min(0).default(0),
+      quota_dollars: z.number().min(0, t('Quota must be a positive number')),
       expired_time: z.date().optional(),
       count: z
         .number()
@@ -61,6 +63,25 @@ export function getRedemptionFormSchema(t: TFunction) {
       source: z.string(),
     })
     .superRefine((data, ctx) => {
+      if (data.type === 'subscription') {
+        if (data.plan_id <= 0) {
+          ctx.addIssue({
+            code: 'custom',
+            message: t('Please select a value package plan'),
+            path: ['plan_id'],
+          })
+        }
+        return
+      }
+
+      if (data.quota_dollars <= 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: t('Quota must be a positive number'),
+          path: ['quota_dollars'],
+        })
+      }
+
       if (data.kind === REDEMPTION_KINDS.PAID_TOPUP) {
         if (
           data.quota_dollars <= 0 ||
@@ -90,6 +111,8 @@ export function getRedemptionFormSchema(t: TFunction) {
 
 export type RedemptionFormValues = {
   name: string
+  type: 'quota' | 'subscription'
+  plan_id: number
   quota_dollars: number
   expired_time?: Date
   count?: number
@@ -107,6 +130,8 @@ export type RedemptionFormValues = {
 
 export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
   name: '',
+  type: 'quota',
+  plan_id: 0,
   quota_dollars: 10,
   expired_time: undefined,
   count: 1,
@@ -128,9 +153,10 @@ export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
 export function transformFormDataToPayload(
   data: RedemptionFormValues
 ): RedemptionFormData {
+  const isSubscription = data.type === 'subscription'
   return {
     name: data.name,
-    quota: parseQuotaFromDollars(data.quota_dollars),
+    quota: isSubscription ? 0 : parseQuotaFromDollars(data.quota_dollars),
     expired_time: data.expired_time
       ? Math.floor(data.expired_time.getTime() / 1000)
       : 0,
@@ -141,6 +167,8 @@ export function transformFormDataToPayload(
     count_as_topup: data.count_as_topup,
     batch_id: data.batch_id,
     source: data.source,
+    type: data.type,
+    plan_id: isSubscription ? data.plan_id : 0,
   }
 }
 
@@ -152,6 +180,8 @@ export function transformRedemptionToFormDefaults(
 ): RedemptionFormValues {
   return {
     name: redemption.name,
+    type: redemption.type === 'subscription' ? 'subscription' : 'quota',
+    plan_id: redemption.plan_id || 0,
     quota_dollars:
       redemption.type === 'subscription'
         ? 0

@@ -30,6 +30,7 @@ import type {
   MailCheckStatus,
   OrderAnalyticsResponse,
   OrderManagementOrderItem,
+  OrderManagementValuePackagePlanRecord,
   PageData,
 } from './types'
 
@@ -79,6 +80,13 @@ export async function getOrderManagementOrders(
   const res = await api.get(
     `/api/order-management/admin/orders${withDefinedParams(params)}`
   )
+  return res.data
+}
+
+export async function getOrderManagementValuePackagePlans(): Promise<
+  ApiResponse<OrderManagementValuePackagePlanRecord[]>
+> {
+  const res = await api.get('/api/subscription/admin/plans')
   return res.data
 }
 

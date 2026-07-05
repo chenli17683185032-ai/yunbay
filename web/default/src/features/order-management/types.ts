@@ -16,6 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type {
+  PlanRecord,
+  SubscriptionPlanStats,
+} from '@/features/subscriptions/types'
 
 export type MailCheckStatus =
   | 'not_required'
@@ -179,3 +183,6 @@ export interface AffiliateStatsResponse {
   items: AffiliateStatsItem[]
   total: number
 }
+
+export type OrderManagementValuePackagePlanRecord = PlanRecord
+export type { SubscriptionPlanStats }
