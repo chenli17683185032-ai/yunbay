@@ -3579,6 +3579,7 @@
     "Redemption codes exported successfully": "交換コードをエクスポートしました",
     "redemption codes.": "引き換えコード。",
     "Redemption failed": "交換に失敗しました",
+    "Redemption successful": "引き換え成功",
     "Redemption successful! Added: {{quota}}": "引き換え成功！追加：{{quota}}",
     "Redemption successful! Activated plan: {{plan}}": "引き換え成功！有効化されたプラン：{{plan}}",
     "Redirecting to chat page...": "チャットページにリダイレクト中...",

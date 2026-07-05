@@ -33,8 +33,16 @@ export const redemptionSchema = z.object({
   key: z.string().catch(''),
   status: z.number().catch(1), // 1: enabled, 2: disabled, 3: used
   quota: z.number().catch(0),
-  type: z.enum(['quota', 'subscription']).optional().default('quota'),
-  plan_id: z.number().optional().default(0),
+  type: z.preprocess(
+    (value) =>
+      value === undefined || value === null || value === '' ? 'quota' : value,
+    z.enum(['quota', 'subscription'])
+  ),
+  plan_id: z.preprocess(
+    (value) =>
+      value === undefined || value === null || value === '' ? 0 : value,
+    z.number()
+  ),
   plan_title: z.string().optional(),
   created_time: z.number().catch(0),
   redeemed_time: z.number().catch(0),

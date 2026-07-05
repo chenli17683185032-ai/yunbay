@@ -3579,6 +3579,7 @@
     "Redemption codes exported successfully": "Коды погашения успешно экспортированы",
     "redemption codes.": "коды активации.",
     "Redemption failed": "Погашение не удалось",
+    "Redemption successful": "Погашение успешно",
     "Redemption successful! Added: {{quota}}": "Погашение успешно! Добавлено: {{quota}}",
     "Redemption successful! Activated plan: {{plan}}": "Погашение успешно! Активирован план: {{plan}}",
     "Redirecting to chat page...": "Перенаправление на страницу чата...",

@@ -3579,6 +3579,7 @@
     "Redemption codes exported successfully": "兑换码导出成功",
     "redemption codes.": "兑换码。",
     "Redemption failed": "兑换失败",
+    "Redemption successful": "兑换成功",
     "Redemption successful! Added: {{quota}}": "兑换成功！已添加：{{quota}}",
     "Redemption successful! Activated plan: {{plan}}": "兑换成功！已激活套餐：{{plan}}",
     "Redirecting to chat page...": "正在跳转到聊天页面...",

@@ -117,13 +117,13 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       header: t('Plan'),
       cell: ({ row }) => {
         const redemption = row.original
-        return redemption.type === 'subscription' ? (
-          <span className='text-muted-foreground'>
-            {redemption.plan_title || `#${redemption.plan_id || '-'}`}
-          </span>
-        ) : (
-          <span className='text-muted-foreground'>-</span>
-        )
+        if (redemption.type !== 'subscription') {
+          return <span className='text-muted-foreground'>-</span>
+        }
+        const planLabel =
+          redemption.plan_title ||
+          (redemption.plan_id > 0 ? `#${redemption.plan_id}` : '-')
+        return <span className='text-muted-foreground'>{planLabel}</span>
       },
       size: 140,
     },
