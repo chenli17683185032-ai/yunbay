@@ -31,10 +31,10 @@ import {
 } from '@/components/ui/tooltip'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
-import { API_KEY_STATUSES } from '../constants'
 import { getActiveValuePackageBillingRatio } from '@/features/value-packages/lib/billing-display'
-import { getApiKeyDisplayGroup } from '../lib/api-key-display'
 import { type ValuePackageState } from '@/features/value-packages/types'
+import { API_KEY_STATUSES } from '../constants'
+import { getApiKeyDisplayGroup } from '../lib/api-key-display'
 import { type ApiKey } from '../types'
 import {
   ApiKeyCell,
@@ -69,13 +69,13 @@ function useGroupRatios(): Record<string, number> {
   return data ?? {}
 }
 
-
 export function useApiKeysColumns(
   valuePackageState?: ValuePackageState | null
 ): ColumnDef<ApiKey>[] {
   const { t } = useTranslation()
   const groupRatios = useGroupRatios()
-  const activePackageRatio = getActiveValuePackageBillingRatio(valuePackageState)
+  const activePackageRatio =
+    getActiveValuePackageBillingRatio(valuePackageState)
   return [
     {
       id: 'select',
