@@ -1,12 +1,9 @@
+import { describe, expect, it } from 'bun:test'
 import {
   getOrderTypeLabel,
   getPlanSummary,
   getPaymentMethodName,
 } from './billing'
-
-declare const describe: (name: string, fn: () => void) => void
-declare const expect: <T>(actual: T) => { toBe: (expected: T) => void }
-declare const it: (name: string, fn: () => void) => void
 
 describe('billing helpers', () => {
   it('formats unified order types', () => {

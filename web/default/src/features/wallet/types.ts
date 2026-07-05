@@ -35,7 +35,14 @@ export interface ApiResponse<T = unknown> {
  * Standard API response types
  */
 export type TopupInfoResponse = ApiResponse<TopupInfo>
-export type RedemptionResponse = ApiResponse<number> & {
+export interface RedemptionResult {
+  type: 'quota' | 'subscription'
+  quota?: number | string | null
+  plan_id?: number
+  plan_title?: string
+}
+
+export type RedemptionResponse = ApiResponse<number | RedemptionResult> & {
   redemption?: RedemptionResultMeta
 }
 export type AmountResponse = ApiResponse<string>

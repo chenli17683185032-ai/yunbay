@@ -17,10 +17,35 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+type QuickStartRedemptionData =
+  | number
+  | {
+      type?: 'quota' | 'subscription'
+      quota?: number | string | null
+      plan_id?: number
+      plan_title?: string
+    }
+
 type QuickStartRedemptionResponse = {
   success?: boolean
   message?: string
-  data?: number
+  data?: QuickStartRedemptionData
+}
+
+function parseFiniteQuota(
+  value: number | string | null | undefined
+): number | null {
+  if (value === null || value === undefined || value === '') return 0
+  const quota = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(quota) ? quota : null
+}
+
+function quotaFromRedemptionData(
+  data: QuickStartRedemptionData | undefined
+): number {
+  if (typeof data === 'number') return parseFiniteQuota(data) ?? 0
+  if (data?.type === 'quota') return parseFiniteQuota(data.quota) ?? 0
+  return 0
 }
 
 type QuickStartRedemptionDependencies = {
@@ -58,7 +83,7 @@ export async function redeemQuickStartCode(
   }
 
   return {
-    quotaAdded: Number(response.data || 0),
+    quotaAdded: quotaFromRedemptionData(response.data),
     refreshed,
   }
 }

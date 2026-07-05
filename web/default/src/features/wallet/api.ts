@@ -68,15 +68,18 @@ export async function getTopupInfo(): Promise<TopupInfoResponse> {
  * Redeem a topup code
  */
 export async function redeemTopupCode(
-  request: RedemptionRequest
-): Promise<ApiResponse<number>>
-export async function redeemTopupCode(
-  request: RedemptionRequest
+  request: RedemptionRequest,
+  config?: ApiRequestConfig
 ): Promise<RedemptionResponse> {
-  const res = await api.post('/api/user/topup', request, {
-    skipBusinessError: true,
-    skipErrorHandler: true,
-  } satisfies ApiRequestConfig)
+  const res = await api.post(
+    '/api/user/topup',
+    request,
+    config ??
+      ({
+        skipBusinessError: true,
+        skipErrorHandler: true,
+      } satisfies ApiRequestConfig)
+  )
   return res.data
 }
 

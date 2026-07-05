@@ -34,6 +34,7 @@ test('quick start redeems a pasted code in place and refreshes the user', async 
   })
 
   assert.equal(result.quotaAdded, 500)
+  assert.equal(result.refreshed, true)
   assert.deepEqual(calls, ['redeem:CODE-123', 'refresh'])
 })
 
@@ -61,4 +62,54 @@ test('quick start keeps a successful redemption successful when user refresh fai
 
   assert.equal(result.quotaAdded, 500)
   assert.equal(result.refreshed, false)
+})
+
+test('quick start treats structured subscription redemption as zero quota for now', async () => {
+  const result = await redeemQuickStartCode('SUB-CODE', {
+    redeemTopupCode: async () => ({
+      success: true,
+      data: { type: 'subscription', plan_id: 1, plan_title: '月卡' },
+    }),
+    refreshSelf: async () => {},
+  })
+
+  assert.equal(result.quotaAdded, 0)
+  assert.equal(result.refreshed, true)
+})
+
+test('quick start accepts structured quota redemption result', async () => {
+  const result = await redeemQuickStartCode('abc', {
+    redeemTopupCode: async () => ({
+      success: true,
+      data: { type: 'quota', quota: 12345 },
+    }),
+    refreshSelf: async () => {},
+  })
+
+  assert.equal(result.quotaAdded, 12345)
+})
+
+test('quick start accepts structured quota redemption numeric string', async () => {
+  const result = await redeemQuickStartCode('abc', {
+    redeemTopupCode: async () => ({
+      success: true,
+      data: { type: 'quota', quota: '12345' },
+    }),
+    refreshSelf: async () => {},
+  })
+
+  assert.equal(result.quotaAdded, 12345)
+})
+
+test('quick start treats malformed structured quota as zero', async () => {
+  const result = await redeemQuickStartCode('abc', {
+    redeemTopupCode: async () => ({
+      success: true,
+      data: { type: 'quota', quota: 'not-a-number' },
+    }),
+    refreshSelf: async () => {},
+  })
+
+  assert.equal(result.quotaAdded, 0)
+  assert.equal(Number.isNaN(result.quotaAdded), false)
 })

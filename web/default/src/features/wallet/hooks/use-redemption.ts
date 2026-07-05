@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useCallback } from 'react'
 import i18next from 'i18next'
 import { toast } from 'sonner'
+import { getSelf } from '@/lib/api'
 import { formatQuota } from '@/lib/format'
 import { redeemTopupCode } from '../api'
 import { getRedemptionSuccessMessageKey } from '../lib/redemption-result'
@@ -26,6 +27,62 @@ import { getRedemptionSuccessMessageKey } from '../lib/redemption-result'
 // ============================================================================
 // Redemption Hook
 // ============================================================================
+
+function parseFiniteQuota(
+  value: number | string | null | undefined
+): number | null {
+  if (value === null || value === undefined || value === '') return 0
+  const quota = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(quota) ? quota : null
+}
+
+function normalizeRedemptionResult(
+  data: unknown
+):
+  | { type: 'quota'; quota: number }
+  | { type: 'subscription'; planTitle: string }
+  | null {
+  const numericQuota = typeof data === 'number' ? parseFiniteQuota(data) : null
+  if (numericQuota !== null) return { type: 'quota', quota: numericQuota }
+  if (data && typeof data === 'object') {
+    const record = data as {
+      type?: string
+      quota?: number | string | null
+      plan_title?: string
+    }
+    if (record.type === 'subscription') {
+      return { type: 'subscription', planTitle: record.plan_title || '' }
+    }
+    if (record.type === 'quota') {
+      const quota = parseFiniteQuota(record.quota)
+      if (quota !== null) return { type: 'quota', quota }
+    }
+  }
+  return null
+}
+
+async function refreshSelfBestEffort() {
+  try {
+    await getSelf()
+  } catch {
+    // Refresh is best-effort; the redemption itself already succeeded.
+  }
+}
+
+function getRedemptionErrorMessage(error: unknown): string {
+  const maybeError = error as {
+    response?: { data?: { message?: unknown } }
+    message?: unknown
+  }
+  const responseMessage = maybeError.response?.data?.message
+  if (typeof responseMessage === 'string' && responseMessage) {
+    return responseMessage
+  }
+  if (typeof maybeError.message === 'string' && maybeError.message) {
+    return maybeError.message
+  }
+  return i18next.t('Redemption failed')
+}
 
 export function useRedemption() {
   const [redeeming, setRedeeming] = useState(false)
@@ -38,22 +95,40 @@ export function useRedemption() {
 
     try {
       setRedeeming(true)
-      const response = await redeemTopupCode({ key: code })
+      const response = await redeemTopupCode(
+        { key: code },
+        { skipBusinessError: true, skipErrorHandler: true }
+      )
 
-      if (response.success && typeof response.data === 'number') {
-        const quotaAdded = response.data
-        toast.success(
-          i18next.t(getRedemptionSuccessMessageKey(response.redemption), {
-            quota: formatQuota(quotaAdded),
-          })
-        )
+      if (response.success) {
+        const result = normalizeRedemptionResult(response.data)
+        if (result?.type === 'subscription') {
+          toast.success(
+            i18next.t('Redemption successful! Activated plan: {{plan}}', {
+              plan: result.planTitle || i18next.t('Subscription'),
+            })
+          )
+          await refreshSelfBestEffort()
+          return true
+        }
+        if (result?.type === 'quota') {
+          toast.success(
+            i18next.t(getRedemptionSuccessMessageKey(response.redemption), {
+              quota: formatQuota(result.quota),
+            })
+          )
+          await refreshSelfBestEffort()
+          return true
+        }
+        toast.success(i18next.t('Redemption successful'))
+        await refreshSelfBestEffort()
         return true
       }
 
       toast.error(response.message || i18next.t('Redemption failed'))
       return false
-    } catch (_error) {
-      toast.error(i18next.t('Redemption failed'))
+    } catch (error) {
+      toast.error(getRedemptionErrorMessage(error))
       return false
     } finally {
       setRedeeming(false)
