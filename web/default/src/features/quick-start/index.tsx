@@ -133,6 +133,8 @@ export function QuickStart() {
     useState<QuickStartPurposeId>(QUICK_START_DEFAULT_PURPOSE)
   const [selectedModelName, setSelectedModelName] = useState<string>('')
   const [generatedApiKey, setGeneratedApiKey] = useState('')
+  const [generatedApiKeyCopied, setGeneratedApiKeyCopied] =
+    useState<boolean | null>(null)
   const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
   const [redemptionCode, setRedemptionCode] = useState('')
   const [isRedeemingCode, setIsRedeemingCode] = useState(false)
@@ -226,10 +228,15 @@ export function QuickStart() {
   const handleGenerateApiKey = async () => {
     if (generatedApiKey) {
       const copied = await copyToClipboard(generatedApiKey)
+      setGeneratedApiKeyCopied(copied)
       if (copied) {
         toast.success(t('Already copied to clipboard'))
       } else {
-        toast.error(t('Failed to copy API key'))
+        toast.warning(
+          t(
+            'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
+          )
+        )
       }
       return
     }
@@ -261,7 +268,16 @@ export function QuickStart() {
         crossGroupRetry: quickStartGroup.crossGroupRetry,
       })
       setGeneratedApiKey(result.fullKey)
-      toast.success(t('Already copied to clipboard'))
+      setGeneratedApiKeyCopied(result.copied)
+      if (result.copied) {
+        toast.success(t('Already copied to clipboard'))
+      } else {
+        toast.warning(
+          t(
+            'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
+          )
+        )
+      }
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : t('Failed to create API key')
@@ -598,7 +614,11 @@ export function QuickStart() {
                   </h2>
                   <p className='mt-2 text-sm leading-7 text-white/54'>
                     {generatedApiKey
-                      ? t('Already copied to clipboard')
+                      ? generatedApiKeyCopied === false
+                        ? t(
+                            'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
+                          )
+                        : t('Already copied to clipboard')
                       : t(
                           'Click generate. The new API key will be copied to your clipboard.'
                         )}

@@ -391,6 +391,7 @@
     "API key from the provider": "Ключ API от провайдера",
     "API key is loading, please try again in a moment": "API-ключ загружается, повторите попытку через несколько секунд",
     "API key is ready": "API-ключ готов",
+    "API key was generated but clipboard copy failed. You can copy it again or continue setup.": "API-ключ создан, но автоматически скопировать его не удалось. Вы можете повторить копирование или продолжить настройку.",
     "API key is required": "Требуется ключ API",
     "API Key mode (does not support batch creation)": "Режим API-ключа (не поддерживает пакетное создание)",
     "API Key mode: use APIKey|Region": "Режим API Key: use APIKey|Region",

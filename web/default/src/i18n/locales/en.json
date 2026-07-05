@@ -391,6 +391,7 @@
     "API key from the provider": "API key from the provider",
     "API key is loading, please try again in a moment": "API key is loading, please try again in a moment",
     "API key is ready": "API key is ready",
+    "API key was generated but clipboard copy failed. You can copy it again or continue setup.": "API key was generated but clipboard copy failed. You can copy it again or continue setup.",
     "API key is required": "API key is required",
     "API Key mode (does not support batch creation)": "API Key mode (does not support batch creation)",
     "API Key mode: use APIKey|Region": "API Key mode: use APIKey|Region",

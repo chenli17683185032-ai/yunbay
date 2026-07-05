@@ -24,6 +24,12 @@ type ApiResult = {
   message?: string
 }
 
+export type QuickStartApiKeyResult = {
+  name: string
+  fullKey: string
+  copied: boolean
+}
+
 type QuickStartApiKeyDependencies = {
   now?: () => number
   defaultGroup: string
@@ -63,7 +69,7 @@ export function getQuickStartApiKeyGroup(options: {
 
 export async function generateAndCopyQuickStartApiKey(
   dependencies: QuickStartApiKeyDependencies
-): Promise<{ name: string; fullKey: string }> {
+): Promise<QuickStartApiKeyResult> {
   const now = dependencies.now || Date.now
   const name = `yunbay-quick-start-${now()}`
   const group = dependencies.defaultGroup.trim()
@@ -105,9 +111,7 @@ export async function generateAndCopyQuickStartApiKey(
   }
 
   const fullKey = key.startsWith('sk-') ? key : `sk-${key}`
-  if (!(await dependencies.copyToClipboard(fullKey))) {
-    throw new Error('Failed to copy the new API key')
-  }
+  const copied = await dependencies.copyToClipboard(fullKey)
 
-  return { name, fullKey }
+  return { name, fullKey, copied }
 }

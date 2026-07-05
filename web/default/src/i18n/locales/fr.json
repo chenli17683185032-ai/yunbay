@@ -391,6 +391,7 @@
     "API key from the provider": "Clé API du fournisseur",
     "API key is loading, please try again in a moment": "La clé API est en cours de chargement, veuillez réessayer dans un instant",
     "API key is ready": "La clé API est prête",
+    "API key was generated but clipboard copy failed. You can copy it again or continue setup.": "La clé API a été générée, mais la copie automatique a échoué. Vous pouvez réessayer de la copier ou continuer la configuration.",
     "API key is required": "La clé API est requise",
     "API Key mode (does not support batch creation)": "Mode clé API (ne prend pas en charge la création par lots)",
     "API Key mode: use APIKey|Region": "Mode clé API : utiliser APIKey|Region",

@@ -50,6 +50,16 @@ test('quick start secondary dashboard CTA remains visible but lower priority', (
   assert.match(pageSource, /onClick=\{handleNext\}/)
 })
 
+test('quick start keeps generated API key when clipboard copy fails', () => {
+  assert.match(pageSource, /generatedApiKeyCopied/)
+  assert.match(
+    pageSource,
+    /API key was generated but clipboard copy failed\. You can copy it again or continue setup\./
+  )
+  assert.match(pageSource, /setGeneratedApiKey\(result\.fullKey\)/)
+  assert.match(pageSource, /setGeneratedApiKeyCopied\(result\.copied\)/)
+})
+
 
 test('quick start fifth page keeps Codex downloads, software guide, and CC Switch one-click import', () => {
   assert.match(pageSource, /Codex one-click launcher/)
