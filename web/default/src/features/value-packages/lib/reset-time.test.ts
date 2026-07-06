@@ -65,6 +65,7 @@ test('reset time formats day values with correct singular and plural forms', () 
 })
 
 test('reset time formats day values with normalized rounded hours', () => {
+  assert.equal(formatValuePackageResetTime(24 * 3600 - 1, t), '1 day')
   assert.equal(formatValuePackageResetTime(24 * 3600 + 1, t), '1 day 1 hour')
   assert.equal(formatValuePackageResetTime(4 * 24 * 3600 + 6 * 3600 + 30, t), '4 days 7 hours')
   assert.equal(formatValuePackageResetTime(7 * 24 * 3600 - 1, t), '7 days')

@@ -23,7 +23,6 @@ export type Translate = (
 
 const MINUTE_SECONDS = 60
 const HOUR_SECONDS = 60 * MINUTE_SECONDS
-const DAY_SECONDS = 24 * HOUR_SECONDS
 
 function isPositiveFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
@@ -41,23 +40,23 @@ export function formatValuePackageResetTime(
     return t('less than 1 minute')
   }
 
-  if (seconds >= DAY_SECONDS) {
-    const totalHours = Math.ceil(seconds / HOUR_SECONDS)
-    return formatDaysAndHours(
-      Math.floor(totalHours / 24),
-      totalHours % 24,
-      t
-    )
-  }
-
   const totalMinutes = Math.ceil(seconds / MINUTE_SECONDS)
   if (totalMinutes < 60) {
     return formatMinutes(totalMinutes, t)
   }
 
-  return formatHoursAndMinutes(
-    Math.floor(totalMinutes / 60),
-    totalMinutes % 60,
+  if (totalMinutes < 24 * 60) {
+    return formatHoursAndMinutes(
+      Math.floor(totalMinutes / 60),
+      totalMinutes % 60,
+      t
+    )
+  }
+
+  const totalHours = Math.ceil(seconds / HOUR_SECONDS)
+  return formatDaysAndHours(
+    Math.floor(totalHours / 24),
+    totalHours % 24,
     t
   )
 }
