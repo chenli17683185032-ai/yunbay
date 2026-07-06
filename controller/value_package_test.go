@@ -497,10 +497,12 @@ func TestGetValuePackageSelfReturnsCurrentState(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	user := createLdxpControllerTestUser(t, "vp_self_user")
 	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
-	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: common.GetTimestamp() - 10, EndTime: common.GetTimestamp() + 3600, Status: model.UserSubscriptionStatusActive}
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 10, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
 	require.NoError(t, model.DB.Create(&sub).Error)
 	_, err := model.ActivateValuePackage(user.Id, sub.Id)
 	require.NoError(t, err)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "self-reset-fields", Quota: 10, CreatedAt: now - 1800}))
 
 	rec := valuePackageControllerRequest(GetValuePackageSelf, http.MethodGet, "/value-packages/self", nil, user.Id)
 
@@ -512,6 +514,13 @@ func TestGetValuePackageSelfReturnsCurrentState(t *testing.T) {
 	assert.Equal(t, float64(sub.Id), pref["active_user_subscription_id"])
 	statePlan := data["plan"].(map[string]interface{})
 	assert.Equal(t, float64(plan.Id), statePlan["id"])
+	usage, ok := data["usage"].(map[string]interface{})
+	require.True(t, ok)
+	requireValuePackageUsageResetFields(t, usage)
+	assert.Equal(t, float64(10), usage["used_5h"])
+	assert.Equal(t, float64(10), usage["used_7d"])
+	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
+	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_7d"), float64(0))
 }
 
 func TestGetValuePackagePurchaseIntentConfirmedCover(t *testing.T) {
@@ -752,8 +761,10 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	user := createLdxpControllerTestUser(t, "vp_active_user")
 	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
-	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: common.GetTimestamp() - 10, EndTime: common.GetTimestamp() + 3600, Status: model.UserSubscriptionStatusActive}
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 10, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
 	require.NoError(t, model.DB.Create(&sub).Error)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "activate-reset-fields", Quota: 10, CreatedAt: now - 1800}))
 
 	rec := valuePackageControllerRequest(ActivateValuePackageSelf, http.MethodPost, "/value-packages/activate", gin.H{"user_subscription_id": sub.Id}, user.Id)
 	body := decodeTestResponse(t, rec)
@@ -764,6 +775,13 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, pref["enabled"])
 	assert.Equal(t, float64(sub.Id), pref["active_user_subscription_id"])
+	usage, ok := data["usage"].(map[string]interface{})
+	require.True(t, ok)
+	requireValuePackageUsageResetFields(t, usage)
+	assert.Equal(t, float64(10), usage["used_5h"])
+	assert.Equal(t, float64(10), usage["used_7d"])
+	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
+	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_7d"), float64(0))
 
 	rec = valuePackageControllerRequest(DeactivateValuePackageSelf, http.MethodPost, "/value-packages/deactivate", nil, user.Id)
 	body = decodeTestResponse(t, rec)
@@ -1113,4 +1131,31 @@ func TestGetValuePackageSelfIncludesBillingState(t *testing.T) {
 	require.Equal(t, float64(0), body.Data.Billing.OriginalGroupRatio)
 	require.Equal(t, plan.Title, body.Data.Billing.PlanTitle)
 	require.Equal(t, plan.Id, body.Data.Billing.PlanId)
+}
+
+func requireValuePackageUsageResetFields(t *testing.T, usage map[string]interface{}) {
+	t.Helper()
+	for _, key := range []string{
+		"reset_at_5h",
+		"reset_seconds_5h",
+		"limited_5h",
+		"reset_at_7d",
+		"reset_seconds_7d",
+		"limited_7d",
+	} {
+		require.Contains(t, usage, key)
+	}
+	require.IsType(t, float64(0), usage["reset_at_5h"])
+	require.IsType(t, float64(0), usage["reset_seconds_5h"])
+	require.IsType(t, false, usage["limited_5h"])
+	require.IsType(t, float64(0), usage["reset_at_7d"])
+	require.IsType(t, float64(0), usage["reset_seconds_7d"])
+	require.IsType(t, false, usage["limited_7d"])
+}
+
+func valuePackageUsageNumber(t *testing.T, usage map[string]interface{}, key string) float64 {
+	t.Helper()
+	value, ok := usage[key].(float64)
+	require.True(t, ok)
+	return value
 }

@@ -479,4 +479,23 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 	assert.EqualValues(t, 120, row.Usage.Used7d)
 	assert.EqualValues(t, 500, row.Usage.Limit5h)
 	assert.EqualValues(t, 1000, row.Usage.Limit7d)
+	assert.Greater(t, row.Usage.ResetSeconds5h, int64(0))
+	assert.Greater(t, row.Usage.ResetSeconds7d, int64(0))
+	assert.False(t, row.Usage.Limited5h)
+	assert.False(t, row.Usage.Limited7d)
+
+	var raw map[string]interface{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &raw))
+	rawData, ok := raw["data"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, rawData, 1)
+	rawRow, ok := rawData[0].(map[string]interface{})
+	require.True(t, ok)
+	usage, ok := rawRow["usage"].(map[string]interface{})
+	require.True(t, ok)
+	requireValuePackageUsageResetFields(t, usage)
+	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
+	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_7d"), float64(0))
+	assert.Equal(t, false, usage["limited_5h"])
+	assert.Equal(t, false, usage["limited_7d"])
 }
