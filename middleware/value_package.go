@@ -288,7 +288,7 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 
 func formatValuePackageLimitMessage(windowLabel string, used int64, limit int64, resetSeconds int64) string {
 	if resetSeconds > 0 {
-		return fmt.Sprintf("%s（%s：已用 %d / 限额 %d，将在 %s 后恢复）", model.ValuePackageQuotaExhaustedUserMessage, windowLabel, used, limit, formatValuePackageResetDuration(resetSeconds))
+		return fmt.Sprintf("%s（%s：已用 %d / 限额 %d，将在 %s后完全恢复）", model.ValuePackageQuotaExhaustedUserMessage, windowLabel, used, limit, formatValuePackageResetDuration(resetSeconds))
 	}
 	return fmt.Sprintf("%s（%s：已用 %d / 限额 %d）", model.ValuePackageQuotaExhaustedUserMessage, windowLabel, used, limit)
 }

@@ -303,8 +303,7 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)
 	require.Contains(t, recorder.Body.String(), "5 小时")
-	require.Contains(t, recorder.Body.String(), "将在")
-	require.Contains(t, recorder.Body.String(), "后恢复")
+	require.Contains(t, recorder.Body.String(), "完全恢复")
 
 	require.NoError(t, model.DB.Where("1 = 1").Delete(&model.ValuePackageUsageRecord{}).Error)
 	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]any{"limit_5h_amount": int64(0), "limit_7d_amount": int64(100)}).Error)
@@ -315,15 +314,73 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)
 	require.Contains(t, recorder.Body.String(), "7 天")
-	require.Contains(t, recorder.Body.String(), "将在")
-	require.Contains(t, recorder.Body.String(), "后恢复")
+	require.Contains(t, recorder.Body.String(), "完全恢复")
+}
+
+func TestValuePackageLimitMessageFormatting(t *testing.T) {
+	tests := []struct {
+		name         string
+		windowLabel  string
+		used         int64
+		limit        int64
+		resetSeconds int64
+		want         string
+	}{
+		{
+			name:         "5h reset uses complete recovery wording without extra spacing",
+			windowLabel:  "5 小时",
+			used:         100,
+			limit:        100,
+			resetSeconds: 5 * 3600,
+			want:         model.ValuePackageQuotaExhaustedUserMessage + "（5 小时：已用 100 / 限额 100，将在 5 小时后完全恢复）",
+		},
+		{
+			name:         "7d reset uses complete recovery wording without extra spacing",
+			windowLabel:  "7 天",
+			used:         100,
+			limit:        100,
+			resetSeconds: 7 * 24 * 3600,
+			want:         model.ValuePackageQuotaExhaustedUserMessage + "（7 天：已用 100 / 限额 100，将在 7 天后完全恢复）",
+		},
+		{
+			name:         "zero reset keeps old wording",
+			windowLabel:  "5 小时",
+			used:         100,
+			limit:        100,
+			resetSeconds: 0,
+			want:         model.ValuePackageQuotaExhaustedUserMessage + "（5 小时：已用 100 / 限额 100）",
+		},
+		{
+			name:         "negative reset keeps old wording",
+			windowLabel:  "7 天",
+			used:         100,
+			limit:        100,
+			resetSeconds: -1,
+			want:         model.ValuePackageQuotaExhaustedUserMessage + "（7 天：已用 100 / 限额 100）",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatValuePackageLimitMessage(tt.windowLabel, tt.used, tt.limit, tt.resetSeconds)
+			require.Equal(t, tt.want, got)
+			if tt.resetSeconds <= 0 {
+				require.NotContains(t, got, "完全恢复")
+			}
+		})
+	}
 }
 
 func TestValuePackageResetDurationFormatting(t *testing.T) {
+	require.Equal(t, "不到 1 分钟", formatValuePackageResetDuration(-1))
+	require.Equal(t, "不到 1 分钟", formatValuePackageResetDuration(0))
 	require.Equal(t, "不到 1 分钟", formatValuePackageResetDuration(45))
+	require.Equal(t, "1 分钟", formatValuePackageResetDuration(60))
 	require.Equal(t, "2 分钟", formatValuePackageResetDuration(61))
+	require.Equal(t, "1 小时", formatValuePackageResetDuration(3600))
+	require.Equal(t, "5 小时", formatValuePackageResetDuration(int64((5*time.Hour)/time.Second)))
 	require.Equal(t, "3 小时 15 分钟", formatValuePackageResetDuration(int64((3*time.Hour+15*time.Minute)/time.Second)))
 	require.Equal(t, "2 天 4 小时", formatValuePackageResetDuration(int64((2*24*time.Hour+4*time.Hour)/time.Second)))
+	require.Equal(t, "7 天", formatValuePackageResetDuration(int64((7*24*time.Hour)/time.Second)))
 }
 
 func TestValuePackageConcurrencyLimiter(t *testing.T) {
