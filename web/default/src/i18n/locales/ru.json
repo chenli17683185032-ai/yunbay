@@ -5068,6 +5068,22 @@
     "我们不生产水，我们只是大自然的搬运工。为中国的 token 出海贡献一份力量。": "Мы не производим воду. Мы переносим ее из природы. Мы вносим скромный поток в выход китайского token на мировой рынок.",
     "无需担心掉线。": "无需担心掉线。",
     "永续的 Vibe Coding 助手": "Постоянный помощник Vibe Coding",
-    "永续的 Vibe Coding 助手，无需再担心掉线。": "Постоянный помощник Vibe Coding, чтобы больше не беспокоиться об отключениях."
+    "永续的 Vibe Coding 助手，无需再担心掉线。": "Постоянный помощник Vibe Coding, чтобы больше не беспокоиться об отключениях.",
+    "Fully restored": "Полностью восстановлено",
+    "less than 1 minute": "менее 1 минуты",
+    "{{count}} minutes": "{{count}} мин.",
+    "{{count}} hours": "{{count}} ч.",
+    "1 hour 1 minute": "1 час 1 минута",
+    "1 hour {{minutes}} minutes": "1 час {{minutes}} мин.",
+    "{{hours}} hours 1 minute": "{{hours}} ч. 1 минута",
+    "{{hours}} hours {{minutes}} minutes": "{{hours}} ч. {{minutes}} мин.",
+    "1 day": "1 день",
+    "{{count}} days": "{{count}} дн.",
+    "1 day 1 hour": "1 день 1 час",
+    "1 day {{hours}} hours": "1 день {{hours}} ч.",
+    "{{days}} days 1 hour": "{{days}} дн. 1 час",
+    "{{days}} days {{hours}} hours": "{{days}} дн. {{hours}} ч.",
+    "Resets in {{time}}": "Полное восстановление через {{time}}",
+    "Limit reached · {{reset}}": "Лимит достигнут · {{reset}}"
   }
 }
