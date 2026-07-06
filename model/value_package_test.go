@@ -401,6 +401,30 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	require.EqualValues(t, 7*24*3600-3600, details.ResetSeconds7d)
 }
 
+func TestValuePackageWindowUsageDetailsIgnoresZeroQuotaForReset(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3009, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-100, now+3600)
+
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "positive-usage", Quota: 100, CreatedAt: now - 4*3600}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "zero-usage", Quota: 0, CreatedAt: now - 3600}))
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 100, details.Used5h)
+	require.EqualValues(t, now-4*3600, details.Latest5hCreatedAt)
+	require.EqualValues(t, now+3600, details.ResetAt5h)
+	require.EqualValues(t, 3600, details.ResetSeconds5h)
+	require.EqualValues(t, 100, details.Used7d)
+	require.EqualValues(t, now-4*3600, details.Latest7dCreatedAt)
+	require.EqualValues(t, now-4*3600+7*24*3600, details.ResetAt7d)
+	require.EqualValues(t, 7*24*3600-4*3600, details.ResetSeconds7d)
+}
+
 func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3400, UserGroupVIP)

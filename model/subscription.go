@@ -2241,6 +2241,7 @@ func GetValuePackageWindowUsageDetails(userId int, userSubscriptionId int, now i
 	return getValuePackageWindowUsageDetailsTx(DB, userId, userSubscriptionId, now)
 }
 
+// ResetAt is based on current-window positive usage; callers should suppress reset display when the matching limit is disabled.
 func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (*ValuePackageWindowUsageDetails, error) {
 	if tx == nil {
 		tx = DB
@@ -2254,7 +2255,7 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 		LatestCreatedAt int64
 	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
-		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-5*3600).
+		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, now-5*3600, 0).
 		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MAX(created_at), 0) AS latest_created_at").
 		Scan(&usage5h).Error; err != nil {
 		return nil, err
@@ -2274,7 +2275,7 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 		LatestCreatedAt int64
 	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
-		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-7*24*3600).
+		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, now-7*24*3600, 0).
 		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MAX(created_at), 0) AS latest_created_at").
 		Scan(&usage7d).Error; err != nil {
 		return nil, err
