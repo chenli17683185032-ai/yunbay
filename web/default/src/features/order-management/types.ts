@@ -195,9 +195,15 @@ export interface OrderManagementValuePackageUsageSummary {
   used_5h: number
   limit_5h: number
   percent_5h: number
+  reset_at_5h: number
+  reset_seconds_5h: number
+  limited_5h: boolean
   used_7d: number
   limit_7d: number
   percent_7d: number
+  reset_at_7d: number
+  reset_seconds_7d: number
+  limited_7d: boolean
   exhausted: boolean
   exhausted_reason: string
   exhausted_message: string

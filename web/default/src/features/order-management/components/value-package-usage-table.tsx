@@ -39,6 +39,7 @@ import {
 } from '@/components/ui/table'
 import { TitledCard } from '@/components/ui/titled-card'
 import { VALUE_PACKAGE_TYPES } from '@/features/subscriptions/constants'
+import { formatValuePackageResetLine } from '@/features/value-packages/lib/reset-time'
 import type {
   OrderManagementValuePackageUsageRow,
   OrderManagementValuePackageUsageSummary,
@@ -65,10 +66,14 @@ function WindowQuotaCell({
   used,
   limit,
   percent,
+  resetSeconds,
+  limited,
 }: {
   used: number
   limit: number
   percent: number
+  resetSeconds?: number
+  limited?: boolean
 }) {
   const { t } = useTranslation()
   const remaining = remainingQuota(used, limit)
@@ -76,6 +81,13 @@ function WindowQuotaCell({
   if (remaining === null) {
     return <span className='font-semibold'>{t('Unlimited')}</span>
   }
+
+  const resetLine = formatValuePackageResetLine({
+    limit,
+    resetSeconds,
+    limited,
+    t,
+  })
 
   return (
     <div className='flex min-w-[160px] flex-col gap-1.5'>
@@ -88,6 +100,15 @@ function WindowQuotaCell({
           used: formatQuota(used || 0),
           limit: formatQuota(limit),
         })}
+      </div>
+      <div
+        className={
+          limited
+            ? 'text-destructive text-xs font-medium'
+            : 'text-muted-foreground text-xs'
+        }
+      >
+        {resetLine}
       </div>
     </div>
   )
@@ -209,6 +230,8 @@ export function ValuePackageUsageTable({
                       used={usage?.used_5h || 0}
                       limit={usage?.limit_5h || 0}
                       percent={usage?.percent_5h || 0}
+                      resetSeconds={usage?.reset_seconds_5h || 0}
+                      limited={usage?.limited_5h || false}
                     />
                   </TableCell>
                   <TableCell>
@@ -216,6 +239,8 @@ export function ValuePackageUsageTable({
                       used={usage?.used_7d || 0}
                       limit={usage?.limit_7d || 0}
                       percent={usage?.percent_7d || 0}
+                      resetSeconds={usage?.reset_seconds_7d || 0}
+                      limited={usage?.limited_7d || false}
                     />
                   </TableCell>
                   <TableCell>
