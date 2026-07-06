@@ -441,15 +441,42 @@ func TestVerifyLdxpSessionDirectTopupCreatesAffiliateCommission(t *testing.T) {
 }
 
 func TestVerifyLdxpWorkerPaidFieldsAllowsCardNetworkFee(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		money  float64
+		worker float64
+	}{
+		{name: "ten", money: 10, worker: 10.3},
+		{name: "discounted fifty", money: 47.5, worker: 48.93},
+		{name: "discounted hundred", money: 90, worker: 92.7},
+		{name: "discounted five hundred", money: 425, worker: 437.75},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session := &model.LdxpTopupSession{
+				SessionId:        "ldxp_verify_fee_allowed",
+				Money:            tc.money,
+				WorkerOrderNo:    "LDFEEALLOWED",
+				WorkerAmount:     tc.worker,
+				WorkerStatusText: "支付成功",
+			}
+
+			require.NoError(t, VerifyLdxpWorkerPaidFields(session))
+		})
+	}
+}
+
+func TestVerifyLdxpWorkerPaidFieldsRejectsUndiscountedExpectationForDiscountedProduct(t *testing.T) {
 	session := &model.LdxpTopupSession{
-		SessionId:        "ldxp_verify_fee_allowed",
-		Money:            10,
-		WorkerOrderNo:    "LDFEEALLOWED",
-		WorkerAmount:     10.3,
+		SessionId:        "ldxp_verify_discount_mismatch",
+		Money:            500,
+		WorkerOrderNo:    "LDDISCOUNTMISMATCH",
+		WorkerAmount:     437.75,
 		WorkerStatusText: "支付成功",
 	}
 
-	require.NoError(t, VerifyLdxpWorkerPaidFields(session))
+	err := VerifyLdxpWorkerPaidFields(session)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not match worker amount")
 }
 
 func TestVerifyLdxpSessionDirectTopupUpgradesUserToVIPAtThreshold(t *testing.T) {

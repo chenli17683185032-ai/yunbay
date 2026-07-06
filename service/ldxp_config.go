@@ -39,9 +39,9 @@ const defaultLdxpProductsJSON = `[
   {"amount":10,"money":10,"product_url":"https://pay.ldxp.cn/item/nzkyrt","product_name":"LDXP 10"},
   {"amount":20,"money":20,"product_url":"https://pay.ldxp.cn/item/ka4pg7","product_name":"LDXP 20"},
   {"amount":30,"money":30,"product_url":"https://pay.ldxp.cn/item/n8schm","product_name":"LDXP 30"},
-  {"amount":50,"money":50,"product_url":"https://pay.ldxp.cn/item/5c4yft","product_name":"LDXP 50"},
-  {"amount":100,"money":100,"product_url":"https://pay.ldxp.cn/item/sb48mz","product_name":"LDXP 100"},
-  {"amount":500,"money":500,"product_url":"https://pay.ldxp.cn/item/y8t52c","product_name":"LDXP 500"}
+  {"amount":50,"money":47.5,"product_url":"https://pay.ldxp.cn/item/5c4yft","product_name":"LDXP 50"},
+  {"amount":100,"money":90,"product_url":"https://pay.ldxp.cn/item/sb48mz","product_name":"LDXP 100"},
+  {"amount":500,"money":425,"product_url":"https://pay.ldxp.cn/item/y8t52c","product_name":"LDXP 500"}
 ]`
 
 var requiredLdxpProductAmounts = []int64{10, 20, 30, 50, 100, 500}

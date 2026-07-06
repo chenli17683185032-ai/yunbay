@@ -171,9 +171,13 @@ test('cashier readiness requires an order number and does not match the item pag
 test('accepts card-network service fee on top of the configured ldxp amount', () => {
   assert.equal(isExpectedAmountAcceptable(10.3, 10), true)
   assert.equal(isExpectedAmountAcceptable(20.6, 20), true)
+  assert.equal(isExpectedAmountAcceptable(48.93, 47.5), true)
+  assert.equal(isExpectedAmountAcceptable(92.7, 90), true)
+  assert.equal(isExpectedAmountAcceptable(437.75, 425), true)
   assert.equal(isExpectedAmountAcceptable(10, 10), true)
   assert.equal(isExpectedAmountAcceptable(9.98, 10), false)
   assert.equal(isExpectedAmountAcceptable(12, 10), false)
+  assert.equal(isExpectedAmountAcceptable(437.75, 500), false)
 })
 
 test('cashier wait does not resolve just because the payApi transition URL is reached', async () => {

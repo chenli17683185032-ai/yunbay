@@ -69,12 +69,20 @@ func TestLoadLdxpConfigDefaultProductsUseRealSixLinks(t *testing.T) {
 		100: "https://pay.ldxp.cn/item/sb48mz",
 		500: "https://pay.ldxp.cn/item/y8t52c",
 	}
+	expectedMoney := map[int64]float64{
+		10:  10,
+		20:  20,
+		30:  30,
+		50:  47.5,
+		100: 90,
+		500: 425,
+	}
 	for amount, expectedURL := range expectedURLs {
 		product, ok := cfg.Products[amount]
 		require.True(t, ok, "amount %d must be present", amount)
 		require.Equal(t, amount, product.Amount)
 		require.Equal(t, expectedURL, product.ProductURL)
-		require.Equal(t, float64(amount), product.Money)
+		require.Equal(t, expectedMoney[amount], product.Money)
 		require.Equal(t, "LDXP "+strconv.FormatInt(amount, 10), product.ProductName)
 	}
 }
