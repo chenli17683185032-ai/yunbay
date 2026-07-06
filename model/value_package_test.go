@@ -387,6 +387,18 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 900, used5h)
 	require.EqualValues(t, 1800, used7d)
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 900, details.Used5h)
+	require.EqualValues(t, now-3600, details.Latest5hCreatedAt)
+	require.EqualValues(t, now+4*3600, details.ResetAt5h)
+	require.EqualValues(t, 4*3600, details.ResetSeconds5h)
+	require.EqualValues(t, 1800, details.Used7d)
+	require.EqualValues(t, now-3600, details.Latest7dCreatedAt)
+	require.EqualValues(t, now+7*24*3600-3600, details.ResetAt7d)
+	require.EqualValues(t, 7*24*3600-3600, details.ResetSeconds7d)
 }
 
 func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
@@ -417,6 +429,14 @@ func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
 	require.EqualValues(t, 100, state.Usage.TotalLimit)
 	require.EqualValues(t, 10, state.Usage.Used5h)
 	require.EqualValues(t, 50, state.Usage.Limit5h)
+	require.EqualValues(t, now+5*3600, state.Usage.ResetAt5h)
+	require.InDelta(t, 5*3600, state.Usage.ResetSeconds5h, 2)
+	require.False(t, state.Usage.Limited5h)
+	require.EqualValues(t, 10, state.Usage.Used7d)
+	require.EqualValues(t, 75, state.Usage.Limit7d)
+	require.EqualValues(t, now+7*24*3600, state.Usage.ResetAt7d)
+	require.InDelta(t, 7*24*3600, state.Usage.ResetSeconds7d, 2)
+	require.False(t, state.Usage.Limited7d)
 }
 
 func TestGetValuePackageStateIncludesUsageSummary(t *testing.T) {
@@ -447,9 +467,15 @@ func TestGetValuePackageStateIncludesUsageSummary(t *testing.T) {
 	require.EqualValues(t, 40, state.Usage.Used5h)
 	require.EqualValues(t, 100, state.Usage.Limit5h)
 	require.InDelta(t, 40.0, state.Usage.Percent5h, 0.001)
+	require.EqualValues(t, now+5*3600, state.Usage.ResetAt5h)
+	require.InDelta(t, 5*3600, state.Usage.ResetSeconds5h, 2)
+	require.False(t, state.Usage.Limited5h)
 	require.EqualValues(t, 70, state.Usage.Used7d)
 	require.EqualValues(t, 150, state.Usage.Limit7d)
 	require.InDelta(t, 46.666, state.Usage.Percent7d, 0.01)
+	require.EqualValues(t, now+7*24*3600, state.Usage.ResetAt7d)
+	require.InDelta(t, 7*24*3600, state.Usage.ResetSeconds7d, 2)
+	require.False(t, state.Usage.Limited7d)
 	require.False(t, state.Usage.Exhausted)
 	require.Empty(t, state.Usage.ExhaustedReason)
 
@@ -512,6 +538,36 @@ func TestGetValuePackageStateMarksExhaustedUsageSummary(t *testing.T) {
 	require.True(t, state.Usage.Exhausted)
 	require.Equal(t, ValuePackageExhaustedReasonTotal, state.Usage.ExhaustedReason)
 	require.Equal(t, ValuePackageQuotaExhaustedUserMessage, state.Usage.ExhaustedMessage)
+}
+
+func TestValuePackageUsageSummaryResetFieldsForEmptyAndUnlimitedWindows(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3410, UserGroupVIP)
+	plan := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	plan.TotalAmount = 1000
+	plan.Limit5hAmount = 0
+	plan.Limit7dAmount = 0
+	require.NoError(t, DB.Save(&plan).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, plan, now-10, now+86400)
+
+	state, err := ActivateValuePackage(user.Id, sub.Id)
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.Usage)
+	require.EqualValues(t, 0, state.Usage.Used5h)
+	require.EqualValues(t, 0, state.Usage.Limit5h)
+	require.EqualValues(t, 0, state.Usage.ResetAt5h)
+	require.EqualValues(t, 0, state.Usage.ResetSeconds5h)
+	require.False(t, state.Usage.Limited5h)
+	require.EqualValues(t, 0, state.Usage.Used7d)
+	require.EqualValues(t, 0, state.Usage.Limit7d)
+	require.EqualValues(t, 0, state.Usage.ResetAt7d)
+	require.EqualValues(t, 0, state.Usage.ResetSeconds7d)
+	require.False(t, state.Usage.Limited7d)
+	require.False(t, state.Usage.Exhausted)
+	require.Empty(t, state.Usage.ExhaustedReason)
 }
 
 func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testing.T) {

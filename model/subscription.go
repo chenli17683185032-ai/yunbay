@@ -1352,12 +1352,29 @@ type ValuePackageUsageSummary struct {
 	Used5h           int64   `json:"used_5h"`
 	Limit5h          int64   `json:"limit_5h"`
 	Percent5h        float64 `json:"percent_5h"`
+	ResetAt5h        int64   `json:"reset_at_5h"`
+	ResetSeconds5h   int64   `json:"reset_seconds_5h"`
+	Limited5h        bool    `json:"limited_5h"`
 	Used7d           int64   `json:"used_7d"`
 	Limit7d          int64   `json:"limit_7d"`
 	Percent7d        float64 `json:"percent_7d"`
+	ResetAt7d        int64   `json:"reset_at_7d"`
+	ResetSeconds7d   int64   `json:"reset_seconds_7d"`
+	Limited7d        bool    `json:"limited_7d"`
 	Exhausted        bool    `json:"exhausted"`
 	ExhaustedReason  string  `json:"exhausted_reason"`
 	ExhaustedMessage string  `json:"exhausted_message"`
+}
+
+type ValuePackageWindowUsageDetails struct {
+	Used5h            int64
+	Latest5hCreatedAt int64
+	ResetAt5h         int64
+	ResetSeconds5h    int64
+	Used7d            int64
+	Latest7dCreatedAt int64
+	ResetAt7d         int64
+	ResetSeconds7d    int64
 }
 
 type ValuePackageBillingState struct {
@@ -1709,10 +1726,12 @@ func buildValuePackageUsageSummaryTx(tx *gorm.DB, userId int, sub *UserSubscript
 	if now <= 0 {
 		now = getDBTimestampTx(tx)
 	}
-	used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
+	usageDetails, err := getValuePackageWindowUsageDetailsTx(tx, userId, sub.Id, now)
 	if err != nil {
 		return nil, err
 	}
+	limited5h := plan.Limit5hAmount > 0 && usageDetails.Used5h >= plan.Limit5hAmount
+	limited7d := plan.Limit7dAmount > 0 && usageDetails.Used7d >= plan.Limit7dAmount
 	totalRemaining := int64(0)
 	if sub.AmountTotal > 0 && sub.AmountTotal > sub.AmountUsed {
 		totalRemaining = sub.AmountTotal - sub.AmountUsed
@@ -1722,21 +1741,31 @@ func buildValuePackageUsageSummaryTx(tx *gorm.DB, userId int, sub *UserSubscript
 		TotalLimit:     sub.AmountTotal,
 		TotalRemaining: totalRemaining,
 		TotalPercent:   valuePackagePercent(sub.AmountUsed, sub.AmountTotal),
-		Used5h:         used5h,
+		Used5h:         usageDetails.Used5h,
 		Limit5h:        plan.Limit5hAmount,
-		Percent5h:      valuePackagePercent(used5h, plan.Limit5hAmount),
-		Used7d:         used7d,
+		Percent5h:      valuePackagePercent(usageDetails.Used5h, plan.Limit5hAmount),
+		Limited5h:      limited5h,
+		Used7d:         usageDetails.Used7d,
 		Limit7d:        plan.Limit7dAmount,
-		Percent7d:      valuePackagePercent(used7d, plan.Limit7dAmount),
+		Percent7d:      valuePackagePercent(usageDetails.Used7d, plan.Limit7dAmount),
+		Limited7d:      limited7d,
+	}
+	if plan.Limit5hAmount > 0 {
+		summary.ResetAt5h = usageDetails.ResetAt5h
+		summary.ResetSeconds5h = usageDetails.ResetSeconds5h
+	}
+	if plan.Limit7dAmount > 0 {
+		summary.ResetAt7d = usageDetails.ResetAt7d
+		summary.ResetSeconds7d = usageDetails.ResetSeconds7d
 	}
 	switch {
 	case sub.AmountTotal > 0 && sub.AmountUsed >= sub.AmountTotal:
 		summary.Exhausted = true
 		summary.ExhaustedReason = ValuePackageExhaustedReasonTotal
-	case plan.Limit5hAmount > 0 && used5h >= plan.Limit5hAmount:
+	case limited5h:
 		summary.Exhausted = true
 		summary.ExhaustedReason = ValuePackageExhaustedReason5h
-	case plan.Limit7dAmount > 0 && used7d >= plan.Limit7dAmount:
+	case limited7d:
 		summary.Exhausted = true
 		summary.ExhaustedReason = ValuePackageExhaustedReason7d
 	}
@@ -2201,22 +2230,65 @@ func GetValuePackageWindowUsage(userId int, userSubscriptionId int, now int64) (
 }
 
 func getValuePackageWindowUsageTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (int64, int64, error) {
-	if now <= 0 {
-		now = GetDBTimestamp()
+	details, err := getValuePackageWindowUsageDetailsTx(tx, userId, userSubscriptionId, now)
+	if err != nil {
+		return 0, 0, err
 	}
-	var used5h int64
+	return details.Used5h, details.Used7d, nil
+}
+
+func GetValuePackageWindowUsageDetails(userId int, userSubscriptionId int, now int64) (*ValuePackageWindowUsageDetails, error) {
+	return getValuePackageWindowUsageDetailsTx(DB, userId, userSubscriptionId, now)
+}
+
+func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (*ValuePackageWindowUsageDetails, error) {
+	if tx == nil {
+		tx = DB
+	}
+	if now <= 0 {
+		now = getDBTimestampTx(tx)
+	}
+	details := &ValuePackageWindowUsageDetails{}
+	var usage5h struct {
+		Used            int64
+		LatestCreatedAt int64
+	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
 		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-5*3600).
-		Select("COALESCE(SUM(quota), 0)").Scan(&used5h).Error; err != nil {
-		return 0, 0, err
+		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MAX(created_at), 0) AS latest_created_at").
+		Scan(&usage5h).Error; err != nil {
+		return nil, err
 	}
-	var used7d int64
+	details.Used5h = usage5h.Used
+	details.Latest5hCreatedAt = usage5h.LatestCreatedAt
+	if details.Used5h > 0 && details.Latest5hCreatedAt > 0 {
+		details.ResetAt5h = details.Latest5hCreatedAt + 5*3600
+		details.ResetSeconds5h = details.ResetAt5h - now
+		if details.ResetSeconds5h < 0 {
+			details.ResetSeconds5h = 0
+		}
+	}
+
+	var usage7d struct {
+		Used            int64
+		LatestCreatedAt int64
+	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
 		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ?", userId, userSubscriptionId, now-7*24*3600).
-		Select("COALESCE(SUM(quota), 0)").Scan(&used7d).Error; err != nil {
-		return 0, 0, err
+		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MAX(created_at), 0) AS latest_created_at").
+		Scan(&usage7d).Error; err != nil {
+		return nil, err
 	}
-	return used5h, used7d, nil
+	details.Used7d = usage7d.Used
+	details.Latest7dCreatedAt = usage7d.LatestCreatedAt
+	if details.Used7d > 0 && details.Latest7dCreatedAt > 0 {
+		details.ResetAt7d = details.Latest7dCreatedAt + 7*24*3600
+		details.ResetSeconds7d = details.ResetAt7d - now
+		if details.ResetSeconds7d < 0 {
+			details.ResetSeconds7d = 0
+		}
+	}
+	return details, nil
 }
 
 // AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.
