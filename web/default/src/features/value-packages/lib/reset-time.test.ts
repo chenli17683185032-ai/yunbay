@@ -41,24 +41,33 @@ test('reset time shows less than 1 minute for sub-minute positive values', () =>
   assert.equal(formatValuePackageResetTime(59, t), 'less than 1 minute')
 })
 
-test('reset time rounds 61 seconds up to 2 minutes', () => {
+test('reset time formats minute values with correct singular and plural forms', () => {
+  assert.equal(formatValuePackageResetTime(60, t), '1 minute')
   assert.equal(formatValuePackageResetTime(61, t), '2 minutes')
+  assert.equal(formatValuePackageResetTime(120, t), '2 minutes')
 })
 
-test('reset time shows exact hour as singular hour line', () => {
+test('reset time formats hour values with normalized rounded minutes', () => {
   assert.equal(formatValuePackageResetTime(3600, t), '1 hour')
+  assert.equal(formatValuePackageResetTime(7200, t), '2 hours')
+  assert.equal(formatValuePackageResetTime(3601, t), '1 hour 1 minute')
+  assert.equal(formatValuePackageResetTime(7199, t), '2 hours')
 })
 
 test('reset time shows hours and minutes for mixed hour values', () => {
   assert.equal(formatValuePackageResetTime(3 * 3600 + 15 * 60, t), '3 hours 15 minutes')
 })
 
-test('reset time shows exact day line', () => {
-  assert.equal(formatValuePackageResetTime(7 * 24 * 3600, t), '7 day')
+test('reset time formats day values with correct singular and plural forms', () => {
+  assert.equal(formatValuePackageResetTime(24 * 3600, t), '1 day')
+  assert.equal(formatValuePackageResetTime(2 * 24 * 3600, t), '2 days')
+  assert.equal(formatValuePackageResetTime(7 * 24 * 3600, t), '7 days')
 })
 
-test('reset time shows days and hours without remaining seconds', () => {
-  assert.equal(formatValuePackageResetTime(4 * 24 * 3600 + 6 * 3600 + 30, t), '4 days 6 hours')
+test('reset time formats day values with normalized rounded hours', () => {
+  assert.equal(formatValuePackageResetTime(24 * 3600 + 1, t), '1 day 1 hour')
+  assert.equal(formatValuePackageResetTime(4 * 24 * 3600 + 6 * 3600 + 30, t), '4 days 7 hours')
+  assert.equal(formatValuePackageResetTime(7 * 24 * 3600 - 1, t), '7 days')
 })
 
 test('reset line shows unlimited when limit is zero or invalid', () => {
@@ -114,6 +123,6 @@ test('reset line shows limit reached message when package is limited', () => {
       limited: true,
       t,
     }),
-    'Limit reached · Resets in 4 days 6 hours'
+    'Limit reached · Resets in 4 days 7 hours'
   )
 })

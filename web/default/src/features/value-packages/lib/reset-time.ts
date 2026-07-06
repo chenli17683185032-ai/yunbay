@@ -42,36 +42,85 @@ export function formatValuePackageResetTime(
   }
 
   if (seconds >= DAY_SECONDS) {
-    const days = Math.floor(seconds / DAY_SECONDS)
-    const remainingSeconds = seconds - days * DAY_SECONDS
-
-    if (remainingSeconds === 0) {
-      return t('{{count}} day', { count: days })
-    }
-
-    return t('{{days}} days {{hours}} hours', {
-      days,
-      hours: Math.floor(remainingSeconds / HOUR_SECONDS),
-    })
+    const totalHours = Math.ceil(seconds / HOUR_SECONDS)
+    return formatDaysAndHours(
+      Math.floor(totalHours / 24),
+      totalHours % 24,
+      t
+    )
   }
 
-  if (seconds >= HOUR_SECONDS) {
-    const hours = Math.floor(seconds / HOUR_SECONDS)
-    const remainingSeconds = seconds - hours * HOUR_SECONDS
-
-    if (remainingSeconds === 0) {
-      return t('{{count}} hour', { count: hours })
-    }
-
-    return t('{{hours}} hours {{minutes}} minutes', {
-      hours,
-      minutes: Math.ceil(remainingSeconds / MINUTE_SECONDS),
-    })
+  const totalMinutes = Math.ceil(seconds / MINUTE_SECONDS)
+  if (totalMinutes < 60) {
+    return formatMinutes(totalMinutes, t)
   }
 
-  return t('{{count}} minutes', {
-    count: Math.ceil(seconds / MINUTE_SECONDS),
-  })
+  return formatHoursAndMinutes(
+    Math.floor(totalMinutes / 60),
+    totalMinutes % 60,
+    t
+  )
+}
+
+function formatMinutes(minutes: number, t: Translate): string {
+  if (minutes === 1) {
+    return t('1 minute')
+  }
+  return t('{{count}} minutes', { count: minutes })
+}
+
+function formatHours(hours: number, t: Translate): string {
+  if (hours === 1) {
+    return t('1 hour')
+  }
+  return t('{{count}} hours', { count: hours })
+}
+
+function formatHoursAndMinutes(
+  hours: number,
+  minutes: number,
+  t: Translate
+): string {
+  if (minutes === 0) {
+    return formatHours(hours, t)
+  }
+  if (hours === 1 && minutes === 1) {
+    return t('1 hour 1 minute')
+  }
+  if (hours === 1) {
+    return t('1 hour {{minutes}} minutes', { minutes })
+  }
+  if (minutes === 1) {
+    return t('{{hours}} hours 1 minute', { hours })
+  }
+  return t('{{hours}} hours {{minutes}} minutes', { hours, minutes })
+}
+
+function formatDays(days: number, t: Translate): string {
+  if (days === 1) {
+    return t('1 day')
+  }
+  return t('{{count}} days', { count: days })
+}
+
+function formatDaysAndHours(
+  days: number,
+  hours: number,
+  t: Translate
+): string {
+  if (hours === 0) {
+    return formatDays(days, t)
+  }
+  if (days === 1 && hours === 1) {
+    return t('1 day 1 hour')
+  }
+  if (days === 1) {
+    return t('1 day {{hours}} hours', { hours })
+  }
+  if (hours === 1) {
+    return t('{{days}} days 1 hour', { days })
+  }
+  return t('{{days}} days {{hours}} hours', { days, hours })
 }
 
 export function formatValuePackageResetLine(args: {
