@@ -253,17 +253,20 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 		}
 
 		now := model.GetDBTimestamp()
-		used5h, used7d, err := model.GetValuePackageWindowUsage(userId, state.Subscription.Id, now)
+		usageDetails, err := model.GetValuePackageWindowUsageDetails(userId, state.Subscription.Id, now)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusInternalServerError, "查询超值套餐用量失败")
 			return
 		}
-		if state.Plan.Limit5hAmount > 0 && used5h >= state.Plan.Limit5hAmount {
-			abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("%s（5 小时：已用 %d / 限额 %d）", model.ValuePackageQuotaExhaustedUserMessage, used5h, state.Plan.Limit5hAmount))
+		if usageDetails == nil {
+			usageDetails = &model.ValuePackageWindowUsageDetails{}
+		}
+		if state.Plan.Limit5hAmount > 0 && usageDetails.Used5h >= state.Plan.Limit5hAmount {
+			abortWithOpenAiMessage(c, http.StatusForbidden, formatValuePackageLimitMessage("5 小时", usageDetails.Used5h, state.Plan.Limit5hAmount, usageDetails.ResetSeconds5h))
 			return
 		}
-		if state.Plan.Limit7dAmount > 0 && used7d >= state.Plan.Limit7dAmount {
-			abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("%s（7 天：已用 %d / 限额 %d）", model.ValuePackageQuotaExhaustedUserMessage, used7d, state.Plan.Limit7dAmount))
+		if state.Plan.Limit7dAmount > 0 && usageDetails.Used7d >= state.Plan.Limit7dAmount {
+			abortWithOpenAiMessage(c, http.StatusForbidden, formatValuePackageLimitMessage("7 天", usageDetails.Used7d, state.Plan.Limit7dAmount, usageDetails.ResetSeconds7d))
 			return
 		}
 
@@ -281,6 +284,40 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func formatValuePackageLimitMessage(windowLabel string, used int64, limit int64, resetSeconds int64) string {
+	if resetSeconds > 0 {
+		return fmt.Sprintf("%s（%s：已用 %d / 限额 %d，将在 %s 后恢复）", model.ValuePackageQuotaExhaustedUserMessage, windowLabel, used, limit, formatValuePackageResetDuration(resetSeconds))
+	}
+	return fmt.Sprintf("%s（%s：已用 %d / 限额 %d）", model.ValuePackageQuotaExhaustedUserMessage, windowLabel, used, limit)
+}
+
+func formatValuePackageResetDuration(seconds int64) string {
+	if seconds <= 0 {
+		return "不到 1 分钟"
+	}
+	if seconds < 60 {
+		return "不到 1 分钟"
+	}
+	minutes := (seconds + 59) / 60
+	if minutes < 60 {
+		return fmt.Sprintf("%d 分钟", minutes)
+	}
+	hours := minutes / 60
+	remainingMinutes := minutes % 60
+	if hours < 24 {
+		if remainingMinutes > 0 {
+			return fmt.Sprintf("%d 小时 %d 分钟", hours, remainingMinutes)
+		}
+		return fmt.Sprintf("%d 小时", hours)
+	}
+	days := hours / 24
+	remainingHours := hours % 24
+	if remainingHours > 0 {
+		return fmt.Sprintf("%d 天 %d 小时", days, remainingHours)
+	}
+	return fmt.Sprintf("%d 天", days)
 }
 
 func applyValuePackageGroupScope(c *gin.Context, state *model.ValuePackageState) {

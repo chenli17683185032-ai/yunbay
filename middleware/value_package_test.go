@@ -302,6 +302,9 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)
+	require.Contains(t, recorder.Body.String(), "5 小时")
+	require.Contains(t, recorder.Body.String(), "将在")
+	require.Contains(t, recorder.Body.String(), "后恢复")
 
 	require.NoError(t, model.DB.Where("1 = 1").Delete(&model.ValuePackageUsageRecord{}).Error)
 	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]any{"limit_5h_amount": int64(0), "limit_7d_amount": int64(100)}).Error)
@@ -311,6 +314,16 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)
+	require.Contains(t, recorder.Body.String(), "7 天")
+	require.Contains(t, recorder.Body.String(), "将在")
+	require.Contains(t, recorder.Body.String(), "后恢复")
+}
+
+func TestValuePackageResetDurationFormatting(t *testing.T) {
+	require.Equal(t, "不到 1 分钟", formatValuePackageResetDuration(45))
+	require.Equal(t, "2 分钟", formatValuePackageResetDuration(61))
+	require.Equal(t, "3 小时 15 分钟", formatValuePackageResetDuration(int64((3*time.Hour+15*time.Minute)/time.Second)))
+	require.Equal(t, "2 天 4 小时", formatValuePackageResetDuration(int64((2*24*time.Hour+4*time.Hour)/time.Second)))
 }
 
 func TestValuePackageConcurrencyLimiter(t *testing.T) {
