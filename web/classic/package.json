@@ -9,7 +9,7 @@
     "@douyinfe/semi-ui": "^2.69.1",
     "@lobehub/icons": "catalog:",
     "@visactor/react-vchart": "~1.8.8",
-    "@visactor/vchart": "~1.8.8",
+    "@visactor/vchart": "~2.1.2",
     "@visactor/vchart-semi-theme": "~1.8.8",
     "axios": "catalog:",
     "clsx": "catalog:",
