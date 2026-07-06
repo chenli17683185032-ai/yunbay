@@ -46,6 +46,7 @@ import {
   getPackageLevelLabel,
   type ValuePackageCardStateKind,
 } from '../lib/rules'
+import { formatValuePackageResetLine } from '../lib/reset-time'
 import type { ValuePackagePlan, ValuePackageState } from '../types'
 
 interface ValuePackageCardProps {
@@ -120,17 +121,33 @@ function LimitProgressRow({
   used,
   limit,
   percent,
+  resetSeconds,
+  limited,
+  showReset = false,
 }: {
   label: string
   used: number
   limit: number
   percent: number
+  resetSeconds?: number
+  limited?: boolean
+  showReset?: boolean
 }) {
+  const { t } = useTranslation()
+
   if (!Number.isFinite(limit) || limit <= 0) {
     return null
   }
 
   const progressPercent = clampPercent(percent)
+  const resetLine = showReset
+    ? formatValuePackageResetLine({
+        limit,
+        resetSeconds,
+        limited,
+        t,
+      })
+    : null
 
   return (
     <div className='flex flex-col gap-1.5'>
@@ -144,6 +161,16 @@ function LimitProgressRow({
         value={progressPercent}
         className={cn('h-1.5', getProgressToneClass(progressPercent))}
       />
+      {resetLine ? (
+        <div
+          className={cn(
+            'text-muted-foreground text-[11px] leading-snug',
+            limited ? 'text-destructive font-medium' : null
+          )}
+        >
+          {resetLine}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -382,12 +409,18 @@ export function ValuePackageCard({
               used={usage.used_5h}
               limit={usage.limit_5h}
               percent={usage.percent_5h}
+              resetSeconds={usage.reset_seconds_5h}
+              limited={usage.limited_5h}
+              showReset
             />
             <LimitProgressRow
               label={t('7-day limit')}
               used={usage.used_7d}
               limit={usage.limit_7d}
               percent={usage.percent_7d}
+              resetSeconds={usage.reset_seconds_7d}
+              limited={usage.limited_7d}
+              showReset
             />
           </div>
         ) : null}

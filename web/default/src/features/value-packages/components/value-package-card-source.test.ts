@@ -33,9 +33,20 @@ test('value package card source keeps required user controls and limit copy', as
   assert.match(source, /Package total limit/)
   assert.match(source, /formatUsageAmount/)
   assert.match(source, /getProgressToneClass/)
+  assert.match(source, /formatValuePackageResetLine/)
+  assert.match(source, /resetSeconds\?: number/)
+  assert.match(source, /limited\?: boolean/)
+  assert.match(source, /reset_seconds_5h/)
+  assert.match(source, /reset_seconds_7d/)
+  assert.match(source, /limited_5h/)
+  assert.match(source, /limited_7d/)
   assert.match(source, /!Number\.isFinite\(limit\) \|\| limit <= 0/)
   assert.match(source, /hasUsageProgress/)
   assert.match(source, /Math\.round\(amount \|\| 0\)/)
+  assert.match(
+    source,
+    /label=\{t\('Package total limit'\)\}[\s\S]*?percent=\{usage\.total_percent\}/
+  )
   assert.match(source, /getValuePackageDisplayCurrency/)
   assert.match(source, /currencyOverride/)
   assert.match(source, /CNY/)
