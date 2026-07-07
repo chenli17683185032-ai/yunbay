@@ -15,6 +15,12 @@ import (
 
 const defaultOrderManagementRangeSeconds = int64(7 * 24 * 60 * 60)
 
+type valuePackageResetCountAdjustRequest struct {
+	Mode   string `json:"mode"`
+	Value  int    `json:"value"`
+	Reason string `json:"reason"`
+}
+
 func centsToAmount(cents int64) float64 {
 	return float64(cents) / 100
 }
@@ -184,6 +190,52 @@ func AdminOrderManagementValuePackageUsage(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, rows)
+}
+
+func AdminOrderManagementValuePackageUsers(c *gin.Context) {
+	pageInfo := getOrderManagementPageInfo(c)
+	result, err := model.ListValuePackageManagementRows(model.ValuePackageManagementFilter{
+		Keyword:     c.Query("keyword"),
+		PackageType: c.DefaultQuery("package_type", "all"),
+		Active:      c.DefaultQuery("active", "active"),
+		Page:        pageInfo.Page,
+		PageSize:    pageInfo.PageSize,
+	}, common.GetTimestamp())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func AdminAdjustValuePackageResetCount(c *gin.Context) {
+	userId, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || userId <= 0 {
+		common.ApiErrorMsg(c, "无效的用户 ID")
+		return
+	}
+	var req valuePackageResetCountAdjustRequest
+	if c.Request.Body == nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	result, err := model.AdjustValuePackageResetCount(userId, model.ValuePackageResetCountAdjustMode(req.Mode), req.Value, req.Reason, c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "value_package.reset_count.adjust", map[string]interface{}{
+		"user_id":   userId,
+		"mode":      req.Mode,
+		"value":     req.Value,
+		"old_count": result.OldCount,
+		"new_count": result.NewCount,
+	})
+	common.ApiSuccess(c, result)
 }
 
 func AdminOrderManagementMailCheck(c *gin.Context) {

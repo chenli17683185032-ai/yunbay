@@ -1474,6 +1474,35 @@ type ValuePackageUsageRow struct {
 	Usage        *ValuePackageUsageSummary `json:"usage"`
 }
 
+type ValuePackageManagementFilter struct {
+	Keyword     string
+	PackageType string
+	Active      string
+	Page        int
+	PageSize    int
+}
+
+type ValuePackageManagementResult struct {
+	Items []ValuePackageManagementRow `json:"items"`
+	Total int64                       `json:"total"`
+}
+
+type ValuePackageManagementRow struct {
+	UserId             int                       `json:"user_id"`
+	Username           string                    `json:"username"`
+	DisplayName        string                    `json:"display_name"`
+	PackageType        string                    `json:"package_type"`
+	PlanTitle          string                    `json:"plan_title"`
+	SubscriptionId     int                       `json:"subscription_id"`
+	SubscriptionStatus string                    `json:"subscription_status"`
+	StartTime          int64                     `json:"start_time"`
+	EndTime            int64                     `json:"end_time"`
+	Enabled            bool                      `json:"enabled"`
+	ResetCount         int                       `json:"reset_count"`
+	Usage              *ValuePackageUsageSummary `json:"usage"`
+	LastResetAt        int64                     `json:"last_reset_at"`
+}
+
 func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
 	var plans []SubscriptionPlan
 	if err := DB.Where("enabled = ? AND plan_kind = ?", true, SubscriptionPlanKindValuePackage).
@@ -1494,6 +1523,120 @@ func GetValuePackageState(userId int) (*ValuePackageState, error) {
 
 func ListActiveValuePackageUsageRows(now int64) ([]ValuePackageUsageRow, error) {
 	return listActiveValuePackageUsageRowsTx(DB, now)
+}
+
+func ListValuePackageManagementRows(filter ValuePackageManagementFilter, now int64) (*ValuePackageManagementResult, error) {
+	return listValuePackageManagementRowsTx(DB, filter, now)
+}
+
+func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagementFilter, now int64) (*ValuePackageManagementResult, error) {
+	if tx == nil {
+		tx = DB
+	}
+	if now <= 0 {
+		now = getDBTimestampTx(tx)
+	}
+	if filter.Page <= 0 {
+		filter.Page = 1
+	}
+	if filter.PageSize <= 0 || filter.PageSize > 100 {
+		filter.PageSize = 20
+	}
+	active := strings.TrimSpace(filter.Active)
+	if active == "" {
+		active = "active"
+	}
+	packageType := strings.TrimSpace(filter.PackageType)
+	keyword := strings.ToLower(strings.TrimSpace(filter.Keyword))
+
+	query := tx.Model(&UserSubscription{})
+	switch active {
+	case "expired":
+		query = query.Where("end_time <= ?", now)
+	case "all":
+	default:
+		query = query.Where("status = ? AND end_time > ?", UserSubscriptionStatusActive, now)
+	}
+
+	var subs []UserSubscription
+	if err := query.Order("end_time desc, id desc").Find(&subs).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]ValuePackageManagementRow, 0, len(subs))
+	for _, sub := range subs {
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			continue
+		}
+		if packageType != "" && packageType != "all" && plan.PackageType != packageType {
+			continue
+		}
+
+		var user User
+		userResult := tx.Select("id", "username", "display_name").Where("id = ?", sub.UserId).Limit(1).Find(&user)
+		if userResult.Error != nil {
+			return nil, userResult.Error
+		}
+		if userResult.RowsAffected == 0 {
+			continue
+		}
+		if keyword != "" {
+			idText := strconv.Itoa(user.Id)
+			username := strings.ToLower(user.Username)
+			displayName := strings.ToLower(user.DisplayName)
+			if !strings.Contains(username, keyword) && !strings.Contains(displayName, keyword) && !strings.Contains(idText, keyword) {
+				continue
+			}
+		}
+
+		pref := UserValuePackagePreference{UserId: user.Id}
+		prefResult := tx.Where("user_id = ?", user.Id).Limit(1).Find(&pref)
+		if prefResult.Error != nil {
+			return nil, prefResult.Error
+		}
+		usage, err := buildValuePackageUsageSummaryTx(tx, user.Id, &sub, plan, now)
+		if err != nil {
+			return nil, err
+		}
+		lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, user.Id, sub.Id, now)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, ValuePackageManagementRow{
+			UserId:             user.Id,
+			Username:           user.Username,
+			DisplayName:        user.DisplayName,
+			PackageType:        plan.PackageType,
+			PlanTitle:          plan.Title,
+			SubscriptionId:     sub.Id,
+			SubscriptionStatus: sub.Status,
+			StartTime:          sub.StartTime,
+			EndTime:            sub.EndTime,
+			Enabled:            pref.Enabled && pref.ActiveUserSubscriptionId == sub.Id,
+			ResetCount:         pref.ResetCount,
+			Usage:              usage,
+			LastResetAt:        lastResetAt,
+		})
+	}
+
+	total := int64(len(items))
+	start := (filter.Page - 1) * filter.PageSize
+	if start >= len(items) {
+		return &ValuePackageManagementResult{Items: []ValuePackageManagementRow{}, Total: total}, nil
+	}
+	end := start + filter.PageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return &ValuePackageManagementResult{Items: items[start:end], Total: total}, nil
 }
 
 func listActiveValuePackageUsageRowsTx(tx *gorm.DB, now int64) ([]ValuePackageUsageRow, error) {

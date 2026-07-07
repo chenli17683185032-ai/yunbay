@@ -501,3 +501,59 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 	assert.Equal(t, false, usage["limited_5h"])
 	assert.Equal(t, false, usage["limited_7d"])
 }
+
+func TestAdminValuePackageManagementUsersReturnsRows(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	now := common.GetTimestamp()
+	user := &model.User{Id: 8893, Username: "vp-management-user", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, AffCode: "vp-management-aff"}
+	require.NoError(t, model.DB.Create(user).Error)
+	plan := &model.SubscriptionPlan{
+		Title:         "月卡",
+		Enabled:       true,
+		PlanKind:      model.SubscriptionPlanKindValuePackage,
+		PackageType:   model.ValuePackageTypeMonth,
+		PackageLevel:  model.ValuePackageLevelMonth,
+		Currency:      "CNY",
+		DurationUnit:  model.SubscriptionDurationMonth,
+		DurationValue: 1,
+		ModelGroup:    "month-card",
+		TotalAmount:   10000,
+		Limit5hAmount: 500,
+		Limit7dAmount: 5000,
+		PriceAmount:   29.9,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 350, StartTime: now - 100, EndTime: now + 86400, Status: model.UserSubscriptionStatusActive, Source: "test"}
+	require.NoError(t, model.DB.Create(sub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 3}).Error)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "management-usage", Quota: 50, CreatedAt: now - 1800}))
+
+	ctx, recorder := newOrderManagementContext(http.MethodGet, "/api/order-management/admin/value-packages/users?page=1&page_size=20", "")
+
+	AdminOrderManagementValuePackageUsers(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"reset_count":3`)
+	require.Contains(t, recorder.Body.String(), `"items"`)
+	require.Contains(t, recorder.Body.String(), "vp-management-user")
+	require.Contains(t, recorder.Body.String(), `"used_5h":50`)
+}
+
+func TestAdminAdjustValuePackageResetCount(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	user := &model.User{Id: 8892, Username: "vp-reset-adjust", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, AffCode: "vp-reset-adjust-aff"}
+	require.NoError(t, model.DB.Create(user).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, ResetCount: 1}).Error)
+
+	ctx, recorder := newOrderManagementContext(http.MethodPost, fmt.Sprintf("/api/order-management/admin/value-packages/users/%d/reset-count", user.Id), `{"mode":"add","value":2,"reason":"test"}`)
+	ctx.Params = gin.Params{{Key: "user_id", Value: fmt.Sprintf("%d", user.Id)}}
+
+	AdminAdjustValuePackageResetCount(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"old_count":1`)
+	require.Contains(t, recorder.Body.String(), `"new_count":3`)
+	var pref model.UserValuePackagePreference
+	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.EqualValues(t, 3, pref.ResetCount)
+}

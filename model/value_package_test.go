@@ -1369,6 +1369,36 @@ func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T)
 	require.Equal(t, legacyDefaultSub.Id, legacyDefault.ActiveUserSubscriptionId)
 }
 
+func TestListValuePackageManagementRowsIncludesResetCountAndUsage(t *testing.T) {
+	setupValuePackageTestDB(t)
+	now := common.GetTimestamp()
+	plan := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	plan.TotalAmount = 1000
+	plan.Limit5hAmount = 100
+	plan.Limit7dAmount = 500
+	require.NoError(t, DB.Save(&plan).Error)
+	user := createValuePackageUser(t, 3020, UserGroupTiyan)
+	sub := createActiveValuePackageSub(t, user.Id, plan, now-100, now+86400)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 4}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "mgmt-usage", Quota: 25, CreatedAt: now - 1800}))
+
+	result, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Keyword: user.Username, PackageType: "all", Active: "active", Page: 1, PageSize: 20}, now)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Total)
+	require.Len(t, result.Items, 1)
+	row := result.Items[0]
+	require.Equal(t, user.Id, row.UserId)
+	require.Equal(t, user.Username, row.Username)
+	require.EqualValues(t, 4, row.ResetCount)
+	require.Equal(t, plan.PackageType, row.PackageType)
+	require.Equal(t, plan.Title, row.PlanTitle)
+	require.Equal(t, sub.Id, row.SubscriptionId)
+	require.True(t, row.Enabled)
+	require.NotNil(t, row.Usage)
+	require.EqualValues(t, 25, row.Usage.Used5h)
+}
+
 func TestRefundSubscriptionPreConsumeRevokesValuePackageUsageReservation(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3312, UserGroupTiyan)
