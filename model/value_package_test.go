@@ -449,6 +449,135 @@ func TestValuePackageWindowUsageDetailsIgnoresZeroQuotaForReset(t *testing.T) {
 	require.EqualValues(t, 7*24*3600-4*3600, details.ResetSeconds7d)
 }
 
+func TestValuePackageWindowUsageCountsUsageAfterLastReset(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3011, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	resetAt := now - 1800
+	sub := createActiveValuePackageSub(t, user.Id, day, now-7200, now+3600)
+
+	require.NoError(t, DB.Create(&ValuePackageQuotaReset{
+		UserId:             user.Id,
+		UserSubscriptionId: sub.Id,
+		PlanId:             day.Id,
+		PackageType:        day.PackageType,
+		ResetAt:            resetAt,
+		Source:             ValuePackageQuotaResetSourceUserConsumeCount,
+		CreatedByUserId:    user.Id,
+		Note:               "test reset lower bound",
+	}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "before-last-reset", Quota: 75, CreatedAt: now - 3600}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "after-last-reset", Quota: 25, CreatedAt: now - 900}))
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 25, details.Used5h)
+	require.EqualValues(t, now-900, details.Earliest5hCreatedAt)
+	require.EqualValues(t, now-900+5*3600, details.ResetAt5h)
+	require.EqualValues(t, 25, details.Used7d)
+}
+
+func TestConsumeValuePackageResetCountResetsShortWindowsOnly(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3012, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 1000
+	day.Limit5hAmount = 100
+	day.Limit7dAmount = 100
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-7200, now+3600)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(300)).Error)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{
+		UserId:                   user.Id,
+		Enabled:                  true,
+		ActiveUserSubscriptionId: sub.Id,
+		ResetCount:               1,
+	}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "reset-count-history-1", Quota: 200, CreatedAt: now - 3600}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "reset-count-history-2", Quota: 100, CreatedAt: now - 2*3600}))
+
+	state, err := ConsumeValuePackageResetCount(user.Id, sub.Id, now, user.Id, "test reset")
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.Equal(t, 0, state.Preference.ResetCount)
+	require.NotNil(t, state.Usage)
+	require.EqualValues(t, 0, state.Usage.Used5h)
+	require.EqualValues(t, 0, state.Usage.Used7d)
+	require.EqualValues(t, 300, state.Usage.TotalUsed)
+
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.Equal(t, 0, pref.ResetCount)
+
+	var resets []ValuePackageQuotaReset
+	require.NoError(t, DB.Where("user_id = ? AND user_subscription_id = ?", user.Id, sub.Id).Order("id asc").Find(&resets).Error)
+	require.Len(t, resets, 1)
+	require.Equal(t, ValuePackageQuotaResetSourceUserConsumeCount, resets[0].Source)
+	require.EqualValues(t, now, resets[0].ResetAt)
+
+	var ledgers []ValuePackageResetCountLedger
+	require.NoError(t, DB.Where("user_id = ?", user.Id).Order("id asc").Find(&ledgers).Error)
+	require.Len(t, ledgers, 1)
+	require.Equal(t, -1, ledgers[0].Delta)
+	require.Equal(t, 1, ledgers[0].BeforeCount)
+	require.Equal(t, 0, ledgers[0].AfterCount)
+	require.Equal(t, ValuePackageResetCountLedgerSourceUserConsume, ledgers[0].Source)
+
+	var usageRecordCount int64
+	require.NoError(t, DB.Model(&ValuePackageUsageRecord{}).Where("user_subscription_id = ?", sub.Id).Count(&usageRecordCount).Error)
+	require.EqualValues(t, 2, usageRecordCount)
+	var reloadedSub UserSubscription
+	require.NoError(t, DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 300, reloadedSub.AmountUsed)
+	require.EqualValues(t, day.TotalAmount, reloadedSub.AmountTotal)
+	require.EqualValues(t, sub.EndTime, reloadedSub.EndTime)
+}
+
+func TestAdjustValuePackageResetCountSupportsSetAddSubtract(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3013, UserGroupTiyan)
+	adminUserId := 9001
+
+	setAdjustment, err := AdjustValuePackageResetCount(user.Id, ValuePackageResetCountAdjustModeSet, 3, "set reset count", adminUserId)
+	require.NoError(t, err)
+	require.Equal(t, 0, setAdjustment.OldCount)
+	require.Equal(t, 3, setAdjustment.NewCount)
+	require.Equal(t, 3, setAdjustment.Delta)
+
+	addAdjustment, err := AdjustValuePackageResetCount(user.Id, ValuePackageResetCountAdjustModeAdd, 2, "add reset count", adminUserId)
+	require.NoError(t, err)
+	require.Equal(t, 3, addAdjustment.OldCount)
+	require.Equal(t, 5, addAdjustment.NewCount)
+	require.Equal(t, 2, addAdjustment.Delta)
+
+	subtractAdjustment, err := AdjustValuePackageResetCount(user.Id, ValuePackageResetCountAdjustModeSubtract, 10, "subtract reset count", adminUserId)
+	require.NoError(t, err)
+	require.Equal(t, 5, subtractAdjustment.OldCount)
+	require.Equal(t, 0, subtractAdjustment.NewCount)
+	require.Equal(t, -5, subtractAdjustment.Delta)
+
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.Equal(t, 0, pref.ResetCount)
+
+	var ledgers []ValuePackageResetCountLedger
+	require.NoError(t, DB.Where("user_id = ?", user.Id).Order("id asc").Find(&ledgers).Error)
+	require.Len(t, ledgers, 3)
+	require.Equal(t, []string{
+		ValuePackageResetCountLedgerSourceAdminSet,
+		ValuePackageResetCountLedgerSourceAdminAdd,
+		ValuePackageResetCountLedgerSourceAdminSubtract,
+	}, []string{ledgers[0].Source, ledgers[1].Source, ledgers[2].Source})
+	require.Equal(t, []int{3, 2, -5}, []int{ledgers[0].Delta, ledgers[1].Delta, ledgers[2].Delta})
+	require.Equal(t, []int{0, 3, 5}, []int{ledgers[0].BeforeCount, ledgers[1].BeforeCount, ledgers[2].BeforeCount})
+	require.Equal(t, []int{3, 5, 0}, []int{ledgers[0].AfterCount, ledgers[1].AfterCount, ledgers[2].AfterCount})
+}
+
 func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3400, UserGroupVIP)

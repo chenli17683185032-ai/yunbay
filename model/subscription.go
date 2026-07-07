@@ -1444,6 +1444,28 @@ type ValuePackageState struct {
 	Billing      *ValuePackageBillingState  `json:"billing"`
 }
 
+type ValuePackageResetCountAdjustMode string
+
+const (
+	ValuePackageResetCountAdjustModeSet      ValuePackageResetCountAdjustMode = "set"
+	ValuePackageResetCountAdjustModeAdd      ValuePackageResetCountAdjustMode = "add"
+	ValuePackageResetCountAdjustModeSubtract ValuePackageResetCountAdjustMode = "subtract"
+
+	ValuePackageResetCountAdjustSet      = ValuePackageResetCountAdjustModeSet
+	ValuePackageResetCountAdjustAdd      = ValuePackageResetCountAdjustModeAdd
+	ValuePackageResetCountAdjustSubtract = ValuePackageResetCountAdjustModeSubtract
+)
+
+type ValuePackageResetCountAdjustment struct {
+	UserId      int    `json:"user_id"`
+	OldCount    int    `json:"old_count"`
+	NewCount    int    `json:"new_count"`
+	Delta       int    `json:"delta"`
+	Mode        string `json:"mode"`
+	Reason      string `json:"reason"`
+	AdminUserId int    `json:"admin_user_id"`
+}
+
 type ValuePackageUsageRow struct {
 	UserId       int                       `json:"user_id"`
 	Username     string                    `json:"username"`
@@ -2091,6 +2113,184 @@ func DeactivateValuePackage(userId int) (*ValuePackageState, error) {
 	return state, err
 }
 
+func ensureValuePackagePreferenceForUpdateTx(tx *gorm.DB, userId int) (*UserValuePackagePreference, error) {
+	if tx == nil {
+		tx = DB
+	}
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	var pref UserValuePackagePreference
+	err := withUpdateLock(tx).Where("user_id = ?", userId).First(&pref).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		pref = UserValuePackagePreference{UserId: userId, Enabled: false, ActiveUserSubscriptionId: 0, ResetCount: 0}
+		if err := tx.Create(&pref).Error; err != nil {
+			return nil, err
+		}
+		return &pref, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &pref, nil
+}
+
+func AdjustValuePackageResetCount(userId int, mode ValuePackageResetCountAdjustMode, value int, reason string, adminUserId int) (*ValuePackageResetCountAdjustment, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if value < 0 {
+		return nil, errors.New("重置次数不能为负数")
+	}
+	reason = strings.TrimSpace(reason)
+	var adjustment *ValuePackageResetCountAdjustment
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		pref, err := ensureValuePackagePreferenceForUpdateTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		oldCount := pref.ResetCount
+		newCount := oldCount
+		source := ""
+		switch mode {
+		case ValuePackageResetCountAdjustModeSet:
+			newCount = value
+			source = ValuePackageResetCountLedgerSourceAdminSet
+		case ValuePackageResetCountAdjustModeAdd:
+			newCount = oldCount + value
+			source = ValuePackageResetCountLedgerSourceAdminAdd
+		case ValuePackageResetCountAdjustModeSubtract:
+			newCount = oldCount - value
+			if newCount < 0 {
+				newCount = 0
+			}
+			source = ValuePackageResetCountLedgerSourceAdminSubtract
+		default:
+			return errors.New("无效的调整模式")
+		}
+		delta := newCount - oldCount
+		if err := tx.Model(&UserValuePackagePreference{}).Where("user_id = ?", userId).Update("reset_count", newCount).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&ValuePackageResetCountLedger{
+			UserId:          userId,
+			Delta:           delta,
+			BeforeCount:     oldCount,
+			AfterCount:      newCount,
+			Source:          source,
+			CreatedByUserId: adminUserId,
+			Note:            reason,
+		}).Error; err != nil {
+			return err
+		}
+		adjustment = &ValuePackageResetCountAdjustment{
+			UserId:      userId,
+			OldCount:    oldCount,
+			NewCount:    newCount,
+			Delta:       delta,
+			Mode:        string(mode),
+			Reason:      reason,
+			AdminUserId: adminUserId,
+		}
+		return nil
+	})
+	return adjustment, err
+}
+
+func ConsumeValuePackageResetCount(userId int, userSubscriptionId int, resetAt int64, actorUserId int, note string) (*ValuePackageState, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if resetAt <= 0 {
+		resetAt = common.GetTimestamp()
+	}
+	note = strings.TrimSpace(note)
+	var state *ValuePackageState
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		pref, err := ensureValuePackagePreferenceForUpdateTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		if pref.ResetCount <= 0 {
+			return errors.New("重置次数不足")
+		}
+		if !pref.Enabled || pref.ActiveUserSubscriptionId <= 0 {
+			return errors.New("请先启用超值套餐后再重置额度")
+		}
+		if userSubscriptionId > 0 && userSubscriptionId != pref.ActiveUserSubscriptionId {
+			return errors.New("当前套餐不匹配，请刷新后重试")
+		}
+
+		var sub UserSubscription
+		if err := withUpdateLock(tx).
+			Where("id = ? AND user_id = ? AND status = ? AND end_time > ?", pref.ActiveUserSubscriptionId, userId, UserSubscriptionStatusActive, resetAt).
+			First(&sub).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("当前没有可重置的超值套餐")
+			}
+			return err
+		}
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if !plan.IsValuePackage() {
+			return errors.New("当前没有可重置的超值套餐")
+		}
+
+		oldCount := pref.ResetCount
+		newCount := oldCount - 1
+		result := tx.Model(&UserValuePackagePreference{}).
+			Where("user_id = ? AND reset_count > ?", userId, 0).
+			Update("reset_count", newCount)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("重置次数不足或状态已变化，请刷新后重试")
+		}
+		if err := tx.Create(&ValuePackageQuotaReset{
+			UserId:             userId,
+			UserSubscriptionId: sub.Id,
+			PlanId:             plan.Id,
+			PackageType:        plan.PackageType,
+			ResetAt:            resetAt,
+			Source:             ValuePackageQuotaResetSourceUserConsumeCount,
+			CreatedByUserId:    actorUserId,
+			Note:               note,
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&ValuePackageResetCountLedger{
+			UserId:          userId,
+			Delta:           -1,
+			BeforeCount:     oldCount,
+			AfterCount:      newCount,
+			Source:          ValuePackageResetCountLedgerSourceUserConsume,
+			CreatedByUserId: actorUserId,
+			Note:            note,
+		}).Error; err != nil {
+			return err
+		}
+
+		pref.ResetCount = newCount
+		usage, err := buildValuePackageUsageSummaryTx(tx, userId, &sub, plan, resetAt)
+		if err != nil {
+			return err
+		}
+		state = &ValuePackageState{
+			Preference:   *pref,
+			Subscription: &sub,
+			Plan:         plan,
+			Usage:        usage,
+		}
+		state.Billing = buildValuePackageBillingState(&state.Preference, state.Subscription, state.Plan)
+		return nil
+	})
+	return state, err
+}
+
 func upsertValuePackagePreferenceTx(tx *gorm.DB, userId int, enabled bool, activeSubId int) (*UserValuePackagePreference, error) {
 	if tx == nil {
 		return nil, errors.New("tx is nil")
@@ -2203,16 +2403,22 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 			if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < delta {
 				return fmt.Errorf("subscription quota insufficient: %s, need=%d", ValuePackageQuotaExhaustedUserMessage, delta)
 			}
+			lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, userId, sub.Id)
+			if err != nil {
+				return err
+			}
+			start5h := maxInt64(now-5*3600, lastResetAt)
+			start7d := maxInt64(now-7*24*3600, lastResetAt)
 			used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
 			if err != nil {
 				return err
 			}
 			adjusted5h := used5h
-			if currentCreatedAt >= now-5*3600 {
+			if currentCreatedAt >= start5h {
 				adjusted5h -= currentQuota
 			}
 			adjusted7d := used7d
-			if currentCreatedAt >= now-7*24*3600 {
+			if currentCreatedAt >= start7d {
 				adjusted7d -= currentQuota
 			}
 			if plan.Limit5hAmount > 0 && adjusted5h+targetQuota > plan.Limit5hAmount {
@@ -2290,6 +2496,25 @@ func GetValuePackageWindowUsageDetails(userId int, userSubscriptionId int, now i
 	return getValuePackageWindowUsageDetailsTx(DB, userId, userSubscriptionId, now)
 }
 
+func getLastValuePackageQuotaResetAtTx(tx *gorm.DB, userId int, userSubscriptionId int) (int64, error) {
+	if tx == nil {
+		tx = DB
+	}
+	var resetAt int64
+	err := tx.Model(&ValuePackageQuotaReset{}).
+		Where("user_id = ? AND user_subscription_id = ?", userId, userSubscriptionId).
+		Select("COALESCE(MAX(reset_at), 0)").
+		Scan(&resetAt).Error
+	return resetAt, err
+}
+
+func maxInt64(a int64, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // ResetAt is based on the earliest current-window positive usage; callers should suppress reset display when the matching limit is disabled.
 func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (*ValuePackageWindowUsageDetails, error) {
 	if tx == nil {
@@ -2298,13 +2523,19 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	if now <= 0 {
 		now = getDBTimestampTx(tx)
 	}
+	lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, userId, userSubscriptionId)
+	if err != nil {
+		return nil, err
+	}
+	start5h := maxInt64(now-5*3600, lastResetAt)
+	start7d := maxInt64(now-7*24*3600, lastResetAt)
 	details := &ValuePackageWindowUsageDetails{}
 	var usage5h struct {
 		Used              int64
 		EarliestCreatedAt int64
 	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
-		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, now-5*3600, 0).
+		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, start5h, 0).
 		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MIN(created_at), 0) AS earliest_created_at").
 		Scan(&usage5h).Error; err != nil {
 		return nil, err
@@ -2324,7 +2555,7 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 		EarliestCreatedAt int64
 	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
-		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, now-7*24*3600, 0).
+		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, start7d, 0).
 		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MIN(created_at), 0) AS earliest_created_at").
 		Scan(&usage7d).Error; err != nil {
 		return nil, err
