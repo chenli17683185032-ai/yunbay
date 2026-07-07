@@ -2,7 +2,7 @@
 
 Date: 2026-07-08
 Status: Draft for review
-Scope: 云贝超值套餐（日卡 / 周卡 / 月卡）的 7 天非滚动周期语义、30 天月卡语义、套餐管理表单总限额设置、用户端/后台限额展示与测试覆盖
+Scope: 云贝超值套餐（日卡 / 周卡 / 月卡）的 7 天非滚动周期语义、按卡类型 reset 规则、30 天月卡语义、套餐管理表单总限额设置、用户端/后台限额展示与测试覆盖
 
 > 本 spec 以当前 `main` 分支实际代码为准，并覆盖之前“7 天 rolling window”相关表述。后续实现以本文定义的“从开通套餐时刻锚定的固定时间周期”为准。
 
@@ -25,7 +25,7 @@ Scope: 云贝超值套餐（日卡 / 周卡 / 月卡）的 7 天非滚动周期�
 
 当前问题集中在两处：
 
-1. **7 天限额语义错误**：现有后端仍用 `now - 7 days` 或历史用量集合做 rolling 7 天统计，并且手动 reset 会把 7 天统计下界推到 reset 时间。这和现在确认的业务语义冲突。
+1. **7 天限额语义错误**：现有后端仍用 `now - 7 days` 或历史用量集合做 rolling 7 天统计，并且手动 reset 没有按日卡 / 周卡 / 月卡区分 7 天窗口是否可重置。这和现在确认的业务语义冲突。
 2. **套餐管理界面表达错误**：后台创建/编辑超值套餐时，`total_amount` 仍显示为通用的 `Received amount`，`limit_7d_amount` 仍显示为裸字段名或 rolling 语义说明。管理员无法清楚设置“周卡 7 天总限额”和“月卡 30 天总限额”，容易以为只能配置日限额或短窗口限额。
 
 ## 2. 已确认业务语义
@@ -49,16 +49,17 @@ anchor = 用户开通该套餐的时间 UserSubscription.StartTime
 
 也不是每次请求后重新推迟的滚动恢复窗口。
 
-### 2.2 7 天周期不受手动 reset 影响
+### 2.2 reset 按卡类型处理
 
-用户或管理员的额度 reset 事件不改变 7 天周期：
+用户或管理员的额度 reset 事件必须按卡类型区分：
 
-- 不改变 7 天周期起点；
-- 不清空当前 7 天周期内已经发生的 7 天用量；
-- 不推迟 7 天恢复时间；
-- 不提前开启下一段 7 天周期。
+| 卡类型 | reset 行为 | 说明 |
+| --- | --- | --- |
+| 日卡 | 只重置 5 小时短窗口 | 日卡不涉及 7 天周期限额。 |
+| 周卡 | 只重置 5 小时短窗口 | 周卡 7 天后过期，7 天总限额由 `total_amount` 承担，reset 不能恢复或重置周卡 7 天总限额。 |
+| 月卡 | 同时重置 5 小时短窗口和当前 7 天周期限额 | 月卡如果启用了 `limit_7d_amount`，reset 可以清空当前 7 天阶段限额统计；不恢复 30 天总额度，不延长有效期。 |
 
-7 天周期只受 `UserSubscription.StartTime`、固定 7 天长度、`UserSubscription.EndTime` 影响。
+因此，“7 天周期不受 reset 影响”只适用于日卡和周卡；月卡的 7 天阶段限额可以被 reset 清空。无论哪种卡，reset 都不改变 `UserSubscription.AmountUsed`、`AmountTotal`、`StartTime`、`EndTime`。
 
 ### 2.3 周卡 7 天到期
 
@@ -120,7 +121,7 @@ custom_seconds = 0
 | --- | --- | --- | --- | --- |
 | `total_amount` | 套餐有效期内总额度。UI 按卡类型显示为 1 天 / 7 天 / 30 天总限额。 | 1 天总限额 | 7 天总限额 | 30 天总限额 |
 | `limit_5h_amount` | 5 小时短窗口限额。沿用现有固定恢复窗口语义。 | 可用 | 可用 | 可用 |
-| `limit_7d_amount` | 可选的 7 天固定周期限额，从 `StartTime` 锚定，不 rolling，不受手动 reset 影响。 | 忽略 | 通常不需要，因 `total_amount` 已覆盖 7 天总额 | 可选，用于“每 7 天最多可用多少”的阶段限额 |
+| `limit_7d_amount` | 可选的 7 天固定周期限额，从 `StartTime` 锚定，不 rolling；reset 是否清空按卡类型决定。 | 忽略 | 通常不需要，因 `total_amount` 已覆盖 7 天总额，reset 不清空 | 可选，用于“每 7 天最多可用多少”的阶段限额，reset 可清空当前阶段 |
 
 `limit_7d_amount` 不再被称为“7 天总限额”。“总限额”统一由 `total_amount` 承担。
 
@@ -161,16 +162,30 @@ window_end = window_start + windowSeconds
 
 ```text
 record.quota > 0
-record.created_at >= current_7d_window.Start
+record.created_at >= effective_7d_start
 record.created_at < current_7d_window.End
 record.created_at <= now
 ```
+
+其中：
+
+```text
+current_7d_window.Start = 按 StartTime 计算出的当前 7 天固定周期起点
+effective_7d_start = current_7d_window.Start
+```
+
+如果是月卡，并且当前订阅存在晚于 `current_7d_window.Start` 且不晚于 `now` 的 reset 事件，则：
+
+```text
+effective_7d_start = last_reset_at
+```
+
+日卡不计算 7 天；周卡不使用 reset 事件作为 7 天下界。
 
 不再使用：
 
 ```text
 created_at >= now - 7d
-created_at >= lastResetAt
 ```
 
 也不再调用滚动语义的 `valuePackageRollingUsageDetails(records)` 来计算 7 天限额。
@@ -189,9 +204,13 @@ reset_seconds_7d = max(reset_at_7d - now, 0)
 - 旧逻辑：`earliest_usage_in_rolling_window + 7d`
 - 新逻辑：`StartTime + N * 7d`
 
-因此后续少量请求不会刷新恢复时间；手动 reset 也不会刷新恢复时间。
+因此后续少量请求不会刷新恢复时间。
 
-周卡如果 `reset_at_7d >= EndTime`，前端可以把它当作“到期”，而不是承诺同一个周卡内还会再次恢复。
+reset 对恢复时间的影响按卡类型处理：
+
+- 日卡：不显示 7 天恢复时间。
+- 周卡：reset 不影响 7 天恢复时间；如果 `reset_at_7d >= EndTime`，前端可以把它当作“到期”，而不是承诺同一个周卡内还会再次恢复。
+- 月卡：reset 可以清空当前 7 天阶段限额的已用量，但不改变固定周期边界；`reset_at_7d` 仍是当前周期的 `current_7d_window.End`。
 
 ### 4.4 日卡忽略 7 天限额
 
@@ -212,9 +231,13 @@ func valuePackageHas7dWindow(plan *SubscriptionPlan) bool {
 - 当前 5 小时窗口从窗口内最早有效正用量开始；
 - 后续同窗口内小额使用不把恢复时间推迟；
 - 用户/管理员 reset 可以清掉 5 小时短窗口统计下界；
-- 5 小时 reset 不影响 7 天固定周期和套餐总额度。
+- 5 小时 reset 不影响套餐总额度。
 
-因此 `ValuePackageQuotaReset` 后续只作为 5 小时短窗口的下界，不再作为 7 天周期下界。
+`ValuePackageQuotaReset` 的作用范围为：
+
+- 所有超值套餐：作为 5 小时短窗口下界。
+- 月卡：同时作为当前 7 天阶段限额下界。
+- 日卡 / 周卡：不作为 7 天周期下界。
 
 ### 4.6 总额度校验
 
@@ -230,7 +253,7 @@ if AmountTotal > 0 && AmountUsed + delta > AmountTotal => reject
 - 周卡 7 天总限额；
 - 月卡 30 天总限额。
 
-手动 reset 不恢复 `AmountUsed`，不增加 `AmountTotal`，不延长 `EndTime`。
+手动 reset 不恢复 `AmountUsed`，不增加 `AmountTotal`，不延长 `EndTime`。月卡 reset 只是在 `limit_7d_amount` 启用时清空当前 7 天阶段限额统计，不等于恢复 30 天总额度。
 
 ### 4.7 预扣与实时 reserve 必须一致
 
@@ -254,6 +277,7 @@ if AmountTotal > 0 && AmountUsed + delta > AmountTotal => reject
 - `sub.EndTime`
 - `plan.PackageType`
 - `plan.Limit7dAmount`
+- `lastResetAt`，仅用于月卡 7 天阶段限额与所有卡的 5 小时窗口
 
 查询用量记录时可以用一个保守下界减少数据量：
 
@@ -307,7 +331,7 @@ lower_bound = min(current_7d_window.Start, current_5h_query_start)
 
 - 日卡：隐藏，并在提交 payload 时归零，防止旧表单值污染。
 - 周卡：默认隐藏或作为高级字段隐藏，因为周卡 7 天总限额已经由 `total_amount` 承担。若为了兼容旧数据必须显示，标签必须是 `7-day period limit`，说明它是额外周期限额，不是总限额。
-- 月卡：可显示为可选高级字段 `7-day period limit` / `每 7 天限额`，说明文案必须写清楚：从开通套餐时间开始每 7 天固定重置，不 rolling，不受手动 reset 影响；0 表示不启用这个阶段限额。
+- 月卡：可显示为可选高级字段 `7-day period limit` / `每 7 天限额`，说明文案必须写清楚：从开通套餐时间开始每 7 天固定重置，不 rolling；月卡 reset 可以清空当前 7 天阶段用量；0 表示不启用这个阶段限额。
 
 本轮最低要求是：管理员必须能清楚设置周卡 `7 天总限额` 和月卡 `30 天总限额`，这两个都落到 `total_amount`。
 
@@ -359,18 +383,18 @@ limit_7d_amount
 - `usage.total_*` 行 label 动态显示为 1 天 / 7 天 / 30 天总限额；
 - 5 小时限额行保留；
 - 7 天周期限额行只在 `limit_7d_amount > 0 && package_type != day` 时展示；
-- 7 天 reset 文案使用固定周期结束时间，不使用 rolling 恢复时间。
+- 7 天 reset 文案使用固定周期结束时间，不使用 rolling 恢复时间；月卡执行 reset 后，7 天阶段已用量归零，但下一次自动周期边界仍是原固定周期结束时间。
 
 用户 reset 按钮确认文案要改掉当前“clear 5-hour and 7-day usage windows”的说法，改为：
 
 ```text
-This will consume 1 reset count and clear your current package's 5-hour usage window. It will not restore total quota, reset the 7-day period limit, or extend expiration.
+This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.
 ```
 
 中文语义：
 
 ```text
-本次会消耗 1 次重置次数并清空当前套餐的 5 小时短窗口用量；不会恢复总额度，不会重置 7 天周期限额，也不会延长有效期。
+本次会消耗 1 次重置次数。日卡和周卡只清空 5 小时短窗口用量；月卡会同时清空 5 小时短窗口用量和当前 7 天阶段用量。本次操作不会恢复总额度，也不会延长有效期。
 ```
 
 ## 6. API 与兼容性
@@ -427,11 +451,10 @@ This will consume 1 reset count and clear your current package's 5-hour usage wi
    - `reset_at_7d = T + 7d`；
    - 在 `T + 6d` 再写入用量后，`reset_at_7d` 仍是 `T + 7d`。
 
-3. **手动 reset 不影响 7 天用量**
-   - 在当前 7 天锚定窗口内写入 7 天用量；
-   - 创建 `ValuePackageQuotaReset`，`reset_at` 晚于用量；
-   - `Used5h` 可被清空或归零；
-   - `Used7d` 仍统计 reset 前的 7 天用量。
+3. **reset 按卡类型影响 7 天用量**
+   - 日卡：设置非零 `Limit7dAmount` 后 reset 仍不启用 7 天统计。
+   - 周卡：当前 7 天锚定窗口内写入 7 天用量后创建 reset，`Used5h` 可归零，`Used7d` 仍统计 reset 前用量。
+   - 月卡：当前 7 天锚定窗口内写入 7 天用量后创建 reset，`Used5h` 归零，`Used7d` 从 reset 时间之后重新统计。
 
 4. **日卡忽略 7 天限额**
    - 日卡计划设置非零 `Limit7dAmount`；
@@ -466,7 +489,8 @@ This will consume 1 reset count and clear your current package's 5-hour usage wi
 3. 周卡表单提交时，`total_amount` 转换为 quota units，并作为 7 天总限额保存。
 4. 月卡表单提交时，`total_amount` 转换为 quota units，并作为 30 天总限额保存。
 5. 日卡提交时，`limit_7d_amount` 被归零或不参与 payload 业务语义。
-6. 编辑已有计划时，`total_amount` 从 quota units 回填成展示金额，不依赖 `limit_7d_amount`。
+6. 周卡 reset 文案说明只重置 5 小时；月卡 reset 文案说明同时重置 5 小时和 7 天阶段用量。
+7. 编辑已有计划时，`total_amount` 从 quota units 回填成展示金额，不依赖 `limit_7d_amount`。
 
 如果 UI label helper 抽成纯函数，应补测试：
 
@@ -505,7 +529,7 @@ git diff --check
 修复完成后应满足：
 
 1. 7 天统计从 `UserSubscription.StartTime` 起算，按固定 7 天边界自动切换，不再使用 rolling `now - 7d`。
-2. 手动 reset 不影响 7 天周期统计、恢复时间、总额度。
+2. reset 按卡类型生效：日卡只重置 5 小时，周卡只重置 5 小时，月卡同时重置 5 小时和当前 7 天阶段用量；所有卡都不恢复总额度、不延长有效期。
 3. 周卡 7 天后过期，周卡总限额通过 `total_amount` 设置和校验。
 4. 日卡不展示、不校验 7 天周期限额。
 5. 月卡新计划固定 30 天，不再是日历月。
