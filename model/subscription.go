@@ -2642,9 +2642,9 @@ func RecordValuePackageUsage(record *ValuePackageUsageRecord) error {
 // targetQuota is the same request's desired total usage, not a delta. If a
 // ValuePackageUsageRecord already exists for (user_subscription_id, request_id),
 // the record uses replacement semantics: only the difference between the old
-// quota and targetQuota is applied to UserSubscription.AmountUsed and rolling
-// window checks compare the replaced target instead of double-counting the
-// existing request quota. This function updates ValuePackageUsageRecord and
+// quota and targetQuota is applied to UserSubscription.AmountUsed, and window
+// checks compare the replaced target instead of double-counting the existing
+// request quota. This function updates ValuePackageUsageRecord and
 // UserSubscription.AmountUsed atomically, but intentionally does not update
 // SubscriptionPreConsumeRecord.PreConsumed; realtime mid-stream/final target
 // reserves must not interfere with the existing pre-consume refund contract.
@@ -2714,38 +2714,38 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 			if err != nil {
 				return err
 			}
-			start5h := maxInt64(now-5*3600, lastResetAt)
 			start7d := maxInt64(now-7*24*3600, lastResetAt)
-			used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
-			if err != nil {
+			var usageRecords []ValuePackageUsageRecord
+			if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND (quota > ? OR request_id = ?)", userId, sub.Id, start7d, now, 0, requestId).
+				Order("created_at asc, id asc").
+				Find(&usageRecords).Error; err != nil {
 				return err
 			}
-			adjusted5h := used5h
-			countTarget5h := true
-			if currentCreatedAt > 0 && currentCreatedAt < start5h {
-				countTarget5h = false
+			nextUsageRecords := make([]ValuePackageUsageRecord, 0, len(usageRecords)+1)
+			replacedCurrentRecord := false
+			for _, record := range usageRecords {
+				if record.RequestId == requestId {
+					record.Quota = targetQuota
+					replacedCurrentRecord = true
+				}
+				nextUsageRecords = append(nextUsageRecords, record)
 			}
-			if currentCreatedAt >= start5h {
-				adjusted5h -= currentQuota
+			if currentCreatedAt == 0 && !replacedCurrentRecord {
+				nextUsageRecords = append(nextUsageRecords, ValuePackageUsageRecord{
+					UserId:             userId,
+					UserSubscriptionId: sub.Id,
+					PlanId:             plan.Id,
+					PackageType:        plan.PackageType,
+					ModelGroup:         plan.ModelGroup,
+					RequestId:          requestId,
+					Quota:              targetQuota,
+					CreatedAt:          now,
+				})
 			}
-			adjusted7d := used7d
-			countTarget7d := true
-			if currentCreatedAt > 0 && currentCreatedAt < start7d {
-				countTarget7d = false
-			}
-			if currentCreatedAt >= start7d {
-				adjusted7d -= currentQuota
-			}
-			next5h := adjusted5h
-			if countTarget5h {
-				next5h += targetQuota
-			}
-			next7d := adjusted7d
-			if countTarget7d {
-				next7d += targetQuota
-			}
+			next5h, _ := valuePackageFixedWindowUsageDetails(nextUsageRecords, 5*3600, now)
+			next7d, _ := valuePackageRollingUsageDetails(nextUsageRecords)
 			if plan.Limit5hAmount > 0 && next5h > plan.Limit5hAmount {
-				return fmt.Errorf("subscription quota insufficient: %s, 5h rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
+				return fmt.Errorf("subscription quota insufficient: %s, 5h limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
 			}
 			if plan.Limit7dAmount > 0 && next7d > plan.Limit7dAmount {
 				return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
@@ -3298,7 +3298,7 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 			return err
 		}
 		if plan.Limit5hAmount > 0 && used5h+amount > plan.Limit5hAmount {
-			return fmt.Errorf("subscription quota insufficient: %s, 5h rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
+			return fmt.Errorf("subscription quota insufficient: %s, 5h limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 		if plan.Limit7dAmount > 0 && used7d+amount > plan.Limit7dAmount {
 			return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)

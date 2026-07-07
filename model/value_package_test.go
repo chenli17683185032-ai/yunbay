@@ -1857,6 +1857,69 @@ func TestReserveValuePackageUsageToTargetKeepsResetClearedRequestOutOfShortWindo
 	require.EqualValues(t, 0, used7d)
 }
 
+func TestReserveValuePackageUsageToTargetUsesFixedFiveHourWindowForReplacement(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3604, UserGroupVIP)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.ModelGroup = "month-card"
+	month.TotalAmount = 1000
+	month.Limit5hAmount = 50
+	month.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, month, now-8*3600, now+3600)
+	expiredWindowStart := now - 6*3600
+	activeWindowStart := now - 30*60
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "reserve-target-expired-window-anchor", Quota: 40, CreatedAt: expiredWindowStart}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "reserve-target-expired-window-final", Quota: 10, CreatedAt: expiredWindowStart + 4*3600}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "reserve-target-active-window", Quota: 45, CreatedAt: activeWindowStart}))
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(95)).Error)
+
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 45, used5h)
+	require.EqualValues(t, 95, used7d)
+
+	res, err := ReserveValuePackageUsageToTarget("reserve-target-expired-window-final", user.Id, sub.Id, 20)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 95, res.AmountUsedBefore)
+	require.EqualValues(t, 105, res.AmountUsedAfter)
+	var usageRecord ValuePackageUsageRecord
+	require.NoError(t, DB.Where("user_subscription_id = ? AND request_id = ?", sub.Id, "reserve-target-expired-window-final").First(&usageRecord).Error)
+	require.EqualValues(t, expiredWindowStart+4*3600, usageRecord.CreatedAt)
+	require.EqualValues(t, 20, usageRecord.Quota)
+	used5h, used7d, err = GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 45, used5h)
+	require.EqualValues(t, 105, used7d)
+}
+
+func TestReserveValuePackageUsageToTargetCountsZeroQuotaCurrentWindowReplacement(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3605, UserGroupVIP)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.TotalAmount = 1000
+	month.Limit5hAmount = 50
+	month.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, month, now-10, now+3600)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "reserve-target-zero-current-window", Quota: 0, CreatedAt: now}))
+
+	_, err := ReserveValuePackageUsageToTarget("reserve-target-zero-current-window", user.Id, sub.Id, 80)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), ValuePackageQuotaExhaustedUserMessage)
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
+	require.EqualValues(t, 0, reloaded.AmountUsed)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, used5h)
+	require.EqualValues(t, 0, used7d)
+}
+
 func TestDecreaseUserQuotaIfEnoughDoesNotOverdraw(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3701, UserGroupVIP)
