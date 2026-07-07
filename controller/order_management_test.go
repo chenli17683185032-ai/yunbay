@@ -146,6 +146,8 @@ func setupOrderManagementControllerTestDB(t *testing.T) {
 		&model.UserSubscription{},
 		&model.UserValuePackagePreference{},
 		&model.ValuePackageUsageRecord{},
+		&model.ValuePackageQuotaReset{},
+		&model.ValuePackageResetCountLedger{},
 		&model.LdxpTopupSession{},
 		&model.LdxpMailEvent{},
 		&model.SubscriptionPreConsumeRecord{},

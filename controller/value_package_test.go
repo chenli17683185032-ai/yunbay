@@ -240,6 +240,8 @@ func setupValuePackageControllerTest(t *testing.T) *gorm.DB {
 		&model.UserSubscription{},
 		&model.UserValuePackagePreference{},
 		&model.ValuePackageUsageRecord{},
+		&model.ValuePackageQuotaReset{},
+		&model.ValuePackageResetCountLedger{},
 		&model.LdxpTopupSession{},
 		&model.LdxpMailEvent{},
 		&model.TopUp{},

@@ -48,7 +48,7 @@ func setupValuePackageMiddlewareTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.ValuePackageUsageRecord{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.ValuePackageUsageRecord{}, &model.ValuePackageQuotaReset{}, &model.ValuePackageResetCountLedger{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
