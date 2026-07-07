@@ -67,20 +67,31 @@ func setupValuePackageMiddlewareTestDB(t *testing.T) *gorm.DB {
 }
 
 func seedValuePackageMiddlewareState(t *testing.T, enabled bool, limit5h int64, limit7d int64, concurrency int) (model.User, model.SubscriptionPlan, model.UserSubscription) {
+	return seedValuePackageMiddlewareStateForPackage(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay, enabled, limit5h, limit7d, concurrency)
+}
+
+func seedValuePackageMiddlewareStateForPackage(t *testing.T, packageType string, packageLevel int, enabled bool, limit5h int64, limit7d int64, concurrency int) (model.User, model.SubscriptionPlan, model.UserSubscription) {
 	t.Helper()
-	user := model.User{Username: "vp-mw-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, Quota: 1000000}
+	user := model.User{
+		Username: "vp-mw-user-" + packageType,
+		Role:     common.RoleCommonUser,
+		Status:   common.UserStatusEnabled,
+		Group:    model.UserGroupTiyan,
+		Quota:    1000000,
+		AffCode:  fmt.Sprintf("vp-mw-aff-%s-%d", packageType, time.Now().UnixNano()),
+	}
 	require.NoError(t, model.DB.Create(&user).Error)
 	plan := model.SubscriptionPlan{
-		Title:            "day card",
+		Title:            packageType + " card",
 		PriceAmount:      3.9,
 		Currency:         "USD",
 		DurationUnit:     model.SubscriptionDurationDay,
 		DurationValue:    1,
 		Enabled:          false,
 		PlanKind:         model.SubscriptionPlanKindValuePackage,
-		PackageType:      model.ValuePackageTypeDay,
-		PackageLevel:     model.ValuePackageLevelDay,
-		ModelGroup:       "day-card",
+		PackageType:      packageType,
+		PackageLevel:     packageLevel,
+		ModelGroup:       packageType + "-card",
 		ConcurrencyLimit: concurrency,
 		Limit5hAmount:    limit5h,
 		Limit7dAmount:    limit7d,
@@ -307,9 +318,17 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 
 	require.NoError(t, model.DB.Where("1 = 1").Delete(&model.ValuePackageUsageRecord{}).Error)
 	require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]any{"limit_5h_amount": int64(0), "limit_7d_amount": int64(100)}).Error)
-	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "hit-7d", Quota: 100, CreatedAt: now - int64(6*time.Hour/time.Second)}))
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "day-legacy-7d-ignored", Quota: 100, CreatedAt: now - int64(6*time.Hour/time.Second)}))
 
 	recorder = runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"day-card"`)
+
+	weekUser, weekPlan, weekSub := seedValuePackageMiddlewareStateForPackage(t, model.ValuePackageTypeWeek, model.ValuePackageLevelWeek, true, 0, 100, 1)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: weekUser.Id, UserSubscriptionId: weekSub.Id, PlanId: weekPlan.Id, PackageType: weekPlan.PackageType, ModelGroup: weekPlan.ModelGroup, RequestId: "week-hit-7d", Quota: 100, CreatedAt: now - int64(6*time.Hour/time.Second)}))
+
+	recorder = runValuePackageMiddlewareRequest(t, weekUser.Id, "gpt-plus")
 
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)
