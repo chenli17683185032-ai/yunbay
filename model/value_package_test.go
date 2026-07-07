@@ -401,6 +401,44 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	require.EqualValues(t, 7*24*3600-int64(6*time.Hour/time.Second), details.ResetSeconds7d)
 }
 
+func TestValuePackageAnchoredWindowUsesSubscriptionStartAndClampsToEnd(t *testing.T) {
+	start := int64(1_700_000_000)
+	end := start + 30*24*3600
+
+	first := calcValuePackageAnchoredWindow(start, end, 7*24*3600, start+3*24*3600)
+	require.EqualValues(t, start, first.Start)
+	require.EqualValues(t, start+7*24*3600, first.End)
+
+	second := calcValuePackageAnchoredWindow(start, end, 7*24*3600, start+8*24*3600)
+	require.EqualValues(t, start+7*24*3600, second.Start)
+	require.EqualValues(t, start+14*24*3600, second.End)
+
+	shortFinal := calcValuePackageAnchoredWindow(start, end, 7*24*3600, start+29*24*3600)
+	require.EqualValues(t, start+28*24*3600, shortFinal.Start)
+	require.EqualValues(t, end, shortFinal.End)
+}
+
+func TestNormalizeValuePackagePlanUsesFixedDurations(t *testing.T) {
+	day := SubscriptionPlan{PlanKind: SubscriptionPlanKindValuePackage, PackageType: ValuePackageTypeDay, DurationUnit: SubscriptionDurationMonth, DurationValue: 99, Limit7dAmount: 123}
+	normalizeValuePackagePlan(&day)
+	require.Equal(t, SubscriptionDurationDay, day.DurationUnit)
+	require.Equal(t, 1, day.DurationValue)
+	require.EqualValues(t, 0, day.CustomSeconds)
+	require.EqualValues(t, 0, day.Limit7dAmount)
+
+	week := SubscriptionPlan{PlanKind: SubscriptionPlanKindValuePackage, PackageType: ValuePackageTypeWeek, DurationUnit: SubscriptionDurationMonth, DurationValue: 99}
+	normalizeValuePackagePlan(&week)
+	require.Equal(t, SubscriptionDurationDay, week.DurationUnit)
+	require.Equal(t, 7, week.DurationValue)
+	require.EqualValues(t, 0, week.CustomSeconds)
+
+	month := SubscriptionPlan{PlanKind: SubscriptionPlanKindValuePackage, PackageType: ValuePackageTypeMonth, DurationUnit: SubscriptionDurationMonth, DurationValue: 1}
+	normalizeValuePackagePlan(&month)
+	require.Equal(t, SubscriptionDurationDay, month.DurationUnit)
+	require.Equal(t, 30, month.DurationValue)
+	require.EqualValues(t, 0, month.CustomSeconds)
+}
+
 func TestValuePackageWindowUsageDetailsDoesNotExtendResetWithLaterUsage(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3010, UserGroupTiyan)
@@ -703,9 +741,9 @@ func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
 	require.InDelta(t, 5*3600, state.Usage.ResetSeconds5h, 2)
 	require.False(t, state.Usage.Limited5h)
 	require.EqualValues(t, 10, state.Usage.Used7d)
-	require.EqualValues(t, 75, state.Usage.Limit7d)
-	require.EqualValues(t, now+7*24*3600, state.Usage.ResetAt7d)
-	require.InDelta(t, 7*24*3600, state.Usage.ResetSeconds7d, 2)
+	require.EqualValues(t, 0, state.Usage.Limit7d)
+	require.EqualValues(t, 0, state.Usage.ResetAt7d)
+	require.EqualValues(t, 0, state.Usage.ResetSeconds7d)
 	require.False(t, state.Usage.Limited7d)
 }
 
@@ -741,10 +779,10 @@ func TestGetValuePackageStateIncludesUsageSummary(t *testing.T) {
 	require.InDelta(t, 5*3600, state.Usage.ResetSeconds5h, 2)
 	require.False(t, state.Usage.Limited5h)
 	require.EqualValues(t, 70, state.Usage.Used7d)
-	require.EqualValues(t, 150, state.Usage.Limit7d)
-	require.InDelta(t, 46.666, state.Usage.Percent7d, 0.01)
-	require.EqualValues(t, now-6*3600+7*24*3600, state.Usage.ResetAt7d)
-	require.InDelta(t, 7*24*3600-6*3600, state.Usage.ResetSeconds7d, 2)
+	require.EqualValues(t, 0, state.Usage.Limit7d)
+	require.EqualValues(t, 0, state.Usage.Percent7d)
+	require.EqualValues(t, 0, state.Usage.ResetAt7d)
+	require.EqualValues(t, 0, state.Usage.ResetSeconds7d)
 	require.False(t, state.Usage.Limited7d)
 	require.False(t, state.Usage.Exhausted)
 	require.Empty(t, state.Usage.ExhaustedReason)
@@ -1418,7 +1456,7 @@ func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T)
 	require.EqualValues(t, 100, row.Usage.Used5h)
 	require.EqualValues(t, 300, row.Usage.Used7d)
 	require.EqualValues(t, 1000, row.Usage.Limit5h)
-	require.EqualValues(t, 5000, row.Usage.Limit7d)
+	require.EqualValues(t, 0, row.Usage.Limit7d)
 	require.EqualValues(t, 700, row.Usage.TotalUsed)
 	require.EqualValues(t, 9300, row.Usage.TotalRemaining)
 

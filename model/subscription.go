@@ -53,6 +53,14 @@ const (
 )
 
 const (
+	valuePackage5hWindowSeconds = int64(5 * 3600)
+	valuePackage7dWindowSeconds = int64(7 * 24 * 3600)
+	valuePackageDaySeconds      = int64(24 * 3600)
+	valuePackageWeekSeconds     = int64(7 * 24 * 3600)
+	valuePackageMonthSeconds    = int64(30 * 24 * 3600)
+)
+
+const (
 	ValuePackageExhaustedReasonTotal = "total_quota_exhausted"
 	ValuePackageExhaustedReason5h    = "limit_5h_exhausted"
 	ValuePackageExhaustedReason7d    = "limit_7d_exhausted"
@@ -316,6 +324,21 @@ func (p *SubscriptionPlan) NormalizeDefaults() {
 	}
 	if p.PlanKind == SubscriptionPlanKindValuePackage {
 		p.Currency = "CNY"
+		switch p.PackageType {
+		case ValuePackageTypeDay:
+			p.DurationUnit = SubscriptionDurationDay
+			p.DurationValue = 1
+			p.CustomSeconds = 0
+			p.Limit7dAmount = 0
+		case ValuePackageTypeWeek:
+			p.DurationUnit = SubscriptionDurationDay
+			p.DurationValue = 7
+			p.CustomSeconds = 0
+		case ValuePackageTypeMonth:
+			p.DurationUnit = SubscriptionDurationDay
+			p.DurationValue = 30
+			p.CustomSeconds = 0
+		}
 	} else {
 		p.Currency = "USD"
 	}
@@ -1305,6 +1328,21 @@ func normalizeValuePackagePlan(plan *SubscriptionPlan) {
 		case ValuePackageTypeMonth:
 			plan.PackageLevel = ValuePackageLevelMonth
 		}
+	}
+	switch plan.PackageType {
+	case ValuePackageTypeDay:
+		plan.DurationUnit = SubscriptionDurationDay
+		plan.DurationValue = 1
+		plan.CustomSeconds = 0
+		plan.Limit7dAmount = 0
+	case ValuePackageTypeWeek:
+		plan.DurationUnit = SubscriptionDurationDay
+		plan.DurationValue = 7
+		plan.CustomSeconds = 0
+	case ValuePackageTypeMonth:
+		plan.DurationUnit = SubscriptionDurationDay
+		plan.DurationValue = 30
+		plan.CustomSeconds = 0
 	}
 	if plan.ConcurrencyLimit <= 0 {
 		plan.ConcurrencyLimit = 1
@@ -2839,6 +2877,38 @@ func maxInt64(a int64, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+type valuePackageAnchoredWindow struct {
+	Start int64
+	End   int64
+}
+
+func calcValuePackageAnchoredWindow(startTime int64, endTime int64, windowSeconds int64, now int64) valuePackageAnchoredWindow {
+	if startTime <= 0 || windowSeconds <= 0 {
+		return valuePackageAnchoredWindow{}
+	}
+	if now <= 0 || now < startTime {
+		now = startTime
+	}
+	index := (now - startTime) / windowSeconds
+	windowStart := startTime + index*windowSeconds
+	windowEnd := windowStart + windowSeconds
+	if endTime > 0 && windowEnd > endTime {
+		windowEnd = endTime
+	}
+	if windowEnd <= windowStart {
+		return valuePackageAnchoredWindow{}
+	}
+	return valuePackageAnchoredWindow{Start: windowStart, End: windowEnd}
+}
+
+func valuePackageHas7dWindow(plan *SubscriptionPlan) bool {
+	return plan != nil && plan.IsValuePackage() && plan.PackageType != ValuePackageTypeDay && plan.Limit7dAmount > 0
+}
+
+func valuePackageResetClears7d(plan *SubscriptionPlan) bool {
+	return plan != nil && plan.IsValuePackage() && plan.PackageType == ValuePackageTypeMonth && plan.Limit7dAmount > 0
 }
 
 // ResetAt is based on the earliest current-window positive usage; callers should suppress reset display when the matching limit is disabled.
