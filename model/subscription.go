@@ -1367,14 +1367,14 @@ type ValuePackageUsageSummary struct {
 }
 
 type ValuePackageWindowUsageDetails struct {
-	Used5h            int64
-	Latest5hCreatedAt int64
-	ResetAt5h         int64
-	ResetSeconds5h    int64
-	Used7d            int64
-	Latest7dCreatedAt int64
-	ResetAt7d         int64
-	ResetSeconds7d    int64
+	Used5h              int64
+	Earliest5hCreatedAt int64
+	ResetAt5h           int64
+	ResetSeconds5h      int64
+	Used7d              int64
+	Earliest7dCreatedAt int64
+	ResetAt7d           int64
+	ResetSeconds7d      int64
 }
 
 type ValuePackageBillingState struct {
@@ -2241,7 +2241,7 @@ func GetValuePackageWindowUsageDetails(userId int, userSubscriptionId int, now i
 	return getValuePackageWindowUsageDetailsTx(DB, userId, userSubscriptionId, now)
 }
 
-// ResetAt is based on current-window positive usage; callers should suppress reset display when the matching limit is disabled.
+// ResetAt is based on the earliest current-window positive usage; callers should suppress reset display when the matching limit is disabled.
 func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (*ValuePackageWindowUsageDetails, error) {
 	if tx == nil {
 		tx = DB
@@ -2251,19 +2251,19 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	}
 	details := &ValuePackageWindowUsageDetails{}
 	var usage5h struct {
-		Used            int64
-		LatestCreatedAt int64
+		Used              int64
+		EarliestCreatedAt int64
 	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
 		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, now-5*3600, 0).
-		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MAX(created_at), 0) AS latest_created_at").
+		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MIN(created_at), 0) AS earliest_created_at").
 		Scan(&usage5h).Error; err != nil {
 		return nil, err
 	}
 	details.Used5h = usage5h.Used
-	details.Latest5hCreatedAt = usage5h.LatestCreatedAt
-	if details.Used5h > 0 && details.Latest5hCreatedAt > 0 {
-		details.ResetAt5h = details.Latest5hCreatedAt + 5*3600
+	details.Earliest5hCreatedAt = usage5h.EarliestCreatedAt
+	if details.Used5h > 0 && details.Earliest5hCreatedAt > 0 {
+		details.ResetAt5h = details.Earliest5hCreatedAt + 5*3600
 		details.ResetSeconds5h = details.ResetAt5h - now
 		if details.ResetSeconds5h < 0 {
 			details.ResetSeconds5h = 0
@@ -2271,19 +2271,19 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	}
 
 	var usage7d struct {
-		Used            int64
-		LatestCreatedAt int64
+		Used              int64
+		EarliestCreatedAt int64
 	}
 	if err := tx.Model(&ValuePackageUsageRecord{}).
 		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, now-7*24*3600, 0).
-		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MAX(created_at), 0) AS latest_created_at").
+		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MIN(created_at), 0) AS earliest_created_at").
 		Scan(&usage7d).Error; err != nil {
 		return nil, err
 	}
 	details.Used7d = usage7d.Used
-	details.Latest7dCreatedAt = usage7d.LatestCreatedAt
-	if details.Used7d > 0 && details.Latest7dCreatedAt > 0 {
-		details.ResetAt7d = details.Latest7dCreatedAt + 7*24*3600
+	details.Earliest7dCreatedAt = usage7d.EarliestCreatedAt
+	if details.Used7d > 0 && details.Earliest7dCreatedAt > 0 {
+		details.ResetAt7d = details.Earliest7dCreatedAt + 7*24*3600
 		details.ResetSeconds7d = details.ResetAt7d - now
 		if details.ResetSeconds7d < 0 {
 			details.ResetSeconds7d = 0
