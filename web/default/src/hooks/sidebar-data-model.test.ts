@@ -35,20 +35,30 @@ const zh: Record<string, string> = {
 const t = (value: string) => zh[value] ?? value
 
 function findValuePackageItem(role: number) {
-  const items = buildSidebarData(t, role).navGroups.flatMap((group) => group.items)
-  const item = items.find((entry) => 'url' in entry && entry.url === '/value-packages')
+  const items = buildSidebarData(t, role).navGroups.flatMap(
+    (group) => group.items
+  )
+  const item = items.find(
+    (entry) => 'url' in entry && entry.url === '/value-packages'
+  )
   assert.ok(item)
   return item
 }
 
 test('ordinary value package sidebar entry is attention marked', () => {
   const item = findValuePackageItem(1)
-  assert.equal('attention' in item ? item.attention : undefined, 'value-packages')
+  assert.equal(
+    'attention' in item ? item.attention : undefined,
+    'value-packages'
+  )
 })
 
 test('admin value package sidebar entry is attention marked', () => {
   const item = findValuePackageItem(10)
-  assert.equal('attention' in item ? item.attention : undefined, 'value-packages')
+  assert.equal(
+    'attention' in item ? item.attention : undefined,
+    'value-packages'
+  )
 })
 
 test('ordinary users see quick-start and required user functions only', () => {
@@ -146,6 +156,12 @@ test('admin users keep admin functions but lose the chat preset widget', () => {
   )
   assert.equal(
     items.some((item) => 'url' in item && item.url === '/order-management'),
+    true
+  )
+  assert.equal(
+    items.some(
+      (item) => 'url' in item && item.url === '/order-management/value-packages'
+    ),
     true
   )
 })

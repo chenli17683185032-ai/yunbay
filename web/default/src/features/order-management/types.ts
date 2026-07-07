@@ -186,7 +186,6 @@ export interface AffiliateStatsResponse {
   total: number
 }
 
-
 export interface OrderManagementValuePackageUsageSummary {
   total_used: number
   total_limit: number
@@ -215,6 +214,42 @@ export interface OrderManagementValuePackageUsageRow {
   subscription: UserSubscription
   plan: SubscriptionPlan
   usage: OrderManagementValuePackageUsageSummary | null
+}
+
+export interface OrderManagementValuePackageManagementRow {
+  user_id: number
+  username: string
+  display_name: string
+  package_type: string
+  plan_title: string
+  subscription_id: number
+  subscription_status: string
+  start_time: number
+  end_time: number
+  enabled: boolean
+  reset_count: number
+  usage: OrderManagementValuePackageUsageSummary | null
+  last_reset_at: number
+}
+
+export interface OrderManagementValuePackageManagementResponse {
+  items: OrderManagementValuePackageManagementRow[]
+  total: number
+}
+
+export type OrderManagementValuePackageResetCountAdjustMode =
+  | 'set'
+  | 'add'
+  | 'subtract'
+
+export interface OrderManagementValuePackageResetCountAdjustment {
+  user_id: number
+  old_count: number
+  new_count: number
+  delta: number
+  mode: string
+  reason: string
+  admin_user_id: number
 }
 
 export type OrderManagementValuePackagePlanRecord = PlanRecord

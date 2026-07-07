@@ -53,6 +53,7 @@ import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authe
 import { Route as AuthenticatedChannelsIndexRouteImport } from './routes/_authenticated/channels/index'
 import { Route as AuthenticatedChannelConsoleIndexRouteImport } from './routes/_authenticated/channel-console/index'
 import { Route as AuthenticatedUsageLogsSectionRouteImport } from './routes/_authenticated/usage-logs/$section'
+import { Route as AuthenticatedOrderManagementValuePackagesRouteImport } from './routes/_authenticated/order-management/value-packages'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
@@ -307,6 +308,12 @@ const AuthenticatedUsageLogsSectionRoute =
     path: '/usage-logs/$section',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedOrderManagementValuePackagesRoute =
+  AuthenticatedOrderManagementValuePackagesRouteImport.update({
+    id: '/order-management/value-packages',
+    path: '/order-management/value-packages',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedModelsSectionRoute =
   AuthenticatedModelsSectionRouteImport.update({
     id: '/models/$section',
@@ -450,6 +457,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/order-management/value-packages': typeof AuthenticatedOrderManagementValuePackagesRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channel-console/': typeof AuthenticatedChannelConsoleIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -512,6 +520,7 @@ export interface FileRoutesByTo {
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/order-management/value-packages': typeof AuthenticatedOrderManagementValuePackagesRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/channel-console': typeof AuthenticatedChannelConsoleIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
@@ -578,6 +587,7 @@ export interface FileRoutesById {
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
+  '/_authenticated/order-management/value-packages': typeof AuthenticatedOrderManagementValuePackagesRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/channel-console/': typeof AuthenticatedChannelConsoleIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
@@ -643,6 +653,7 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/order-management/value-packages'
     | '/usage-logs/$section'
     | '/channel-console/'
     | '/channels/'
@@ -705,6 +716,7 @@ export interface FileRouteTypes {
     | '/dashboard/$section'
     | '/errors/$error'
     | '/models/$section'
+    | '/order-management/value-packages'
     | '/usage-logs/$section'
     | '/channel-console'
     | '/channels'
@@ -770,6 +782,7 @@ export interface FileRouteTypes {
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
+    | '/_authenticated/order-management/value-packages'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/channel-console/'
     | '/_authenticated/channels/'
@@ -1135,6 +1148,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedUsageLogsSectionRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/order-management/value-packages': {
+      id: '/_authenticated/order-management/value-packages'
+      path: '/order-management/value-packages'
+      fullPath: '/order-management/value-packages'
+      preLoaderRoute: typeof AuthenticatedOrderManagementValuePackagesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/models/$section': {
       id: '/_authenticated/models/$section'
       path: '/models/$section'
@@ -1361,6 +1381,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardSectionRoute: typeof AuthenticatedDashboardSectionRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
+  AuthenticatedOrderManagementValuePackagesRoute: typeof AuthenticatedOrderManagementValuePackagesRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedChannelConsoleIndexRoute: typeof AuthenticatedChannelConsoleIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
@@ -1387,6 +1408,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardSectionRoute: AuthenticatedDashboardSectionRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
+  AuthenticatedOrderManagementValuePackagesRoute:
+    AuthenticatedOrderManagementValuePackagesRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedChannelConsoleIndexRoute: AuthenticatedChannelConsoleIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,

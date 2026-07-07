@@ -43,3 +43,10 @@ test('order management API uses dedicated value package usage endpoint', async (
   assert.match(source, /getOrderManagementValuePackageUsage/)
   assert.match(source, /\/api\/order-management\/admin\/value-package-usage/)
 })
+
+test('order management index keeps standalone value package management page separate', async () => {
+  const source = await readFile(sourcePath, 'utf8')
+
+  assert.doesNotMatch(source, /ValuePackageManagementPage/)
+  assert.doesNotMatch(source, /adjustOrderManagementValuePackageResetCount/)
+})

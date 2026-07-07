@@ -231,6 +231,11 @@ export function buildSidebarData(
             icon: icons.creditCard,
           },
           {
+            title: t('Value Package Management'),
+            url: '/order-management/value-packages',
+            icon: icons.valuePackages,
+          },
+          {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: icons.ticket,

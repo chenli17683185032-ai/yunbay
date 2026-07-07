@@ -30,6 +30,9 @@ import type {
   MailCheckStatus,
   OrderAnalyticsResponse,
   OrderManagementOrderItem,
+  OrderManagementValuePackageManagementResponse,
+  OrderManagementValuePackageResetCountAdjustment,
+  OrderManagementValuePackageResetCountAdjustMode,
   OrderManagementValuePackageUsageRow,
   PageData,
 } from './types'
@@ -51,6 +54,21 @@ export interface GetAffiliateStatsParams extends OrderManagementRangeParams {
   page?: number
   page_size?: number
   withdrawal_status?: AffiliateWithdrawalStatus
+}
+
+export interface GetOrderManagementValuePackageUsersParams {
+  page?: number
+  page_size?: number
+  keyword?: string
+  package_type?: string
+  active?: string
+}
+
+export interface AdjustOrderManagementValuePackageResetCountRequest {
+  userId: number
+  mode: OrderManagementValuePackageResetCountAdjustMode
+  value: number
+  reason?: string
 }
 
 export function withDefinedParams(params: object): string {
@@ -87,6 +105,26 @@ export async function getOrderManagementValuePackageUsage(): Promise<
   ApiResponse<OrderManagementValuePackageUsageRow[]>
 > {
   const res = await api.get('/api/order-management/admin/value-package-usage')
+  return res.data
+}
+
+export async function getOrderManagementValuePackageUsers(
+  params: GetOrderManagementValuePackageUsersParams = {}
+): Promise<ApiResponse<OrderManagementValuePackageManagementResponse>> {
+  const res = await api.get(
+    `/api/order-management/admin/value-packages/users${withDefinedParams(params)}`
+  )
+  return res.data
+}
+
+export async function adjustOrderManagementValuePackageResetCount(
+  request: AdjustOrderManagementValuePackageResetCountRequest
+): Promise<ApiResponse<OrderManagementValuePackageResetCountAdjustment>> {
+  const { userId, ...payload } = request
+  const res = await api.post(
+    `/api/order-management/admin/value-packages/users/${userId}/reset-count`,
+    payload
+  )
   return res.data
 }
 
