@@ -17,6 +17,10 @@ type valuePackageActivateRequest struct {
 	UserSubscriptionId int `json:"user_subscription_id"`
 }
 
+type valuePackageResetQuotaRequest struct {
+	UserSubscriptionId int `json:"user_subscription_id"`
+}
+
 func GetValuePackagePlans(c *gin.Context) {
 	userId := c.GetInt("id")
 	plans, err := model.GetValuePackagePlansForUser(userId)
@@ -107,6 +111,23 @@ func ActivateValuePackageSelf(c *gin.Context) {
 func DeactivateValuePackageSelf(c *gin.Context) {
 	userId := c.GetInt("id")
 	state, err := model.DeactivateValuePackage(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, state)
+}
+
+func ResetValuePackageQuotaSelf(c *gin.Context) {
+	userId := c.GetInt("id")
+	var req valuePackageResetQuotaRequest
+	if c.Request.Body != nil && c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			common.ApiErrorMsg(c, "参数错误")
+			return
+		}
+	}
+	state, err := model.ConsumeValuePackageResetCount(userId, req.UserSubscriptionId, common.GetTimestamp(), userId, "user reset quota")
 	if err != nil {
 		common.ApiError(c, err)
 		return

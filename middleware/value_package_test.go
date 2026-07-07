@@ -317,6 +317,34 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "完全恢复")
 }
 
+func TestValuePackageMiddlewareResetCountdownUsesEarliestUsage(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	now := common.GetTimestamp()
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "first-window-usage", Quota: 99, CreatedAt: now - 4*3600}))
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "later-window-usage", Quota: 1, CreatedAt: now - 2*3600}))
+
+	recorder := runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
+
+	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "5 小时")
+	require.Contains(t, recorder.Body.String(), "1 小时")
+	require.NotContains(t, recorder.Body.String(), "3 小时")
+}
+
+func TestValuePackageMiddlewareAllowsRequestAfterQuotaReset(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	now := common.GetTimestamp()
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "before-reset-exhausted", Quota: 100, CreatedAt: now - 1800}))
+	require.NoError(t, model.DB.Create(&model.ValuePackageQuotaReset{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ResetAt: now, Source: model.ValuePackageQuotaResetSourceUserConsumeCount, CreatedByUserId: user.Id}).Error)
+
+	recorder := runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"day-card"`)
+}
+
 func TestValuePackageLimitMessageFormatting(t *testing.T) {
 	tests := []struct {
 		name         string

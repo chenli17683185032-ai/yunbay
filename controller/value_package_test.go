@@ -802,6 +802,53 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	assert.Equal(t, float64(plan.Id), responsePlan["id"])
 }
 
+func TestResetValuePackageQuotaSelfConsumesResetCount(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_reset_quota_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	plan.TotalAmount = 1000
+	plan.Limit5hAmount = 100
+	plan.Limit7dAmount = 200
+	require.NoError(t, model.DB.Save(&plan).Error)
+	model.InvalidateSubscriptionPlanCache(plan.Id)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 300, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 1}).Error)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "before-reset", Quota: 100, CreatedAt: now - 1800}))
+
+	rec := valuePackageControllerRequest(ResetValuePackageQuotaSelf, http.MethodPost, "/value-packages/reset-quota", gin.H{"user_subscription_id": sub.Id}, user.Id)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Success bool                    `json:"success"`
+		Data    model.ValuePackageState `json:"data"`
+		Message string                  `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Success, resp.Message)
+	require.EqualValues(t, 0, resp.Data.Preference.ResetCount)
+	require.NotNil(t, resp.Data.Usage)
+	require.EqualValues(t, 0, resp.Data.Usage.Used5h)
+	require.EqualValues(t, 0, resp.Data.Usage.Used7d)
+	require.EqualValues(t, 300, resp.Data.Usage.TotalUsed)
+}
+
+func TestResetValuePackageQuotaSelfRejectsWithoutCount(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_reset_quota_no_count_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 0}).Error)
+
+	rec := valuePackageControllerRequest(ResetValuePackageQuotaSelf, http.MethodPost, "/value-packages/reset-quota", gin.H{"user_subscription_id": sub.Id}, user.Id)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "重置次数不足")
+}
+
 func TestAdminCreateSubscriptionPlanNormalizesValuePackageLevelFromType(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
