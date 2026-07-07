@@ -583,6 +583,47 @@ func TestValuePackageWindowUsageDayCardIgnores7dLimit(t *testing.T) {
 	require.EqualValues(t, 0, state.Usage.ResetSeconds7d)
 }
 
+func TestValuePackageWindowUsageUsesCreatedAtAnchorWhenStartTimeMissing(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3049, UserGroupTiyan)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.TotalAmount = 10000
+	month.Limit5hAmount = 10000
+	month.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	legacyStart := now - 8*valuePackageDaySeconds
+	end := legacyStart + valuePackageMonthSeconds
+	sub := createActiveValuePackageSub(t, user.Id, month, legacyStart, end)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).UpdateColumns(map[string]any{
+		"start_time": int64(0),
+		"created_at": legacyStart,
+		"updated_at": legacyStart,
+	}).Error)
+	currentWindowStart := legacyStart + valuePackage7dWindowSeconds
+	currentWindowEnd := legacyStart + 2*valuePackage7dWindowSeconds
+	currentUsageAt := currentWindowStart + valuePackageDaySeconds/2
+
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "legacy-previous-cycle", Quota: 100, CreatedAt: legacyStart + 2*valuePackageDaySeconds}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "legacy-current-cycle", Quota: 200, CreatedAt: currentUsageAt}))
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 200, details.Used7d)
+	require.EqualValues(t, currentUsageAt, details.Earliest7dCreatedAt)
+	require.EqualValues(t, currentWindowEnd, details.ResetAt7d)
+	require.EqualValues(t, currentWindowEnd-now, details.ResetSeconds7d)
+
+	result, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Keyword: user.Username, PackageType: "all", Active: "active", Page: 1, PageSize: 20}, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Total)
+	require.Len(t, result.Items, 1)
+	require.NotNil(t, result.Items[0].Usage)
+	require.EqualValues(t, 200, result.Items[0].Usage.Used7d)
+	require.EqualValues(t, currentWindowEnd, result.Items[0].Usage.ResetAt7d)
+}
+
 func TestValuePackageWindowUsageDetailsDoesNotExtendResetWithLaterUsage(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3010, UserGroupTiyan)

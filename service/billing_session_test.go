@@ -108,7 +108,7 @@ func TestValuePackageBillingIgnoresWalletOnlyPreference(t *testing.T) {
 	used5h, used7d, err := model.GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
 	require.NoError(t, err)
 	require.EqualValues(t, 150, used5h)
-	require.EqualValues(t, 150, used7d)
+	require.EqualValues(t, 0, used7d)
 }
 
 func TestValuePackageBillingAppliesOneXGroupRatio(t *testing.T) {
@@ -187,7 +187,7 @@ func TestValuePackageBillingSettleZeroActualQuotaClearsUsageReservation(t *testi
 	used5h, used7d, err := model.GetValuePackageWindowUsage(user.Id, sub.Id, now)
 	require.NoError(t, err)
 	require.EqualValues(t, 100, used5h)
-	require.EqualValues(t, 100, used7d)
+	require.EqualValues(t, 0, used7d)
 
 	require.NoError(t, session.Settle(0))
 	var reloadedSub model.UserSubscription

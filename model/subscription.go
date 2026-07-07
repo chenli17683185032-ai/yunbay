@@ -1696,7 +1696,11 @@ func buildValuePackageWindowUsageDetailsFromRecords(sub *UserSubscription, plan 
 	if !valuePackageHas7dWindow(plan) {
 		return details
 	}
-	window := calcValuePackageAnchoredWindow(sub.StartTime, sub.EndTime, valuePackage7dWindowSeconds, now)
+	anchorStart := valuePackageSubscriptionAnchorStart(sub, now)
+	if anchorStart <= 0 {
+		return details
+	}
+	window := calcValuePackageAnchoredWindow(anchorStart, sub.EndTime, valuePackage7dWindowSeconds, now)
 	if window.Start <= 0 || window.End <= 0 {
 		return details
 	}
@@ -1850,18 +1854,19 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 	}
 
 	usageLowerBound := int64(0)
-	hasMissingStartTime := false
+	hasMissingAnchorStart := false
 	for _, sub := range pageSubs {
-		if sub.StartTime > 0 {
-			if usageLowerBound == 0 || sub.StartTime < usageLowerBound {
-				usageLowerBound = sub.StartTime
+		anchorStart := valuePackageSubscriptionAnchorStart(&sub, now)
+		if anchorStart > 0 {
+			if usageLowerBound == 0 || anchorStart < usageLowerBound {
+				usageLowerBound = anchorStart
 			}
 		} else {
-			hasMissingStartTime = true
+			hasMissingAnchorStart = true
 		}
 	}
 	fallbackUsageLowerBound := now - valuePackage7dWindowSeconds
-	if hasMissingStartTime && (usageLowerBound == 0 || fallbackUsageLowerBound < usageLowerBound) {
+	if hasMissingAnchorStart && (usageLowerBound == 0 || fallbackUsageLowerBound < usageLowerBound) {
 		usageLowerBound = fallbackUsageLowerBound
 	}
 	if usageLowerBound == 0 {
@@ -2936,6 +2941,19 @@ func maxInt64(a int64, b int64) int64 {
 	return b
 }
 
+func valuePackageSubscriptionAnchorStart(sub *UserSubscription, now int64) int64 {
+	if sub == nil {
+		return 0
+	}
+	if sub.StartTime > 0 {
+		return sub.StartTime
+	}
+	if sub.CreatedAt > 0 && (now <= 0 || sub.CreatedAt <= now) {
+		return sub.CreatedAt
+	}
+	return 0
+}
+
 type valuePackageAnchoredWindow struct {
 	Start int64
 	End   int64
@@ -2988,7 +3006,7 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	if err != nil {
 		return nil, err
 	}
-	lowerBound := sub.StartTime
+	lowerBound := valuePackageSubscriptionAnchorStart(&sub, now)
 	if lowerBound <= 0 {
 		lowerBound = now - valuePackage7dWindowSeconds
 	}
