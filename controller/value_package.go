@@ -135,7 +135,7 @@ func ResetValuePackageQuotaSelf(c *gin.Context) {
 		}
 		userSubscriptionId = *req.UserSubscriptionId
 	}
-	state, err := model.ConsumeValuePackageResetCount(userId, userSubscriptionId, common.GetTimestamp(), userId, "user reset quota")
+	state, err := model.ConsumeValuePackageResetCount(userId, userSubscriptionId, 0, userId, "user reset quota")
 	if err != nil {
 		common.ApiError(c, err)
 		return

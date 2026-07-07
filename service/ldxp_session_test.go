@@ -17,7 +17,7 @@ import (
 
 func setupLdxpSessionServiceTest(t *testing.T) {
 	t.Helper()
-	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.SubscriptionOrder{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}))
+	require.NoError(t, model.DB.AutoMigrate(&model.User{}, &model.SubscriptionOrder{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.ValuePackageQuotaReset{}, &model.ValuePackageResetCountLedger{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}))
 	ensureLdxpSessionSubscriptionPlanTable(t)
 	cleanup := func() {
 		require.NoError(t, model.DB.Exec("DELETE FROM ldxp_topup_sessions").Error)

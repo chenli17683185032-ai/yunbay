@@ -557,3 +557,45 @@ func TestAdminAdjustValuePackageResetCount(t *testing.T) {
 	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&pref).Error)
 	require.EqualValues(t, 3, pref.ResetCount)
 }
+
+func TestAdminAdjustValuePackageResetCountRejectsInvalidRequestsWithoutLedger(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	user := &model.User{Id: 8894, Username: "vp-reset-invalid", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, AffCode: "vp-reset-invalid-aff"}
+	require.NoError(t, model.DB.Create(user).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, ResetCount: 2}).Error)
+
+	cases := []struct {
+		name   string
+		userID int
+		body   string
+	}{
+		{name: "missing value", userID: user.Id, body: `{"mode":"add"}`},
+		{name: "negative value", userID: user.Id, body: `{"mode":"add","value":-1}`},
+		{name: "zero add", userID: user.Id, body: `{"mode":"add","value":0}`},
+		{name: "invalid mode", userID: user.Id, body: `{"mode":"bad","value":1}`},
+		{name: "missing user", userID: 999999, body: `{"mode":"add","value":1}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, recorder := newOrderManagementContext(http.MethodPost, fmt.Sprintf("/api/order-management/admin/value-packages/users/%d/reset-count", tc.userID), tc.body)
+			ctx.Params = gin.Params{{Key: "user_id", Value: fmt.Sprintf("%d", tc.userID)}}
+
+			AdminAdjustValuePackageResetCount(ctx)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			body := decodeTestResponse(t, recorder)
+			require.Equal(t, false, body["success"])
+		})
+	}
+
+	var pref model.UserValuePackagePreference
+	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.EqualValues(t, 2, pref.ResetCount)
+	var ledgerCount int64
+	require.NoError(t, model.DB.Model(&model.ValuePackageResetCountLedger{}).Count(&ledgerCount).Error)
+	require.Zero(t, ledgerCount)
+	var orphanPrefCount int64
+	require.NoError(t, model.DB.Model(&model.UserValuePackagePreference{}).Where("user_id = ?", 999999).Count(&orphanPrefCount).Error)
+	require.Zero(t, orphanPrefCount)
+}

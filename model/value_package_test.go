@@ -1399,6 +1399,125 @@ func TestListValuePackageManagementRowsIncludesResetCountAndUsage(t *testing.T) 
 	require.EqualValues(t, 25, row.Usage.Used5h)
 }
 
+func TestListValuePackageManagementRowsFiltersAndPaginatesInDatabaseSemantics(t *testing.T) {
+	setupValuePackageTestDB(t)
+	now := common.GetTimestamp()
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	regular := createRegularSubscriptionPlanForValuePackageTest(t, "regular", 1000)
+
+	matched := createValuePackageUser(t, 3030, UserGroupTiyan)
+	matched.DisplayName = "Needle Display"
+	require.NoError(t, DB.Save(&matched).Error)
+	matchedSub := createActiveValuePackageSub(t, matched.Id, week, now-100, now+86400)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: matched.Id, Enabled: true, ActiveUserSubscriptionId: matchedSub.Id, ResetCount: 2}).Error)
+
+	otherWeek := createValuePackageUser(t, 3031, UserGroupTiyan)
+	otherWeekSub := createActiveValuePackageSub(t, otherWeek.Id, week, now-90, now+86400)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: otherWeek.Id, Enabled: true, ActiveUserSubscriptionId: otherWeekSub.Id, ResetCount: 1}).Error)
+
+	dayUser := createValuePackageUser(t, 3032, UserGroupTiyan)
+	createActiveValuePackageSub(t, dayUser.Id, day, now-80, now+86400)
+	regularUser := createValuePackageUser(t, 3033, UserGroupTiyan)
+	createActiveValuePackageSub(t, regularUser.Id, regular, now-70, now+86400)
+
+	byPackage, err := ListValuePackageManagementRows(ValuePackageManagementFilter{PackageType: ValuePackageTypeWeek, Active: "active", Page: 1, PageSize: 1}, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, byPackage.Total)
+	require.Len(t, byPackage.Items, 1)
+	require.Equal(t, otherWeek.Id, byPackage.Items[0].UserId)
+
+	secondPage, err := ListValuePackageManagementRows(ValuePackageManagementFilter{PackageType: ValuePackageTypeWeek, Active: "active", Page: 2, PageSize: 1}, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, secondPage.Total)
+	require.Len(t, secondPage.Items, 1)
+	require.Equal(t, matched.Id, secondPage.Items[0].UserId)
+
+	byKeyword, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Keyword: "needle", PackageType: "all", Active: "active", Page: 1, PageSize: 20}, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, byKeyword.Total)
+	require.Len(t, byKeyword.Items, 1)
+	require.Equal(t, matched.Id, byKeyword.Items[0].UserId)
+
+	byUserId, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Keyword: fmt.Sprintf("%d", otherWeek.Id), PackageType: "all", Active: "active", Page: 1, PageSize: 20}, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, byUserId.Total)
+	require.Len(t, byUserId.Items, 1)
+	require.Equal(t, otherWeek.Id, byUserId.Items[0].UserId)
+}
+
+func TestListValuePackageManagementRowsStatusFiltersExcludeCancelledAndCovered(t *testing.T) {
+	setupValuePackageTestDB(t)
+	now := common.GetTimestamp()
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+
+	expiredUser := createValuePackageUser(t, 3040, UserGroupTiyan)
+	expiredSub := createActiveValuePackageSub(t, expiredUser.Id, day, now-86400, now-10)
+	activeExpiredUser := createValuePackageUser(t, 3041, UserGroupTiyan)
+	activeExpiredSub := createActiveValuePackageSub(t, activeExpiredUser.Id, day, now-86400, now-1)
+	cancelledUser := createValuePackageUser(t, 3042, UserGroupTiyan)
+	cancelledSub := createActiveValuePackageSub(t, cancelledUser.Id, day, now-86400, now-1)
+	coveredUser := createValuePackageUser(t, 3043, UserGroupTiyan)
+	coveredSub := createActiveValuePackageSub(t, coveredUser.Id, day, now-86400, now-1)
+	activeUser := createValuePackageUser(t, 3044, UserGroupTiyan)
+	activeSub := createActiveValuePackageSub(t, activeUser.Id, day, now-100, now+86400)
+
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", expiredSub.Id).Update("status", UserSubscriptionStatusExpired).Error)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", cancelledSub.Id).Update("status", UserSubscriptionStatusCancelled).Error)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", coveredSub.Id).Update("status", UserSubscriptionStatusCovered).Error)
+	_ = activeExpiredSub
+	_ = activeSub
+
+	expiredResult, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Active: "expired", Page: 1, PageSize: 20}, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, expiredResult.Total)
+	require.ElementsMatch(t, []int{expiredUser.Id, activeExpiredUser.Id}, []int{expiredResult.Items[0].UserId, expiredResult.Items[1].UserId})
+
+	allResult, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Active: "all", Page: 1, PageSize: 20}, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 3, allResult.Total)
+	ids := make([]int, 0, len(allResult.Items))
+	for _, row := range allResult.Items {
+		ids = append(ids, row.UserId)
+	}
+	require.ElementsMatch(t, []int{expiredUser.Id, activeExpiredUser.Id, activeUser.Id}, ids)
+}
+
+func TestAdjustValuePackageResetCountRejectsInvalidAndNoopWithoutLedger(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3045, UserGroupTiyan)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, ResetCount: 2}).Error)
+
+	cases := []struct {
+		name   string
+		userID int
+		mode   ValuePackageResetCountAdjustMode
+		value  int
+	}{
+		{name: "missing user", userID: 999999, mode: ValuePackageResetCountAdjustModeAdd, value: 1},
+		{name: "add zero", userID: user.Id, mode: ValuePackageResetCountAdjustModeAdd, value: 0},
+		{name: "subtract zero", userID: user.Id, mode: ValuePackageResetCountAdjustModeSubtract, value: 0},
+		{name: "set same", userID: user.Id, mode: ValuePackageResetCountAdjustModeSet, value: 2},
+		{name: "invalid mode", userID: user.Id, mode: ValuePackageResetCountAdjustMode("bad"), value: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := AdjustValuePackageResetCount(tc.userID, tc.mode, tc.value, "invalid", 9001)
+			require.Error(t, err)
+		})
+	}
+
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.Equal(t, 2, pref.ResetCount)
+	var ledgerCount int64
+	require.NoError(t, DB.Model(&ValuePackageResetCountLedger{}).Count(&ledgerCount).Error)
+	require.Zero(t, ledgerCount)
+	var orphanPrefCount int64
+	require.NoError(t, DB.Model(&UserValuePackagePreference{}).Where("user_id = ?", 999999).Count(&orphanPrefCount).Error)
+	require.Zero(t, orphanPrefCount)
+}
+
 func TestRefundSubscriptionPreConsumeRevokesValuePackageUsageReservation(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3312, UserGroupTiyan)

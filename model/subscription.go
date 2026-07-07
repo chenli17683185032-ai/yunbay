@@ -1450,10 +1450,6 @@ const (
 	ValuePackageResetCountAdjustModeSet      ValuePackageResetCountAdjustMode = "set"
 	ValuePackageResetCountAdjustModeAdd      ValuePackageResetCountAdjustMode = "add"
 	ValuePackageResetCountAdjustModeSubtract ValuePackageResetCountAdjustMode = "subtract"
-
-	ValuePackageResetCountAdjustSet      = ValuePackageResetCountAdjustModeSet
-	ValuePackageResetCountAdjustAdd      = ValuePackageResetCountAdjustModeAdd
-	ValuePackageResetCountAdjustSubtract = ValuePackageResetCountAdjustModeSubtract
 )
 
 type ValuePackageResetCountAdjustment struct {
@@ -1529,6 +1525,86 @@ func ListValuePackageManagementRows(filter ValuePackageManagementFilter, now int
 	return listValuePackageManagementRowsTx(DB, filter, now)
 }
 
+type valuePackageUsageDetailsAccumulator struct {
+	Used5h              int64
+	Earliest5hCreatedAt int64
+	Used7d              int64
+	Earliest7dCreatedAt int64
+}
+
+func buildValuePackageUsageSummaryFromDetails(sub *UserSubscription, plan *SubscriptionPlan, usageDetails *ValuePackageWindowUsageDetails, now int64) *ValuePackageUsageSummary {
+	if sub == nil || plan == nil || usageDetails == nil {
+		return nil
+	}
+	limited5h := plan.Limit5hAmount > 0 && usageDetails.Used5h >= plan.Limit5hAmount
+	limited7d := plan.Limit7dAmount > 0 && usageDetails.Used7d >= plan.Limit7dAmount
+	totalRemaining := int64(0)
+	if sub.AmountTotal > 0 && sub.AmountTotal > sub.AmountUsed {
+		totalRemaining = sub.AmountTotal - sub.AmountUsed
+	}
+	summary := &ValuePackageUsageSummary{
+		TotalUsed:      sub.AmountUsed,
+		TotalLimit:     sub.AmountTotal,
+		TotalRemaining: totalRemaining,
+		TotalPercent:   valuePackagePercent(sub.AmountUsed, sub.AmountTotal),
+		Used5h:         usageDetails.Used5h,
+		Limit5h:        plan.Limit5hAmount,
+		Percent5h:      valuePackagePercent(usageDetails.Used5h, plan.Limit5hAmount),
+		Limited5h:      limited5h,
+		Used7d:         usageDetails.Used7d,
+		Limit7d:        plan.Limit7dAmount,
+		Percent7d:      valuePackagePercent(usageDetails.Used7d, plan.Limit7dAmount),
+		Limited7d:      limited7d,
+	}
+	if plan.Limit5hAmount > 0 {
+		summary.ResetAt5h = usageDetails.ResetAt5h
+		summary.ResetSeconds5h = usageDetails.ResetSeconds5h
+	}
+	if plan.Limit7dAmount > 0 {
+		summary.ResetAt7d = usageDetails.ResetAt7d
+		summary.ResetSeconds7d = usageDetails.ResetSeconds7d
+	}
+	switch {
+	case sub.AmountTotal > 0 && sub.AmountUsed >= sub.AmountTotal:
+		summary.Exhausted = true
+		summary.ExhaustedReason = ValuePackageExhaustedReasonTotal
+	case limited5h:
+		summary.Exhausted = true
+		summary.ExhaustedReason = ValuePackageExhaustedReason5h
+	case limited7d:
+		summary.Exhausted = true
+		summary.ExhaustedReason = ValuePackageExhaustedReason7d
+	}
+	if summary.Exhausted {
+		summary.ExhaustedMessage = ValuePackageQuotaExhaustedUserMessage
+	}
+	return summary
+}
+
+func valuePackageUsageDetailsFromAccumulator(acc valuePackageUsageDetailsAccumulator, now int64) *ValuePackageWindowUsageDetails {
+	details := &ValuePackageWindowUsageDetails{
+		Used5h:              acc.Used5h,
+		Earliest5hCreatedAt: acc.Earliest5hCreatedAt,
+		Used7d:              acc.Used7d,
+		Earliest7dCreatedAt: acc.Earliest7dCreatedAt,
+	}
+	if details.Used5h > 0 && details.Earliest5hCreatedAt > 0 {
+		details.ResetAt5h = details.Earliest5hCreatedAt + 5*3600
+		details.ResetSeconds5h = details.ResetAt5h - now
+		if details.ResetSeconds5h < 0 {
+			details.ResetSeconds5h = 0
+		}
+	}
+	if details.Used7d > 0 && details.Earliest7dCreatedAt > 0 {
+		details.ResetAt7d = details.Earliest7dCreatedAt + 7*24*3600
+		details.ResetSeconds7d = details.ResetAt7d - now
+		if details.ResetSeconds7d < 0 {
+			details.ResetSeconds7d = 0
+		}
+	}
+	return details
+}
+
 func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagementFilter, now int64) (*ValuePackageManagementResult, error) {
 	if tx == nil {
 		tx = DB
@@ -1539,8 +1615,10 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 	if filter.Page <= 0 {
 		filter.Page = 1
 	}
-	if filter.PageSize <= 0 || filter.PageSize > 100 {
+	if filter.PageSize <= 0 {
 		filter.PageSize = 20
+	} else if filter.PageSize > 100 {
+		filter.PageSize = 100
 	}
 	active := strings.TrimSpace(filter.Active)
 	if active == "" {
@@ -1549,67 +1627,148 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 	packageType := strings.TrimSpace(filter.PackageType)
 	keyword := strings.ToLower(strings.TrimSpace(filter.Keyword))
 
-	query := tx.Model(&UserSubscription{})
-	switch active {
-	case "expired":
-		query = query.Where("end_time <= ?", now)
-	case "all":
-	default:
-		query = query.Where("status = ? AND end_time > ?", UserSubscriptionStatusActive, now)
-	}
-
-	var subs []UserSubscription
-	if err := query.Order("end_time desc, id desc").Find(&subs).Error; err != nil {
-		return nil, err
-	}
-
-	items := make([]ValuePackageManagementRow, 0, len(subs))
-	for _, sub := range subs {
-		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue
-			}
-			return nil, err
+	buildQuery := func() *gorm.DB {
+		query := tx.Model(&UserSubscription{}).
+			Joins("JOIN subscription_plans ON subscription_plans.id = user_subscriptions.plan_id").
+			Joins("JOIN users ON users.id = user_subscriptions.user_id").
+			Where("subscription_plans.plan_kind = ?", SubscriptionPlanKindValuePackage)
+		if packageType != "" && packageType != "all" {
+			query = query.Where("subscription_plans.package_type = ?", packageType)
 		}
-		normalizeValuePackagePlan(plan)
-		if !plan.IsValuePackage() {
-			continue
-		}
-		if packageType != "" && packageType != "all" && plan.PackageType != packageType {
-			continue
-		}
-
-		var user User
-		userResult := tx.Select("id", "username", "display_name").Where("id = ?", sub.UserId).Limit(1).Find(&user)
-		if userResult.Error != nil {
-			return nil, userResult.Error
-		}
-		if userResult.RowsAffected == 0 {
-			continue
+		switch active {
+		case "expired":
+			query = query.Where("(user_subscriptions.status = ? OR (user_subscriptions.status = ? AND user_subscriptions.end_time <= ?))", UserSubscriptionStatusExpired, UserSubscriptionStatusActive, now)
+		case "all":
+			query = query.Where("(user_subscriptions.status = ? OR user_subscriptions.status = ?)", UserSubscriptionStatusExpired, UserSubscriptionStatusActive)
+		default:
+			query = query.Where("user_subscriptions.status = ? AND user_subscriptions.end_time > ?", UserSubscriptionStatusActive, now)
 		}
 		if keyword != "" {
-			idText := strconv.Itoa(user.Id)
-			username := strings.ToLower(user.Username)
-			displayName := strings.ToLower(user.DisplayName)
-			if !strings.Contains(username, keyword) && !strings.Contains(displayName, keyword) && !strings.Contains(idText, keyword) {
-				continue
+			like := "%" + keyword + "%"
+			if keywordUserId, err := strconv.Atoi(keyword); err == nil {
+				query = query.Where("(LOWER(users.username) LIKE ? OR LOWER(users.display_name) LIKE ? OR users.id = ?)", like, like, keywordUserId)
+			} else {
+				query = query.Where("(LOWER(users.username) LIKE ? OR LOWER(users.display_name) LIKE ?)", like, like)
 			}
 		}
+		return query
+	}
 
-		pref := UserValuePackagePreference{UserId: user.Id}
-		prefResult := tx.Where("user_id = ?", user.Id).Limit(1).Find(&pref)
-		if prefResult.Error != nil {
-			return nil, prefResult.Error
+	var total int64
+	if err := buildQuery().Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if total == 0 {
+		return &ValuePackageManagementResult{Items: []ValuePackageManagementRow{}, Total: 0}, nil
+	}
+
+	var pageSubs []UserSubscription
+	if err := buildQuery().
+		Select("user_subscriptions.*").
+		Order("user_subscriptions.end_time desc, user_subscriptions.id desc").
+		Limit(filter.PageSize).
+		Offset((filter.Page - 1) * filter.PageSize).
+		Find(&pageSubs).Error; err != nil {
+		return nil, err
+	}
+	if len(pageSubs) == 0 {
+		return &ValuePackageManagementResult{Items: []ValuePackageManagementRow{}, Total: total}, nil
+	}
+
+	subIDs := make([]int, 0, len(pageSubs))
+	userIDs := make([]int, 0, len(pageSubs))
+	planIDs := make([]int, 0, len(pageSubs))
+	for _, sub := range pageSubs {
+		subIDs = append(subIDs, sub.Id)
+		userIDs = append(userIDs, sub.UserId)
+		planIDs = append(planIDs, sub.PlanId)
+	}
+
+	var users []User
+	if err := tx.Select("id", "username", "display_name").Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	usersByID := make(map[int]User, len(users))
+	for _, user := range users {
+		usersByID[user.Id] = user
+	}
+
+	var plans []SubscriptionPlan
+	if err := tx.Where("id IN ?", planIDs).Find(&plans).Error; err != nil {
+		return nil, err
+	}
+	plansByID := make(map[int]SubscriptionPlan, len(plans))
+	for _, plan := range plans {
+		normalizeValuePackagePlan(&plan)
+		if plan.IsValuePackage() {
+			plansByID[plan.Id] = plan
 		}
-		usage, err := buildValuePackageUsageSummaryTx(tx, user.Id, &sub, plan, now)
-		if err != nil {
-			return nil, err
+	}
+
+	var prefs []UserValuePackagePreference
+	if err := tx.Where("user_id IN ?", userIDs).Find(&prefs).Error; err != nil {
+		return nil, err
+	}
+	prefsByUserID := make(map[int]UserValuePackagePreference, len(prefs))
+	for _, pref := range prefs {
+		prefsByUserID[pref.UserId] = pref
+	}
+
+	var resetRows []struct {
+		UserSubscriptionId int
+		ResetAt            int64
+	}
+	if err := tx.Model(&ValuePackageQuotaReset{}).
+		Where("user_subscription_id IN ? AND reset_at <= ?", subIDs, now).
+		Select("user_subscription_id, COALESCE(MAX(reset_at), 0) AS reset_at").
+		Group("user_subscription_id").
+		Scan(&resetRows).Error; err != nil {
+		return nil, err
+	}
+	lastResetBySubID := make(map[int]int64, len(resetRows))
+	for _, row := range resetRows {
+		lastResetBySubID[row.UserSubscriptionId] = row.ResetAt
+	}
+
+	var usageRecords []ValuePackageUsageRecord
+	if err := tx.Where("user_subscription_id IN ? AND created_at >= ? AND quota > ?", subIDs, now-7*24*3600, 0).
+		Find(&usageRecords).Error; err != nil {
+		return nil, err
+	}
+	usageBySubID := make(map[int]valuePackageUsageDetailsAccumulator, len(pageSubs))
+	for _, record := range usageRecords {
+		lastResetAt := lastResetBySubID[record.UserSubscriptionId]
+		if record.CreatedAt < lastResetAt {
+			continue
 		}
-		lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, user.Id, sub.Id, now)
-		if err != nil {
-			return nil, err
+		acc := usageBySubID[record.UserSubscriptionId]
+		if record.CreatedAt >= now-5*3600 {
+			acc.Used5h += record.Quota
+			if acc.Earliest5hCreatedAt == 0 || record.CreatedAt < acc.Earliest5hCreatedAt {
+				acc.Earliest5hCreatedAt = record.CreatedAt
+			}
 		}
+		if record.CreatedAt >= now-7*24*3600 {
+			acc.Used7d += record.Quota
+			if acc.Earliest7dCreatedAt == 0 || record.CreatedAt < acc.Earliest7dCreatedAt {
+				acc.Earliest7dCreatedAt = record.CreatedAt
+			}
+		}
+		usageBySubID[record.UserSubscriptionId] = acc
+	}
+
+	items := make([]ValuePackageManagementRow, 0, len(pageSubs))
+	for _, sub := range pageSubs {
+		user, ok := usersByID[sub.UserId]
+		if !ok {
+			continue
+		}
+		plan, ok := plansByID[sub.PlanId]
+		if !ok {
+			continue
+		}
+		pref := prefsByUserID[user.Id]
+		usage := buildValuePackageUsageSummaryFromDetails(&sub, &plan, valuePackageUsageDetailsFromAccumulator(usageBySubID[sub.Id], now), now)
 		items = append(items, ValuePackageManagementRow{
 			UserId:             user.Id,
 			Username:           user.Username,
@@ -1623,20 +1782,11 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 			Enabled:            pref.Enabled && pref.ActiveUserSubscriptionId == sub.Id,
 			ResetCount:         pref.ResetCount,
 			Usage:              usage,
-			LastResetAt:        lastResetAt,
+			LastResetAt:        lastResetBySubID[sub.Id],
 		})
 	}
 
-	total := int64(len(items))
-	start := (filter.Page - 1) * filter.PageSize
-	if start >= len(items) {
-		return &ValuePackageManagementResult{Items: []ValuePackageManagementRow{}, Total: total}, nil
-	}
-	end := start + filter.PageSize
-	if end > len(items) {
-		end = len(items)
-	}
-	return &ValuePackageManagementResult{Items: items[start:end], Total: total}, nil
+	return &ValuePackageManagementResult{Items: items, Total: total}, nil
 }
 
 func listActiveValuePackageUsageRowsTx(tx *gorm.DB, now int64) ([]ValuePackageUsageRow, error) {
@@ -1944,49 +2094,7 @@ func buildValuePackageUsageSummaryTx(tx *gorm.DB, userId int, sub *UserSubscript
 	if err != nil {
 		return nil, err
 	}
-	limited5h := plan.Limit5hAmount > 0 && usageDetails.Used5h >= plan.Limit5hAmount
-	limited7d := plan.Limit7dAmount > 0 && usageDetails.Used7d >= plan.Limit7dAmount
-	totalRemaining := int64(0)
-	if sub.AmountTotal > 0 && sub.AmountTotal > sub.AmountUsed {
-		totalRemaining = sub.AmountTotal - sub.AmountUsed
-	}
-	summary := &ValuePackageUsageSummary{
-		TotalUsed:      sub.AmountUsed,
-		TotalLimit:     sub.AmountTotal,
-		TotalRemaining: totalRemaining,
-		TotalPercent:   valuePackagePercent(sub.AmountUsed, sub.AmountTotal),
-		Used5h:         usageDetails.Used5h,
-		Limit5h:        plan.Limit5hAmount,
-		Percent5h:      valuePackagePercent(usageDetails.Used5h, plan.Limit5hAmount),
-		Limited5h:      limited5h,
-		Used7d:         usageDetails.Used7d,
-		Limit7d:        plan.Limit7dAmount,
-		Percent7d:      valuePackagePercent(usageDetails.Used7d, plan.Limit7dAmount),
-		Limited7d:      limited7d,
-	}
-	if plan.Limit5hAmount > 0 {
-		summary.ResetAt5h = usageDetails.ResetAt5h
-		summary.ResetSeconds5h = usageDetails.ResetSeconds5h
-	}
-	if plan.Limit7dAmount > 0 {
-		summary.ResetAt7d = usageDetails.ResetAt7d
-		summary.ResetSeconds7d = usageDetails.ResetSeconds7d
-	}
-	switch {
-	case sub.AmountTotal > 0 && sub.AmountUsed >= sub.AmountTotal:
-		summary.Exhausted = true
-		summary.ExhaustedReason = ValuePackageExhaustedReasonTotal
-	case limited5h:
-		summary.Exhausted = true
-		summary.ExhaustedReason = ValuePackageExhaustedReason5h
-	case limited7d:
-		summary.Exhausted = true
-		summary.ExhaustedReason = ValuePackageExhaustedReason7d
-	}
-	if summary.Exhausted {
-		summary.ExhaustedMessage = ValuePackageQuotaExhaustedUserMessage
-	}
-	return summary, nil
+	return buildValuePackageUsageSummaryFromDetails(sub, plan, usageDetails, now), nil
 }
 
 func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedPaymentProvider string, actualPaymentMethod string, confirmedCover bool) (*UserSubscription, error) {
@@ -2256,6 +2364,21 @@ func DeactivateValuePackage(userId int) (*ValuePackageState, error) {
 	return state, err
 }
 
+func ensureExistingUserForUpdateTx(tx *gorm.DB, userId int) error {
+	if tx == nil {
+		tx = DB
+	}
+	if userId <= 0 {
+		return errors.New("invalid user id")
+	}
+	var user User
+	err := withUpdateLock(tx).Select("id").Where("id = ?", userId).First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return errors.New("用户不存在")
+	}
+	return err
+}
+
 func ensureValuePackagePreferenceForUpdateTx(tx *gorm.DB, userId int) (*UserValuePackagePreference, error) {
 	if tx == nil {
 		tx = DB
@@ -2288,6 +2411,9 @@ func AdjustValuePackageResetCount(userId int, mode ValuePackageResetCountAdjustM
 	reason = strings.TrimSpace(reason)
 	var adjustment *ValuePackageResetCountAdjustment
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := ensureExistingUserForUpdateTx(tx, userId); err != nil {
+			return err
+		}
 		pref, err := ensureValuePackagePreferenceForUpdateTx(tx, userId)
 		if err != nil {
 			return err
@@ -2300,9 +2426,15 @@ func AdjustValuePackageResetCount(userId int, mode ValuePackageResetCountAdjustM
 			newCount = value
 			source = ValuePackageResetCountLedgerSourceAdminSet
 		case ValuePackageResetCountAdjustModeAdd:
+			if value <= 0 {
+				return errors.New("调整次数必须大于 0")
+			}
 			newCount = oldCount + value
 			source = ValuePackageResetCountLedgerSourceAdminAdd
 		case ValuePackageResetCountAdjustModeSubtract:
+			if value <= 0 {
+				return errors.New("调整次数必须大于 0")
+			}
 			newCount = oldCount - value
 			if newCount < 0 {
 				newCount = 0
@@ -2312,6 +2444,9 @@ func AdjustValuePackageResetCount(userId int, mode ValuePackageResetCountAdjustM
 			return errors.New("无效的调整模式")
 		}
 		delta := newCount - oldCount
+		if delta == 0 {
+			return errors.New("重置次数没有变化")
+		}
 		if err := tx.Model(&UserValuePackagePreference{}).Where("user_id = ?", userId).Update("reset_count", newCount).Error; err != nil {
 			return err
 		}

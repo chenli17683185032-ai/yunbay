@@ -46,7 +46,7 @@ func setupValuePackageBillingSessionTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.ValuePackageUsageRecord{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.UserValuePackagePreference{}, &model.ValuePackageUsageRecord{}, &model.ValuePackageQuotaReset{}, &model.ValuePackageResetCountLedger{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()

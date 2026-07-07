@@ -55,6 +55,8 @@ func TestMain(m *testing.M) {
 		&model.UserSubscription{},
 		&model.UserValuePackagePreference{},
 		&model.ValuePackageUsageRecord{},
+		&model.ValuePackageQuotaReset{},
+		&model.ValuePackageResetCountLedger{},
 		&model.SubscriptionPreConsumeRecord{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())

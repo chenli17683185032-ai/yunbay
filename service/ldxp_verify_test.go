@@ -42,7 +42,7 @@ func setupLdxpVerifyValuePackageServiceTest(t *testing.T) {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.SubscriptionOrder{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}, &model.Redemption{}, &model.TopUp{}, &model.Log{}, &model.AffiliateCommission{}, &model.AffiliateWithdrawal{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.SubscriptionOrder{}, &model.UserSubscription{}, &model.UserValuePackagePreference{}, &model.ValuePackageQuotaReset{}, &model.ValuePackageResetCountLedger{}, &model.LdxpTopupSession{}, &model.LdxpMailEvent{}, &model.Redemption{}, &model.TopUp{}, &model.Log{}, &model.AffiliateCommission{}, &model.AffiliateWithdrawal{}))
 	ensureLdxpSessionSubscriptionPlanTable(t)
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()

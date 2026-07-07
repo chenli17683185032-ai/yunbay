@@ -17,7 +17,7 @@ const defaultOrderManagementRangeSeconds = int64(7 * 24 * 60 * 60)
 
 type valuePackageResetCountAdjustRequest struct {
 	Mode   string `json:"mode"`
-	Value  int    `json:"value"`
+	Value  *int   `json:"value"`
 	Reason string `json:"reason"`
 }
 
@@ -223,7 +223,11 @@ func AdminAdjustValuePackageResetCount(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
-	result, err := model.AdjustValuePackageResetCount(userId, model.ValuePackageResetCountAdjustMode(req.Mode), req.Value, req.Reason, c.GetInt("id"))
+	if req.Value == nil {
+		common.ApiErrorMsg(c, "重置次数不能为空")
+		return
+	}
+	result, err := model.AdjustValuePackageResetCount(userId, model.ValuePackageResetCountAdjustMode(req.Mode), *req.Value, req.Reason, c.GetInt("id"))
 	if err != nil {
 		common.ApiError(c, err)
 		return
