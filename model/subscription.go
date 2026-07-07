@@ -2201,12 +2201,13 @@ func ConsumeValuePackageResetCount(userId int, userSubscriptionId int, resetAt i
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
-	if resetAt <= 0 {
-		resetAt = common.GetTimestamp()
-	}
 	note = strings.TrimSpace(note)
 	var state *ValuePackageState
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		dbNow := getDBTimestampTx(tx)
+		if resetAt <= 0 || resetAt > dbNow {
+			resetAt = dbNow
+		}
 		pref, err := ensureValuePackagePreferenceForUpdateTx(tx, userId)
 		if err != nil {
 			return err
@@ -2403,7 +2404,7 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 			if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < delta {
 				return fmt.Errorf("subscription quota insufficient: %s, need=%d", ValuePackageQuotaExhaustedUserMessage, delta)
 			}
-			lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, userId, sub.Id)
+			lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, userId, sub.Id, now)
 			if err != nil {
 				return err
 			}
@@ -2414,17 +2415,33 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 				return err
 			}
 			adjusted5h := used5h
+			countTarget5h := true
+			if currentCreatedAt > 0 && currentCreatedAt < start5h {
+				countTarget5h = false
+			}
 			if currentCreatedAt >= start5h {
 				adjusted5h -= currentQuota
 			}
 			adjusted7d := used7d
+			countTarget7d := true
+			if currentCreatedAt > 0 && currentCreatedAt < start7d {
+				countTarget7d = false
+			}
 			if currentCreatedAt >= start7d {
 				adjusted7d -= currentQuota
 			}
-			if plan.Limit5hAmount > 0 && adjusted5h+targetQuota > plan.Limit5hAmount {
+			next5h := adjusted5h
+			if countTarget5h {
+				next5h += targetQuota
+			}
+			next7d := adjusted7d
+			if countTarget7d {
+				next7d += targetQuota
+			}
+			if plan.Limit5hAmount > 0 && next5h > plan.Limit5hAmount {
 				return fmt.Errorf("subscription quota insufficient: %s, 5h rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
 			}
-			if plan.Limit7dAmount > 0 && adjusted7d+targetQuota > plan.Limit7dAmount {
+			if plan.Limit7dAmount > 0 && next7d > plan.Limit7dAmount {
 				return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
 			}
 		}
@@ -2496,13 +2513,16 @@ func GetValuePackageWindowUsageDetails(userId int, userSubscriptionId int, now i
 	return getValuePackageWindowUsageDetailsTx(DB, userId, userSubscriptionId, now)
 }
 
-func getLastValuePackageQuotaResetAtTx(tx *gorm.DB, userId int, userSubscriptionId int) (int64, error) {
+func getLastValuePackageQuotaResetAtTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (int64, error) {
 	if tx == nil {
 		tx = DB
 	}
+	if now <= 0 {
+		now = getDBTimestampTx(tx)
+	}
 	var resetAt int64
 	err := tx.Model(&ValuePackageQuotaReset{}).
-		Where("user_id = ? AND user_subscription_id = ?", userId, userSubscriptionId).
+		Where("user_id = ? AND user_subscription_id = ? AND reset_at <= ?", userId, userSubscriptionId, now).
 		Select("COALESCE(MAX(reset_at), 0)").
 		Scan(&resetAt).Error
 	return resetAt, err
@@ -2523,7 +2543,7 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	if now <= 0 {
 		now = getDBTimestampTx(tx)
 	}
-	lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, userId, userSubscriptionId)
+	lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, userId, userSubscriptionId, now)
 	if err != nil {
 		return nil, err
 	}

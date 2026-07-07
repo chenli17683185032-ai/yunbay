@@ -480,6 +480,53 @@ func TestValuePackageWindowUsageCountsUsageAfterLastReset(t *testing.T) {
 	require.EqualValues(t, 25, details.Used7d)
 }
 
+func TestValuePackageWindowUsageIgnoresFutureResetEvents(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3014, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-7200, now+3600)
+
+	require.NoError(t, DB.Create(&ValuePackageQuotaReset{
+		UserId:             user.Id,
+		UserSubscriptionId: sub.Id,
+		PlanId:             day.Id,
+		PackageType:        day.PackageType,
+		ResetAt:            now + 3600,
+		Source:             ValuePackageQuotaResetSourceUserConsumeCount,
+		CreatedByUserId:    user.Id,
+		Note:               "future reset must not clear current window",
+	}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "current-usage-before-future-reset", Quota: 40, CreatedAt: now - 900}))
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 40, details.Used5h)
+	require.EqualValues(t, now-900, details.Earliest5hCreatedAt)
+	require.EqualValues(t, 40, details.Used7d)
+	require.EqualValues(t, now-900, details.Earliest7dCreatedAt)
+}
+
+func TestConsumeValuePackageResetCountClampsFutureResetAtToNow(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3015, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-100, now+3600)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 1}).Error)
+
+	state, err := ConsumeValuePackageResetCount(user.Id, sub.Id, now+3600, user.Id, "future reset clamp")
+
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	var reset ValuePackageQuotaReset
+	require.NoError(t, DB.Where("user_id = ? AND user_subscription_id = ?", user.Id, sub.Id).First(&reset).Error)
+	require.LessOrEqual(t, reset.ResetAt, common.GetTimestamp())
+	require.GreaterOrEqual(t, reset.ResetAt, now)
+}
+
 func TestConsumeValuePackageResetCountResetsShortWindowsOnly(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3012, UserGroupTiyan)
@@ -1516,6 +1563,53 @@ func TestReserveValuePackageUsageToTargetReplacesExistingRequestQuota(t *testing
 	require.NoError(t, err)
 	require.EqualValues(t, 20, used5h)
 	require.EqualValues(t, 20, used7d)
+}
+
+func TestReserveValuePackageUsageToTargetKeepsResetClearedRequestOutOfShortWindows(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3603, UserGroupVIP)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.ModelGroup = "month-card"
+	month.TotalAmount = 1000
+	month.Limit5hAmount = 50
+	month.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, month, now-7200, now+3600)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{
+		UserId:             user.Id,
+		UserSubscriptionId: sub.Id,
+		PlanId:             month.Id,
+		PackageType:        month.PackageType,
+		ModelGroup:         month.ModelGroup,
+		RequestId:          "reserve-target-before-reset",
+		Quota:              10,
+		CreatedAt:          now - 3600,
+	}))
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(10)).Error)
+	require.NoError(t, DB.Create(&ValuePackageQuotaReset{
+		UserId:             user.Id,
+		UserSubscriptionId: sub.Id,
+		PlanId:             month.Id,
+		PackageType:        month.PackageType,
+		ResetAt:            now - 1800,
+		Source:             ValuePackageQuotaResetSourceUserConsumeCount,
+		CreatedByUserId:    user.Id,
+	}).Error)
+
+	res, err := ReserveValuePackageUsageToTarget("reserve-target-before-reset", user.Id, sub.Id, 80)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 10, res.AmountUsedBefore)
+	require.EqualValues(t, 80, res.AmountUsedAfter)
+	var usageRecord ValuePackageUsageRecord
+	require.NoError(t, DB.Where("user_subscription_id = ? AND request_id = ?", sub.Id, "reserve-target-before-reset").First(&usageRecord).Error)
+	require.EqualValues(t, now-3600, usageRecord.CreatedAt)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, used5h)
+	require.EqualValues(t, 0, used7d)
 }
 
 func TestDecreaseUserQuotaIfEnoughDoesNotOverdraw(t *testing.T) {
