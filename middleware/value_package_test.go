@@ -345,6 +345,20 @@ func TestValuePackageMiddlewareAllowsRequestAfterQuotaReset(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"day-card"`)
 }
 
+func TestValuePackageMiddlewareAllowsAfterFixedFiveHourWindowExpires(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	now := common.GetTimestamp()
+	windowStart := now - 5*3600
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "fixed-window-first", Quota: 90, CreatedAt: windowStart}))
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "fixed-window-later", Quota: 10, CreatedAt: windowStart + 4*3600}))
+
+	recorder := runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"day-card"`)
+}
+
 func TestValuePackageLimitMessageFormatting(t *testing.T) {
 	tests := []struct {
 		name         string

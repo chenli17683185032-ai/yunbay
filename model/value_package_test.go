@@ -425,6 +425,52 @@ func TestValuePackageWindowUsageDetailsDoesNotExtendResetWithLaterUsage(t *testi
 	require.EqualValues(t, 7*24*3600-4*3600, details.ResetSeconds7d)
 }
 
+func TestValuePackageFiveHourWindowClearsAllUsageAtFirstUsageExpiry(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3016, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-8*3600, now+3600)
+	windowStart := now - 5*3600
+
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "fixed-window-first", Quota: 80, CreatedAt: windowStart}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "fixed-window-later", Quota: 15, CreatedAt: windowStart + 4*3600}))
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 0, details.Used5h)
+	require.EqualValues(t, 0, details.Earliest5hCreatedAt)
+	require.EqualValues(t, 0, details.ResetAt5h)
+	require.EqualValues(t, 0, details.ResetSeconds5h)
+	require.EqualValues(t, 95, details.Used7d)
+}
+
+func TestValuePackageFiveHourWindowRestartsFromNextUsageAfterClear(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3017, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-8*3600, now+3600)
+	expiredWindowStart := now - 6*3600
+	nextWindowStart := now - 30*60
+
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "expired-window-first", Quota: 80, CreatedAt: expiredWindowStart}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "expired-window-later", Quota: 15, CreatedAt: expiredWindowStart + 4*3600}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "next-window-first", Quota: 12, CreatedAt: nextWindowStart}))
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 12, details.Used5h)
+	require.EqualValues(t, nextWindowStart, details.Earliest5hCreatedAt)
+	require.EqualValues(t, nextWindowStart+5*3600, details.ResetAt5h)
+	require.EqualValues(t, 270*60, details.ResetSeconds5h)
+	require.EqualValues(t, 107, details.Used7d)
+}
+
 func TestValuePackageWindowUsageDetailsIgnoresZeroQuotaForReset(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3009, UserGroupTiyan)
@@ -1268,6 +1314,31 @@ func TestPreConsumeValuePackageSubscriptionChecksRollingReservationWindows(t *te
 	require.EqualValues(t, 100, used7d)
 }
 
+func TestPreConsumeValuePackageSubscriptionAllowsAfterFixedFiveHourWindowExpires(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3312, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 1000
+	day.Limit5hAmount = 100
+	day.Limit7dAmount = 500
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-8*3600, now+3600)
+	windowStart := now - 5*3600
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "preconsume-fixed-window-first", Quota: 90, CreatedAt: windowStart}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "preconsume-fixed-window-later", Quota: 10, CreatedAt: windowStart + 4*3600}))
+
+	result, err := PreConsumeValuePackageSubscription("preconsume-next-window", user.Id, sub.Id, 20)
+
+	require.NoError(t, err)
+	require.Equal(t, sub.Id, result.UserSubscriptionId)
+	require.EqualValues(t, 20, result.PreConsumed)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
+	require.NoError(t, err)
+	require.EqualValues(t, 20, used5h)
+	require.EqualValues(t, 120, used7d)
+}
+
 func TestRecordValuePackageUsageUpsertsBySubscriptionAndRequest(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3311, UserGroupTiyan)
@@ -1397,6 +1468,31 @@ func TestListValuePackageManagementRowsIncludesResetCountAndUsage(t *testing.T) 
 	require.True(t, row.Enabled)
 	require.NotNil(t, row.Usage)
 	require.EqualValues(t, 25, row.Usage.Used5h)
+}
+
+func TestListValuePackageManagementRowsUsesFixedFiveHourWindow(t *testing.T) {
+	setupValuePackageTestDB(t)
+	now := common.GetTimestamp()
+	plan := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	plan.Limit5hAmount = 100
+	plan.Limit7dAmount = 500
+	require.NoError(t, DB.Save(&plan).Error)
+	user := createValuePackageUser(t, 3021, UserGroupTiyan)
+	sub := createActiveValuePackageSub(t, user.Id, plan, now-8*3600, now+86400)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 1}).Error)
+	windowStart := now - 5*3600
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "mgmt-fixed-window-first", Quota: 80, CreatedAt: windowStart}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "mgmt-fixed-window-later", Quota: 15, CreatedAt: windowStart + 4*3600}))
+
+	result, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Keyword: user.Username, PackageType: "all", Active: "active", Page: 1, PageSize: 20}, now)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Total)
+	require.Len(t, result.Items, 1)
+	require.NotNil(t, result.Items[0].Usage)
+	require.EqualValues(t, 0, result.Items[0].Usage.Used5h)
+	require.EqualValues(t, 0, result.Items[0].Usage.ResetSeconds5h)
+	require.EqualValues(t, 95, result.Items[0].Usage.Used7d)
 }
 
 func TestListValuePackageManagementRowsFiltersAndPaginatesInDatabaseSemantics(t *testing.T) {

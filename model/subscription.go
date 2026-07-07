@@ -1525,11 +1525,54 @@ func ListValuePackageManagementRows(filter ValuePackageManagementFilter, now int
 	return listValuePackageManagementRowsTx(DB, filter, now)
 }
 
-type valuePackageUsageDetailsAccumulator struct {
-	Used5h              int64
-	Earliest5hCreatedAt int64
-	Used7d              int64
-	Earliest7dCreatedAt int64
+func valuePackageFixedWindowUsageDetails(records []ValuePackageUsageRecord, windowSeconds int64, now int64) (int64, int64) {
+	if windowSeconds <= 0 || now <= 0 || len(records) == 0 {
+		return 0, 0
+	}
+	var windowStart int64
+	var windowEnd int64
+	var expiredUntil int64
+	var used int64
+	for _, record := range records {
+		if record.Quota <= 0 || record.CreatedAt <= 0 || record.CreatedAt > now {
+			continue
+		}
+		if record.CreatedAt < expiredUntil {
+			continue
+		}
+		if windowStart == 0 || record.CreatedAt >= windowEnd {
+			windowStart = record.CreatedAt
+			windowEnd = windowStart + windowSeconds
+			used = 0
+		}
+		if now >= windowEnd {
+			expiredUntil = windowEnd
+			windowStart = 0
+			windowEnd = 0
+			used = 0
+			continue
+		}
+		used += record.Quota
+	}
+	if windowStart == 0 {
+		return 0, 0
+	}
+	return used, windowStart
+}
+
+func valuePackageRollingUsageDetails(records []ValuePackageUsageRecord) (int64, int64) {
+	var used int64
+	var earliestCreatedAt int64
+	for _, record := range records {
+		if record.Quota <= 0 || record.CreatedAt <= 0 {
+			continue
+		}
+		used += record.Quota
+		if earliestCreatedAt == 0 || record.CreatedAt < earliestCreatedAt {
+			earliestCreatedAt = record.CreatedAt
+		}
+	}
+	return used, earliestCreatedAt
 }
 
 func buildValuePackageUsageSummaryFromDetails(sub *UserSubscription, plan *SubscriptionPlan, usageDetails *ValuePackageWindowUsageDetails, now int64) *ValuePackageUsageSummary {
@@ -1581,13 +1624,10 @@ func buildValuePackageUsageSummaryFromDetails(sub *UserSubscription, plan *Subsc
 	return summary
 }
 
-func valuePackageUsageDetailsFromAccumulator(acc valuePackageUsageDetailsAccumulator, now int64) *ValuePackageWindowUsageDetails {
-	details := &ValuePackageWindowUsageDetails{
-		Used5h:              acc.Used5h,
-		Earliest5hCreatedAt: acc.Earliest5hCreatedAt,
-		Used7d:              acc.Used7d,
-		Earliest7dCreatedAt: acc.Earliest7dCreatedAt,
-	}
+func valuePackageUsageDetailsFromRecords(records []ValuePackageUsageRecord, now int64) *ValuePackageWindowUsageDetails {
+	details := &ValuePackageWindowUsageDetails{}
+	details.Used5h, details.Earliest5hCreatedAt = valuePackageFixedWindowUsageDetails(records, 5*3600, now)
+	details.Used7d, details.Earliest7dCreatedAt = valuePackageRollingUsageDetails(records)
 	if details.Used5h > 0 && details.Earliest5hCreatedAt > 0 {
 		details.ResetAt5h = details.Earliest5hCreatedAt + 5*3600
 		details.ResetSeconds5h = details.ResetAt5h - now
@@ -1732,29 +1772,17 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 
 	var usageRecords []ValuePackageUsageRecord
 	if err := tx.Where("user_subscription_id IN ? AND created_at >= ? AND quota > ?", subIDs, now-7*24*3600, 0).
+		Order("user_subscription_id asc, created_at asc, id asc").
 		Find(&usageRecords).Error; err != nil {
 		return nil, err
 	}
-	usageBySubID := make(map[int]valuePackageUsageDetailsAccumulator, len(pageSubs))
+	usageRecordsBySubID := make(map[int][]ValuePackageUsageRecord, len(pageSubs))
 	for _, record := range usageRecords {
 		lastResetAt := lastResetBySubID[record.UserSubscriptionId]
 		if record.CreatedAt < lastResetAt {
 			continue
 		}
-		acc := usageBySubID[record.UserSubscriptionId]
-		if record.CreatedAt >= now-5*3600 {
-			acc.Used5h += record.Quota
-			if acc.Earliest5hCreatedAt == 0 || record.CreatedAt < acc.Earliest5hCreatedAt {
-				acc.Earliest5hCreatedAt = record.CreatedAt
-			}
-		}
-		if record.CreatedAt >= now-7*24*3600 {
-			acc.Used7d += record.Quota
-			if acc.Earliest7dCreatedAt == 0 || record.CreatedAt < acc.Earliest7dCreatedAt {
-				acc.Earliest7dCreatedAt = record.CreatedAt
-			}
-		}
-		usageBySubID[record.UserSubscriptionId] = acc
+		usageRecordsBySubID[record.UserSubscriptionId] = append(usageRecordsBySubID[record.UserSubscriptionId], record)
 	}
 
 	items := make([]ValuePackageManagementRow, 0, len(pageSubs))
@@ -1768,7 +1796,7 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 			continue
 		}
 		pref := prefsByUserID[user.Id]
-		usage := buildValuePackageUsageSummaryFromDetails(&sub, &plan, valuePackageUsageDetailsFromAccumulator(usageBySubID[sub.Id], now), now)
+		usage := buildValuePackageUsageSummaryFromDetails(&sub, &plan, valuePackageUsageDetailsFromRecords(usageRecordsBySubID[sub.Id], now), now)
 		items = append(items, ValuePackageManagementRow{
 			UserId:             user.Id,
 			Username:           user.Username,
@@ -2825,21 +2853,16 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	if err != nil {
 		return nil, err
 	}
-	start5h := maxInt64(now-5*3600, lastResetAt)
 	start7d := maxInt64(now-7*24*3600, lastResetAt)
 	details := &ValuePackageWindowUsageDetails{}
-	var usage5h struct {
-		Used              int64
-		EarliestCreatedAt int64
-	}
-	if err := tx.Model(&ValuePackageUsageRecord{}).
-		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, start5h, 0).
-		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MIN(created_at), 0) AS earliest_created_at").
-		Scan(&usage5h).Error; err != nil {
+
+	var usageRecords []ValuePackageUsageRecord
+	if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND quota > ?", userId, userSubscriptionId, start7d, now, 0).
+		Order("created_at asc, id asc").
+		Find(&usageRecords).Error; err != nil {
 		return nil, err
 	}
-	details.Used5h = usage5h.Used
-	details.Earliest5hCreatedAt = usage5h.EarliestCreatedAt
+	details.Used5h, details.Earliest5hCreatedAt = valuePackageFixedWindowUsageDetails(usageRecords, 5*3600, now)
 	if details.Used5h > 0 && details.Earliest5hCreatedAt > 0 {
 		details.ResetAt5h = details.Earliest5hCreatedAt + 5*3600
 		details.ResetSeconds5h = details.ResetAt5h - now
@@ -2848,18 +2871,7 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 		}
 	}
 
-	var usage7d struct {
-		Used              int64
-		EarliestCreatedAt int64
-	}
-	if err := tx.Model(&ValuePackageUsageRecord{}).
-		Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND quota > ?", userId, userSubscriptionId, start7d, 0).
-		Select("COALESCE(SUM(quota), 0) AS used, COALESCE(MIN(created_at), 0) AS earliest_created_at").
-		Scan(&usage7d).Error; err != nil {
-		return nil, err
-	}
-	details.Used7d = usage7d.Used
-	details.Earliest7dCreatedAt = usage7d.EarliestCreatedAt
+	details.Used7d, details.Earliest7dCreatedAt = valuePackageRollingUsageDetails(usageRecords)
 	if details.Used7d > 0 && details.Earliest7dCreatedAt > 0 {
 		details.ResetAt7d = details.Earliest7dCreatedAt + 7*24*3600
 		details.ResetSeconds7d = details.ResetAt7d - now
