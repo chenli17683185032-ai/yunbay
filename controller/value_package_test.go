@@ -338,6 +338,10 @@ func valuePackageControllerRoutePattern(path string) string {
 
 func seedValuePackageControllerPlan(t *testing.T, packageType string, packageLevel int) model.SubscriptionPlan {
 	t.Helper()
+	limit7dAmount := int64(5000)
+	if packageType == model.ValuePackageTypeDay {
+		limit7dAmount = 0
+	}
 	plan := model.SubscriptionPlan{
 		Title:                 packageType + " value package",
 		PriceAmount:           9.9,
@@ -352,7 +356,7 @@ func seedValuePackageControllerPlan(t *testing.T, packageType string, packageLev
 		ModelGroup:            packageType + "-card",
 		ConcurrencyLimit:      1,
 		Limit5hAmount:         1000,
-		Limit7dAmount:         5000,
+		Limit7dAmount:         limit7dAmount,
 		Benefits:              "fast lane",
 		LdxpProductUrl:        "https://ldxp.example.test/value-package/" + packageType,
 		LdxpProductName:       packageType + " value package product",
@@ -367,11 +371,14 @@ func seedValuePackageControllerPlan(t *testing.T, packageType string, packageLev
 
 func validAdminValuePackagePlanForTest(packageType string) model.SubscriptionPlan {
 	level := model.ValuePackageLevelDay
+	limit7dAmount := int64(0)
 	switch packageType {
 	case model.ValuePackageTypeWeek:
 		level = model.ValuePackageLevelWeek
+		limit7dAmount = 1000
 	case model.ValuePackageTypeMonth:
 		level = model.ValuePackageLevelMonth
+		limit7dAmount = 1000
 	}
 	return model.SubscriptionPlan{
 		Title:                 packageType + " admin value package",
@@ -386,7 +393,7 @@ func validAdminValuePackagePlanForTest(packageType string) model.SubscriptionPla
 		ModelGroup:            packageType + "-card",
 		ConcurrencyLimit:      1,
 		Limit5hAmount:         100,
-		Limit7dAmount:         1000,
+		Limit7dAmount:         limit7dAmount,
 		LdxpProductUrl:        "https://ldxp.example.test/" + packageType,
 		LdxpProductName:       packageType + " product",
 		LdxpProductAmount:     9.9,
@@ -540,8 +547,9 @@ func TestGetValuePackageSelfReturnsCurrentState(t *testing.T) {
 	requireValuePackageUsageResetFields(t, usage)
 	assert.Equal(t, float64(10), usage["used_5h"])
 	assert.Equal(t, float64(10), usage["used_7d"])
+	assert.Equal(t, float64(0), usage["limit_7d"])
 	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
-	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_7d"), float64(0))
+	assert.Equal(t, float64(0), valuePackageUsageNumber(t, usage, "reset_seconds_7d"))
 }
 
 func TestGetValuePackagePurchaseIntentConfirmedCover(t *testing.T) {
@@ -801,8 +809,9 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	requireValuePackageUsageResetFields(t, usage)
 	assert.Equal(t, float64(10), usage["used_5h"])
 	assert.Equal(t, float64(10), usage["used_7d"])
+	assert.Equal(t, float64(0), usage["limit_7d"])
 	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
-	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_7d"), float64(0))
+	assert.Equal(t, float64(0), valuePackageUsageNumber(t, usage, "reset_seconds_7d"))
 
 	rec = valuePackageControllerRequest(DeactivateValuePackageSelf, http.MethodPost, "/value-packages/deactivate", nil, user.Id)
 	body = decodeTestResponse(t, rec)
@@ -1050,9 +1059,10 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageValidationCases(t 
 	setupValuePackageControllerTest(t)
 
 	tests := []struct {
-		name    string
-		mutate  func(*model.SubscriptionPlan)
-		message string
+		name        string
+		packageType string
+		mutate      func(*model.SubscriptionPlan)
+		message     string
 	}{
 		{
 			name: "invalid package type",
@@ -1083,7 +1093,15 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageValidationCases(t 
 			message: "套餐额度不能为负数",
 		},
 		{
-			name: "7d lower than 5h",
+			name: "day 7d limit unsupported",
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.Limit7dAmount = 1
+			},
+			message: "日卡不支持7天额度",
+		},
+		{
+			name:        "7d lower than 5h",
+			packageType: model.ValuePackageTypeWeek,
 			mutate: func(plan *model.SubscriptionPlan) {
 				plan.Limit5hAmount = 1000
 				plan.Limit7dAmount = 999
@@ -1094,7 +1112,11 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageValidationCases(t 
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+			packageType := tt.packageType
+			if packageType == "" {
+				packageType = model.ValuePackageTypeDay
+			}
+			plan := validAdminValuePackagePlanForTest(packageType)
 			tt.mutate(&plan)
 
 			rec := valuePackageControllerRequest(AdminCreateSubscriptionPlan, http.MethodPost, "/subscription/admin/plans", gin.H{"plan": plan}, 1)

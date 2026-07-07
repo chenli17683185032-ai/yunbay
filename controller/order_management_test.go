@@ -451,7 +451,7 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 		ModelGroup:      "day-card",
 		TotalAmount:     2000,
 		Limit5hAmount:   500,
-		Limit7dAmount:   1000,
+		Limit7dAmount:   0,
 		PriceAmount:     3.9,
 		AllowBalancePay: nil,
 	}
@@ -480,9 +480,9 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 	assert.EqualValues(t, 50, row.Usage.Used5h)
 	assert.EqualValues(t, 120, row.Usage.Used7d)
 	assert.EqualValues(t, 500, row.Usage.Limit5h)
-	assert.EqualValues(t, 1000, row.Usage.Limit7d)
+	assert.EqualValues(t, 0, row.Usage.Limit7d)
 	assert.Greater(t, row.Usage.ResetSeconds5h, int64(0))
-	assert.Greater(t, row.Usage.ResetSeconds7d, int64(0))
+	assert.EqualValues(t, 0, row.Usage.ResetSeconds7d)
 	assert.False(t, row.Usage.Limited5h)
 	assert.False(t, row.Usage.Limited7d)
 
@@ -497,7 +497,7 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 	require.True(t, ok)
 	requireValuePackageUsageResetFields(t, usage)
 	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
-	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_7d"), float64(0))
+	assert.Equal(t, float64(0), valuePackageUsageNumber(t, usage, "reset_seconds_7d"))
 	assert.Equal(t, false, usage["limited_5h"])
 	assert.Equal(t, false, usage["limited_7d"])
 }

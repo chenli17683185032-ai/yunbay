@@ -324,21 +324,7 @@ func (p *SubscriptionPlan) NormalizeDefaults() {
 	}
 	if p.PlanKind == SubscriptionPlanKindValuePackage {
 		p.Currency = "CNY"
-		switch p.PackageType {
-		case ValuePackageTypeDay:
-			p.DurationUnit = SubscriptionDurationDay
-			p.DurationValue = 1
-			p.CustomSeconds = 0
-			p.Limit7dAmount = 0
-		case ValuePackageTypeWeek:
-			p.DurationUnit = SubscriptionDurationDay
-			p.DurationValue = 7
-			p.CustomSeconds = 0
-		case ValuePackageTypeMonth:
-			p.DurationUnit = SubscriptionDurationDay
-			p.DurationValue = 30
-			p.CustomSeconds = 0
-		}
+		normalizeValuePackageFixedDurationFields(p)
 	} else {
 		p.Currency = "USD"
 	}
@@ -1329,6 +1315,16 @@ func normalizeValuePackagePlan(plan *SubscriptionPlan) {
 			plan.PackageLevel = ValuePackageLevelMonth
 		}
 	}
+	normalizeValuePackageFixedDurationFields(plan)
+	if plan.ConcurrencyLimit <= 0 {
+		plan.ConcurrencyLimit = 1
+	}
+}
+
+func normalizeValuePackageFixedDurationFields(plan *SubscriptionPlan) {
+	if plan == nil || !plan.IsValuePackage() {
+		return
+	}
 	switch plan.PackageType {
 	case ValuePackageTypeDay:
 		plan.DurationUnit = SubscriptionDurationDay
@@ -1343,9 +1339,6 @@ func normalizeValuePackagePlan(plan *SubscriptionPlan) {
 		plan.DurationUnit = SubscriptionDurationDay
 		plan.DurationValue = 30
 		plan.CustomSeconds = 0
-	}
-	if plan.ConcurrencyLimit <= 0 {
-		plan.ConcurrencyLimit = 1
 	}
 }
 

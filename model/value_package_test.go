@@ -403,18 +403,18 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 
 func TestValuePackageAnchoredWindowUsesSubscriptionStartAndClampsToEnd(t *testing.T) {
 	start := int64(1_700_000_000)
-	end := start + 30*24*3600
+	end := start + valuePackageMonthSeconds
 
-	first := calcValuePackageAnchoredWindow(start, end, 7*24*3600, start+3*24*3600)
+	first := calcValuePackageAnchoredWindow(start, end, valuePackage7dWindowSeconds, start+3*valuePackageDaySeconds)
 	require.EqualValues(t, start, first.Start)
-	require.EqualValues(t, start+7*24*3600, first.End)
+	require.EqualValues(t, start+valuePackage7dWindowSeconds, first.End)
 
-	second := calcValuePackageAnchoredWindow(start, end, 7*24*3600, start+8*24*3600)
-	require.EqualValues(t, start+7*24*3600, second.Start)
-	require.EqualValues(t, start+14*24*3600, second.End)
+	second := calcValuePackageAnchoredWindow(start, end, valuePackage7dWindowSeconds, start+8*valuePackageDaySeconds)
+	require.EqualValues(t, start+valuePackage7dWindowSeconds, second.Start)
+	require.EqualValues(t, start+2*valuePackage7dWindowSeconds, second.End)
 
-	shortFinal := calcValuePackageAnchoredWindow(start, end, 7*24*3600, start+29*24*3600)
-	require.EqualValues(t, start+28*24*3600, shortFinal.Start)
+	shortFinal := calcValuePackageAnchoredWindow(start, end, valuePackage7dWindowSeconds, start+29*valuePackageDaySeconds)
+	require.EqualValues(t, start+4*valuePackage7dWindowSeconds, shortFinal.Start)
 	require.EqualValues(t, end, shortFinal.End)
 }
 

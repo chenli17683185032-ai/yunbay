@@ -171,6 +171,8 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	plan.LdxpProductUrl = strings.TrimSpace(plan.LdxpProductUrl)
 	plan.LdxpProductName = strings.TrimSpace(plan.LdxpProductName)
 	plan.LdxpProductRef = strings.TrimSpace(plan.LdxpProductRef)
+	requestedLimit5hAmount := plan.Limit5hAmount
+	requestedLimit7dAmount := plan.Limit7dAmount
 	plan.NormalizeDefaults()
 	switch plan.PlanKind {
 	case model.SubscriptionPlanKindSubscription, model.SubscriptionPlanKindValuePackage:
@@ -198,10 +200,13 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	if plan.ConcurrencyLimit != 1 && plan.ConcurrencyLimit != 2 {
 		return "并发限制必须为1或2"
 	}
-	if plan.Limit5hAmount < 0 || plan.Limit7dAmount < 0 {
+	if requestedLimit5hAmount < 0 || requestedLimit7dAmount < 0 {
 		return "套餐额度不能为负数"
 	}
-	if plan.Limit5hAmount > 0 && plan.Limit7dAmount > 0 && plan.Limit7dAmount < plan.Limit5hAmount {
+	if plan.PackageType == model.ValuePackageTypeDay && requestedLimit7dAmount != 0 {
+		return "日卡不支持7天额度"
+	}
+	if plan.PackageType != model.ValuePackageTypeDay && requestedLimit5hAmount > 0 && requestedLimit7dAmount > 0 && requestedLimit7dAmount < requestedLimit5hAmount {
 		return "7天额度不能小于5小时额度"
 	}
 	if plan.Enabled {
