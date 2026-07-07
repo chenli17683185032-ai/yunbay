@@ -321,7 +321,7 @@ func TestValuePackageMiddlewareResetCountdownUsesEarliestUsage(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
 	now := common.GetTimestamp()
-	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "first-window-usage", Quota: 99, CreatedAt: now - 4*3600}))
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "first-window-usage", Quota: 99, CreatedAt: now - (3*3600 + 55*60)}))
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "later-window-usage", Quota: 1, CreatedAt: now - 2*3600}))
 
 	recorder := runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")

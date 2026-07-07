@@ -296,6 +296,25 @@ func valuePackageControllerRequest(handler gin.HandlerFunc, method string, path 
 	return recorder
 }
 
+func valuePackageControllerRawRequest(handler gin.HandlerFunc, method string, path string, body string, userID int) *httptest.ResponseRecorder {
+	router := gin.New()
+	routePath := valuePackageControllerRoutePattern(path)
+	router.Handle(method, routePath, func(c *gin.Context) {
+		if userID > 0 {
+			c.Set("id", userID)
+		}
+		handler(c)
+	})
+
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	return recorder
+}
+
 func valuePackageControllerRoutePattern(path string) string {
 	if idx := strings.Index(path, "?"); idx >= 0 {
 		path = path[:idx]
@@ -847,6 +866,79 @@ func TestResetValuePackageQuotaSelfRejectsWithoutCount(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), "重置次数不足")
+}
+
+func TestResetValuePackageQuotaSelfAllowsEmptyBodyForActivePackage(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_reset_quota_empty_body_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 1}).Error)
+
+	rec := valuePackageControllerRequest(ResetValuePackageQuotaSelf, http.MethodPost, "/value-packages/reset-quota", nil, user.Id)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp struct {
+		Success bool                    `json:"success"`
+		Data    model.ValuePackageState `json:"data"`
+		Message string                  `json:"message"`
+	}
+	require.NoError(t, common.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Success, resp.Message)
+	require.EqualValues(t, 0, resp.Data.Preference.ResetCount)
+}
+
+func TestResetValuePackageQuotaSelfRejectsMalformedJSON(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_reset_quota_bad_json_user")
+
+	rec := valuePackageControllerRawRequest(ResetValuePackageQuotaSelf, http.MethodPost, "/value-packages/reset-quota", `{"user_subscription_id":`, user.Id)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "参数错误")
+}
+
+func TestResetValuePackageQuotaSelfRejectsInvalidSubscriptionIdWithoutConsumingCount(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_reset_quota_invalid_sub_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 1}).Error)
+
+	rec := valuePackageControllerRequest(ResetValuePackageQuotaSelf, http.MethodPost, "/value-packages/reset-quota", gin.H{"user_subscription_id": -1}, user.Id)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "参数错误")
+	var pref model.UserValuePackagePreference
+	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.EqualValues(t, 1, pref.ResetCount)
+	var resetCount int64
+	require.NoError(t, model.DB.Model(&model.ValuePackageQuotaReset{}).Where("user_id = ?", user.Id).Count(&resetCount).Error)
+	require.EqualValues(t, 0, resetCount)
+}
+
+func TestResetValuePackageQuotaSelfRejectsMismatchedSubscriptionIdWithoutConsumingCount(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_reset_quota_mismatch_sub_user")
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	now := common.GetTimestamp()
+	activeSub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&activeSub).Error)
+	otherSub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&otherSub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: activeSub.Id, ResetCount: 1}).Error)
+
+	rec := valuePackageControllerRequest(ResetValuePackageQuotaSelf, http.MethodPost, "/value-packages/reset-quota", gin.H{"user_subscription_id": otherSub.Id}, user.Id)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Contains(t, rec.Body.String(), "当前套餐不匹配")
+	var pref model.UserValuePackagePreference
+	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.EqualValues(t, 1, pref.ResetCount)
 }
 
 func TestAdminCreateSubscriptionPlanNormalizesValuePackageLevelFromType(t *testing.T) {
