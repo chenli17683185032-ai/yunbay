@@ -58,6 +58,16 @@ const (
 	ValuePackageExhaustedReason7d    = "limit_7d_exhausted"
 )
 
+const (
+	ValuePackageQuotaResetSourceUserConsumeCount = "user_consume_count"
+	ValuePackageQuotaResetSourceAdminManualReset = "admin_manual_reset"
+
+	ValuePackageResetCountLedgerSourceAdminSet      = "admin_set"
+	ValuePackageResetCountLedgerSourceAdminAdd      = "admin_add"
+	ValuePackageResetCountLedgerSourceAdminSubtract = "admin_subtract"
+	ValuePackageResetCountLedgerSourceUserConsume   = "user_consume"
+)
+
 const ValuePackageQuotaExhaustedUserMessage = "当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用"
 
 const ValuePackageEffectiveBillingRatio = 1.0
@@ -399,6 +409,7 @@ type UserValuePackagePreference struct {
 	UserId                   int   `json:"user_id" gorm:"uniqueIndex"`
 	Enabled                  bool  `json:"enabled" gorm:"default:false"`
 	ActiveUserSubscriptionId int   `json:"active_user_subscription_id" gorm:"index;default:0"`
+	ResetCount               int   `json:"reset_count" gorm:"default:0"`
 	CreatedAt                int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt                int64 `json:"updated_at" gorm:"bigint"`
 }
@@ -430,6 +441,44 @@ type ValuePackageUsageRecord struct {
 func (r *ValuePackageUsageRecord) BeforeCreate(tx *gorm.DB) error {
 	if r.CreatedAt == 0 {
 		r.CreatedAt = common.GetTimestamp()
+	}
+	return nil
+}
+
+type ValuePackageQuotaReset struct {
+	Id                 int    `json:"id"`
+	UserId             int    `json:"user_id" gorm:"index:idx_vp_reset_user_time,priority:1"`
+	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index"`
+	PlanId             int    `json:"plan_id" gorm:"index"`
+	PackageType        string `json:"package_type" gorm:"type:varchar(16);index"`
+	ResetAt            int64  `json:"reset_at" gorm:"bigint;index:idx_vp_reset_user_time,priority:2"`
+	Source             string `json:"source" gorm:"type:varchar(32);index"`
+	CreatedByUserId    int    `json:"created_by_user_id" gorm:"index"`
+	Note               string `json:"note" gorm:"type:text"`
+}
+
+func (r *ValuePackageQuotaReset) BeforeCreate(tx *gorm.DB) error {
+	if r.ResetAt == 0 {
+		r.ResetAt = common.GetTimestamp()
+	}
+	return nil
+}
+
+type ValuePackageResetCountLedger struct {
+	Id              int    `json:"id"`
+	UserId          int    `json:"user_id" gorm:"index:idx_vp_reset_count_ledger_user_time,priority:1"`
+	Delta           int    `json:"delta"`
+	BeforeCount     int    `json:"before_count"`
+	AfterCount      int    `json:"after_count"`
+	Source          string `json:"source" gorm:"type:varchar(32);index"`
+	CreatedByUserId int    `json:"created_by_user_id" gorm:"index"`
+	CreatedAt       int64  `json:"created_at" gorm:"bigint;index:idx_vp_reset_count_ledger_user_time,priority:2"`
+	Note            string `json:"note" gorm:"type:text"`
+}
+
+func (l *ValuePackageResetCountLedger) BeforeCreate(tx *gorm.DB) error {
+	if l.CreatedAt == 0 {
+		l.CreatedAt = common.GetTimestamp()
 	}
 	return nil
 }

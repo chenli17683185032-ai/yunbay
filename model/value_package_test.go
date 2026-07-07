@@ -40,7 +40,7 @@ func setupValuePackageTestDB(t *testing.T) *gorm.DB {
 	if subscriptionPlanInfoCache != nil {
 		_ = subscriptionPlanInfoCache.Purge()
 	}
-	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &UserValuePackagePreference{}, &ValuePackageUsageRecord{}, &SubscriptionPreConsumeRecord{}, &AffiliateCommission{}, &AffiliateWithdrawal{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SubscriptionPlan{}, &SubscriptionOrder{}, &UserSubscription{}, &UserValuePackagePreference{}, &ValuePackageUsageRecord{}, &ValuePackageQuotaReset{}, &ValuePackageResetCountLedger{}, &SubscriptionPreConsumeRecord{}, &AffiliateCommission{}, &AffiliateWithdrawal{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()

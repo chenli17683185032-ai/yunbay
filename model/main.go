@@ -282,6 +282,8 @@ func migrateDB() error {
 		&UserSubscription{},
 		&UserValuePackagePreference{},
 		&ValuePackageUsageRecord{},
+		&ValuePackageQuotaReset{},
+		&ValuePackageResetCountLedger{},
 		&SubscriptionPreConsumeRecord{},
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
@@ -297,6 +299,9 @@ func migrateDB() error {
 			return err
 		}
 		if err := ensureUserSubscriptionTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureUserValuePackagePreferenceTableSQLite(); err != nil {
 			return err
 		}
 		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
@@ -347,6 +352,8 @@ func migrateDBFast() error {
 		{&UserSubscription{}, "UserSubscription"},
 		{&UserValuePackagePreference{}, "UserValuePackagePreference"},
 		{&ValuePackageUsageRecord{}, "ValuePackageUsageRecord"},
+		{&ValuePackageQuotaReset{}, "ValuePackageQuotaReset"},
+		{&ValuePackageResetCountLedger{}, "ValuePackageResetCountLedger"},
 		{&SubscriptionPreConsumeRecord{}, "SubscriptionPreConsumeRecord"},
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
@@ -382,6 +389,9 @@ func migrateDBFast() error {
 			return err
 		}
 		if err := ensureUserSubscriptionTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureUserValuePackagePreferenceTableSQLite(); err != nil {
 			return err
 		}
 		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
@@ -540,6 +550,22 @@ func ensureUserSubscriptionTableSQLite() error {
 			continue
 		}
 		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureUserValuePackagePreferenceTableSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tableName := "user_value_package_preferences"
+	if !DB.Migrator().HasTable(tableName) {
+		return nil
+	}
+	if !DB.Migrator().HasColumn(&UserValuePackagePreference{}, "reset_count") {
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN `reset_count` integer DEFAULT 0").Error; err != nil {
 			return err
 		}
 	}
