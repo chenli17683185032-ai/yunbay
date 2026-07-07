@@ -1611,7 +1611,17 @@ func buildValuePackageUsageSummaryFromDetails(sub *UserSubscription, plan *Subsc
 		return nil
 	}
 	limited5h := plan.Limit5hAmount > 0 && usageDetails.Used5h >= plan.Limit5hAmount
-	limited7d := plan.Limit7dAmount > 0 && usageDetails.Used7d >= plan.Limit7dAmount
+	has7dWindow := valuePackageHas7dWindow(plan)
+	used7d := int64(0)
+	limit7d := int64(0)
+	percent7d := float64(0)
+	limited7d := false
+	if has7dWindow {
+		used7d = usageDetails.Used7d
+		limit7d = plan.Limit7dAmount
+		percent7d = valuePackagePercent(used7d, limit7d)
+		limited7d = limit7d > 0 && used7d >= limit7d
+	}
 	totalRemaining := int64(0)
 	if sub.AmountTotal > 0 && sub.AmountTotal > sub.AmountUsed {
 		totalRemaining = sub.AmountTotal - sub.AmountUsed
@@ -1625,16 +1635,16 @@ func buildValuePackageUsageSummaryFromDetails(sub *UserSubscription, plan *Subsc
 		Limit5h:        plan.Limit5hAmount,
 		Percent5h:      valuePackagePercent(usageDetails.Used5h, plan.Limit5hAmount),
 		Limited5h:      limited5h,
-		Used7d:         usageDetails.Used7d,
-		Limit7d:        plan.Limit7dAmount,
-		Percent7d:      valuePackagePercent(usageDetails.Used7d, plan.Limit7dAmount),
+		Used7d:         used7d,
+		Limit7d:        limit7d,
+		Percent7d:      percent7d,
 		Limited7d:      limited7d,
 	}
 	if plan.Limit5hAmount > 0 {
 		summary.ResetAt5h = usageDetails.ResetAt5h
 		summary.ResetSeconds5h = usageDetails.ResetSeconds5h
 	}
-	if plan.Limit7dAmount > 0 {
+	if has7dWindow {
 		summary.ResetAt7d = usageDetails.ResetAt7d
 		summary.ResetSeconds7d = usageDetails.ResetSeconds7d
 	}
@@ -1655,23 +1665,61 @@ func buildValuePackageUsageSummaryFromDetails(sub *UserSubscription, plan *Subsc
 	return summary
 }
 
-func valuePackageUsageDetailsFromRecords(records []ValuePackageUsageRecord, now int64) *ValuePackageWindowUsageDetails {
+func buildValuePackageWindowUsageDetailsFromRecords(sub *UserSubscription, plan *SubscriptionPlan, records []ValuePackageUsageRecord, lastResetAt int64, now int64) *ValuePackageWindowUsageDetails {
 	details := &ValuePackageWindowUsageDetails{}
-	details.Used5h, details.Earliest5hCreatedAt = valuePackageFixedWindowUsageDetails(records, 5*3600, now)
-	details.Used7d, details.Earliest7dCreatedAt = valuePackageRollingUsageDetails(records)
+	if sub == nil || plan == nil || now <= 0 {
+		return details
+	}
+	effectiveLastResetAt := int64(0)
+	if lastResetAt > 0 && lastResetAt <= now {
+		effectiveLastResetAt = lastResetAt
+	}
+	fiveHourRecords := make([]ValuePackageUsageRecord, 0, len(records))
+	for _, record := range records {
+		if record.Quota <= 0 || record.CreatedAt <= 0 || record.CreatedAt > now {
+			continue
+		}
+		if effectiveLastResetAt > 0 && record.CreatedAt < effectiveLastResetAt {
+			continue
+		}
+		fiveHourRecords = append(fiveHourRecords, record)
+	}
+	details.Used5h, details.Earliest5hCreatedAt = valuePackageFixedWindowUsageDetails(fiveHourRecords, valuePackage5hWindowSeconds, now)
 	if details.Used5h > 0 && details.Earliest5hCreatedAt > 0 {
-		details.ResetAt5h = details.Earliest5hCreatedAt + 5*3600
+		details.ResetAt5h = details.Earliest5hCreatedAt + valuePackage5hWindowSeconds
 		details.ResetSeconds5h = details.ResetAt5h - now
 		if details.ResetSeconds5h < 0 {
 			details.ResetSeconds5h = 0
 		}
 	}
-	if details.Used7d > 0 && details.Earliest7dCreatedAt > 0 {
-		details.ResetAt7d = details.Earliest7dCreatedAt + 7*24*3600
-		details.ResetSeconds7d = details.ResetAt7d - now
-		if details.ResetSeconds7d < 0 {
-			details.ResetSeconds7d = 0
+
+	if !valuePackageHas7dWindow(plan) {
+		return details
+	}
+	window := calcValuePackageAnchoredWindow(sub.StartTime, sub.EndTime, valuePackage7dWindowSeconds, now)
+	if window.Start <= 0 || window.End <= 0 {
+		return details
+	}
+	effective7dStart := window.Start
+	if valuePackageResetClears7d(plan) && effectiveLastResetAt > window.Start {
+		effective7dStart = effectiveLastResetAt
+	}
+	for _, record := range records {
+		if record.Quota <= 0 || record.CreatedAt <= 0 || record.CreatedAt > now {
+			continue
 		}
+		if record.CreatedAt < effective7dStart || record.CreatedAt >= window.End {
+			continue
+		}
+		details.Used7d += record.Quota
+		if details.Earliest7dCreatedAt == 0 || record.CreatedAt < details.Earliest7dCreatedAt {
+			details.Earliest7dCreatedAt = record.CreatedAt
+		}
+	}
+	details.ResetAt7d = window.End
+	details.ResetSeconds7d = details.ResetAt7d - now
+	if details.ResetSeconds7d < 0 {
+		details.ResetSeconds7d = 0
 	}
 	return details
 }
@@ -1801,18 +1849,33 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 		lastResetBySubID[row.UserSubscriptionId] = row.ResetAt
 	}
 
+	usageLowerBound := int64(0)
+	hasMissingStartTime := false
+	for _, sub := range pageSubs {
+		if sub.StartTime > 0 {
+			if usageLowerBound == 0 || sub.StartTime < usageLowerBound {
+				usageLowerBound = sub.StartTime
+			}
+		} else {
+			hasMissingStartTime = true
+		}
+	}
+	fallbackUsageLowerBound := now - valuePackage7dWindowSeconds
+	if hasMissingStartTime && (usageLowerBound == 0 || fallbackUsageLowerBound < usageLowerBound) {
+		usageLowerBound = fallbackUsageLowerBound
+	}
+	if usageLowerBound == 0 {
+		usageLowerBound = fallbackUsageLowerBound
+	}
+
 	var usageRecords []ValuePackageUsageRecord
-	if err := tx.Where("user_subscription_id IN ? AND created_at >= ? AND quota > ?", subIDs, now-7*24*3600, 0).
+	if err := tx.Where("user_subscription_id IN ? AND created_at >= ? AND created_at <= ? AND quota > ?", subIDs, usageLowerBound, now, 0).
 		Order("user_subscription_id asc, created_at asc, id asc").
 		Find(&usageRecords).Error; err != nil {
 		return nil, err
 	}
 	usageRecordsBySubID := make(map[int][]ValuePackageUsageRecord, len(pageSubs))
 	for _, record := range usageRecords {
-		lastResetAt := lastResetBySubID[record.UserSubscriptionId]
-		if record.CreatedAt < lastResetAt {
-			continue
-		}
 		usageRecordsBySubID[record.UserSubscriptionId] = append(usageRecordsBySubID[record.UserSubscriptionId], record)
 	}
 
@@ -1827,7 +1890,8 @@ func listValuePackageManagementRowsTx(tx *gorm.DB, filter ValuePackageManagement
 			continue
 		}
 		pref := prefsByUserID[user.Id]
-		usage := buildValuePackageUsageSummaryFromDetails(&sub, &plan, valuePackageUsageDetailsFromRecords(usageRecordsBySubID[sub.Id], now), now)
+		details := buildValuePackageWindowUsageDetailsFromRecords(&sub, &plan, usageRecordsBySubID[sub.Id], lastResetBySubID[sub.Id], now)
+		usage := buildValuePackageUsageSummaryFromDetails(&sub, &plan, details, now)
 		items = append(items, ValuePackageManagementRow{
 			UserId:             user.Id,
 			Username:           user.Username,
@@ -2904,7 +2968,6 @@ func valuePackageResetClears7d(plan *SubscriptionPlan) bool {
 	return plan != nil && plan.IsValuePackage() && plan.PackageType == ValuePackageTypeMonth && plan.Limit7dAmount > 0
 }
 
-// ResetAt is based on the earliest current-window positive usage; callers should suppress reset display when the matching limit is disabled.
 func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscriptionId int, now int64) (*ValuePackageWindowUsageDetails, error) {
 	if tx == nil {
 		tx = DB
@@ -2912,37 +2975,31 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	if now <= 0 {
 		now = getDBTimestampTx(tx)
 	}
+	var sub UserSubscription
+	if err := tx.Where("id = ? AND user_id = ?", userSubscriptionId, userId).First(&sub).Error; err != nil {
+		return nil, err
+	}
+	plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+	if err != nil {
+		return nil, err
+	}
+	normalizeValuePackagePlan(plan)
 	lastResetAt, err := getLastValuePackageQuotaResetAtTx(tx, userId, userSubscriptionId, now)
 	if err != nil {
 		return nil, err
 	}
-	start7d := maxInt64(now-7*24*3600, lastResetAt)
-	details := &ValuePackageWindowUsageDetails{}
+	lowerBound := sub.StartTime
+	if lowerBound <= 0 {
+		lowerBound = now - valuePackage7dWindowSeconds
+	}
 
 	var usageRecords []ValuePackageUsageRecord
-	if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND quota > ?", userId, userSubscriptionId, start7d, now, 0).
+	if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND quota > ?", userId, userSubscriptionId, lowerBound, now, 0).
 		Order("created_at asc, id asc").
 		Find(&usageRecords).Error; err != nil {
 		return nil, err
 	}
-	details.Used5h, details.Earliest5hCreatedAt = valuePackageFixedWindowUsageDetails(usageRecords, 5*3600, now)
-	if details.Used5h > 0 && details.Earliest5hCreatedAt > 0 {
-		details.ResetAt5h = details.Earliest5hCreatedAt + 5*3600
-		details.ResetSeconds5h = details.ResetAt5h - now
-		if details.ResetSeconds5h < 0 {
-			details.ResetSeconds5h = 0
-		}
-	}
-
-	details.Used7d, details.Earliest7dCreatedAt = valuePackageRollingUsageDetails(usageRecords)
-	if details.Used7d > 0 && details.Earliest7dCreatedAt > 0 {
-		details.ResetAt7d = details.Earliest7dCreatedAt + 7*24*3600
-		details.ResetSeconds7d = details.ResetAt7d - now
-		if details.ResetSeconds7d < 0 {
-			details.ResetSeconds7d = 0
-		}
-	}
-	return details, nil
+	return buildValuePackageWindowUsageDetailsFromRecords(&sub, plan, usageRecords, lastResetAt, now), nil
 }
 
 // AdminInvalidateUserSubscription marks a user subscription as cancelled and ends it immediately.

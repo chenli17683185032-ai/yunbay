@@ -526,7 +526,7 @@ func TestGetValuePackageSelfReturnsCurrentState(t *testing.T) {
 	user := createLdxpControllerTestUser(t, "vp_self_user")
 	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
 	now := common.GetTimestamp()
-	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 10, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 3600, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
 	require.NoError(t, model.DB.Create(&sub).Error)
 	_, err := model.ActivateValuePackage(user.Id, sub.Id)
 	require.NoError(t, err)
@@ -546,7 +546,7 @@ func TestGetValuePackageSelfReturnsCurrentState(t *testing.T) {
 	require.True(t, ok)
 	requireValuePackageUsageResetFields(t, usage)
 	assert.Equal(t, float64(10), usage["used_5h"])
-	assert.Equal(t, float64(10), usage["used_7d"])
+	assert.Equal(t, float64(0), usage["used_7d"])
 	assert.Equal(t, float64(0), usage["limit_7d"])
 	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
 	assert.Equal(t, float64(0), valuePackageUsageNumber(t, usage, "reset_seconds_7d"))
@@ -791,7 +791,7 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	user := createLdxpControllerTestUser(t, "vp_active_user")
 	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
 	now := common.GetTimestamp()
-	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 10, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, StartTime: now - 3600, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive}
 	require.NoError(t, model.DB.Create(&sub).Error)
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "activate-reset-fields", Quota: 10, CreatedAt: now - 1800}))
 
@@ -808,7 +808,7 @@ func TestActivateAndDeactivateValuePackageAPI(t *testing.T) {
 	require.True(t, ok)
 	requireValuePackageUsageResetFields(t, usage)
 	assert.Equal(t, float64(10), usage["used_5h"])
-	assert.Equal(t, float64(10), usage["used_7d"])
+	assert.Equal(t, float64(0), usage["used_7d"])
 	assert.Equal(t, float64(0), usage["limit_7d"])
 	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
 	assert.Equal(t, float64(0), valuePackageUsageNumber(t, usage, "reset_seconds_7d"))

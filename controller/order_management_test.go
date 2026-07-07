@@ -456,7 +456,7 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 		AllowBalancePay: nil,
 	}
 	require.NoError(t, model.DB.Create(plan).Error)
-	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 350, StartTime: now - 100, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive, Source: "test"}
+	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 350, StartTime: now - 7*3600, EndTime: now + 3600, Status: model.UserSubscriptionStatusActive, Source: "test"}
 	require.NoError(t, model.DB.Create(sub).Error)
 	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id}).Error)
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "admin-usage-5h", Quota: 50, CreatedAt: now - 1800}))
@@ -478,7 +478,7 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 	assert.Equal(t, model.ValuePackageTypeDay, row.Plan.PackageType)
 	require.NotNil(t, row.Usage)
 	assert.EqualValues(t, 50, row.Usage.Used5h)
-	assert.EqualValues(t, 120, row.Usage.Used7d)
+	assert.EqualValues(t, 0, row.Usage.Used7d)
 	assert.EqualValues(t, 500, row.Usage.Limit5h)
 	assert.EqualValues(t, 0, row.Usage.Limit7d)
 	assert.Greater(t, row.Usage.ResetSeconds5h, int64(0))
@@ -523,7 +523,7 @@ func TestAdminValuePackageManagementUsersReturnsRows(t *testing.T) {
 		PriceAmount:   29.9,
 	}
 	require.NoError(t, model.DB.Create(plan).Error)
-	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 350, StartTime: now - 100, EndTime: now + 86400, Status: model.UserSubscriptionStatusActive, Source: "test"}
+	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 350, StartTime: now - 3600, EndTime: now + 86400, Status: model.UserSubscriptionStatusActive, Source: "test"}
 	require.NoError(t, model.DB.Create(sub).Error)
 	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 3}).Error)
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "management-usage", Quota: 50, CreatedAt: now - 1800}))

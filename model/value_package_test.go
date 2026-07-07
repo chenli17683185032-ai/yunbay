@@ -378,7 +378,7 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	user := createValuePackageUser(t, 3007, UserGroupTiyan)
 	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
 	now := common.GetTimestamp()
-	sub := createActiveValuePackageSub(t, user.Id, day, now-100, now+3600)
+	sub := createActiveValuePackageSub(t, user.Id, day, now-7*3600, now+3600)
 
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: ValuePackageTypeDay, ModelGroup: "day-card", RequestId: "old", Quota: 900, CreatedAt: now - int64(6*time.Hour/time.Second)}))
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: ValuePackageTypeDay, ModelGroup: "day-card", RequestId: "recent", Quota: 900, CreatedAt: now - int64(time.Hour/time.Second)}))
@@ -386,7 +386,7 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
 	require.NoError(t, err)
 	require.EqualValues(t, 900, used5h)
-	require.EqualValues(t, 1800, used7d)
+	require.EqualValues(t, 0, used7d)
 
 	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
 	require.NoError(t, err)
@@ -395,10 +395,10 @@ func TestValuePackageRollingUsageWindows(t *testing.T) {
 	require.EqualValues(t, now-3600, details.Earliest5hCreatedAt)
 	require.EqualValues(t, now+4*3600, details.ResetAt5h)
 	require.EqualValues(t, 4*3600, details.ResetSeconds5h)
-	require.EqualValues(t, 1800, details.Used7d)
-	require.EqualValues(t, now-int64(6*time.Hour/time.Second), details.Earliest7dCreatedAt)
-	require.EqualValues(t, now+7*24*3600-int64(6*time.Hour/time.Second), details.ResetAt7d)
-	require.EqualValues(t, 7*24*3600-int64(6*time.Hour/time.Second), details.ResetSeconds7d)
+	require.EqualValues(t, 0, details.Used7d)
+	require.EqualValues(t, 0, details.Earliest7dCreatedAt)
+	require.EqualValues(t, 0, details.ResetAt7d)
+	require.EqualValues(t, 0, details.ResetSeconds7d)
 }
 
 func TestValuePackageAnchoredWindowUsesSubscriptionStartAndClampsToEnd(t *testing.T) {
@@ -439,12 +439,156 @@ func TestNormalizeValuePackagePlanUsesFixedDurations(t *testing.T) {
 	require.EqualValues(t, 0, month.CustomSeconds)
 }
 
+func TestValuePackageWindowUsageAnchors7dToSubscriptionStart(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3018, UserGroupTiyan)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.TotalAmount = 10000
+	month.Limit5hAmount = 10000
+	month.Limit7dAmount = 1000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	start := now - 8*valuePackageDaySeconds
+	end := start + valuePackageMonthSeconds
+	sub := createActiveValuePackageSub(t, user.Id, month, start, end)
+	currentWindowStart := start + valuePackage7dWindowSeconds
+	currentWindowEnd := start + 2*valuePackage7dWindowSeconds
+	currentUsageAt := currentWindowStart + valuePackageDaySeconds/2
+
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "anchored-previous-cycle", Quota: 100, CreatedAt: start + 2*valuePackageDaySeconds}))
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "anchored-current-cycle", Quota: 200, CreatedAt: currentUsageAt}))
+
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 0, used5h)
+	require.EqualValues(t, 200, used7d)
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 200, details.Used7d)
+	require.EqualValues(t, currentUsageAt, details.Earliest7dCreatedAt)
+	require.EqualValues(t, currentWindowEnd, details.ResetAt7d)
+	require.EqualValues(t, currentWindowEnd-now, details.ResetSeconds7d)
+	require.NotEqualValues(t, currentUsageAt+valuePackage7dWindowSeconds, details.ResetAt7d)
+}
+
+func TestValuePackageWindowUsageResetScopeByPackageType(t *testing.T) {
+	t.Run("week reset clears 5h only", func(t *testing.T) {
+		setupValuePackageTestDB(t)
+		user := createValuePackageUser(t, 3019, UserGroupTiyan)
+		week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+		week.TotalAmount = 10000
+		week.Limit5hAmount = 1000
+		week.Limit7dAmount = 1000
+		require.NoError(t, DB.Save(&week).Error)
+		now := common.GetTimestamp()
+		start := now - 2*valuePackageDaySeconds
+		end := start + valuePackageWeekSeconds
+		sub := createActiveValuePackageSub(t, user.Id, week, start, end)
+		resetAt := now - valuePackageDaySeconds/24
+		beforeResetAt := resetAt - valuePackageDaySeconds/24
+		afterResetAt := resetAt + valuePackageDaySeconds/48
+
+		require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: week.Id, PackageType: week.PackageType, ModelGroup: week.ModelGroup, RequestId: "week-before-reset", Quota: 100, CreatedAt: beforeResetAt}))
+		require.NoError(t, DB.Create(&ValuePackageQuotaReset{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: week.Id, PackageType: week.PackageType, ResetAt: resetAt, Source: ValuePackageQuotaResetSourceUserConsumeCount, CreatedByUserId: user.Id}).Error)
+		require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: week.Id, PackageType: week.PackageType, ModelGroup: week.ModelGroup, RequestId: "week-after-reset", Quota: 30, CreatedAt: afterResetAt}))
+
+		details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+		require.NoError(t, err)
+		require.NotNil(t, details)
+		require.EqualValues(t, 30, details.Used5h)
+		require.EqualValues(t, afterResetAt, details.Earliest5hCreatedAt)
+		require.EqualValues(t, afterResetAt+valuePackage5hWindowSeconds, details.ResetAt5h)
+		require.EqualValues(t, 130, details.Used7d)
+		require.EqualValues(t, beforeResetAt, details.Earliest7dCreatedAt)
+		require.EqualValues(t, start+valuePackage7dWindowSeconds, details.ResetAt7d)
+		require.EqualValues(t, start+valuePackage7dWindowSeconds-now, details.ResetSeconds7d)
+	})
+
+	t.Run("month reset clears 5h and current 7d phase", func(t *testing.T) {
+		setupValuePackageTestDB(t)
+		user := createValuePackageUser(t, 3029, UserGroupTiyan)
+		month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+		month.TotalAmount = 10000
+		month.Limit5hAmount = 1000
+		month.Limit7dAmount = 1000
+		require.NoError(t, DB.Save(&month).Error)
+		now := common.GetTimestamp()
+		start := now - 8*valuePackageDaySeconds
+		end := start + valuePackageMonthSeconds
+		sub := createActiveValuePackageSub(t, user.Id, month, start, end)
+		currentWindowStart := start + valuePackage7dWindowSeconds
+		currentWindowEnd := start + 2*valuePackage7dWindowSeconds
+		resetAt := now - valuePackageDaySeconds/24
+		beforeResetAt := resetAt - valuePackageDaySeconds/24
+		afterResetAt := resetAt + valuePackageDaySeconds/48
+
+		require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "month-previous-cycle", Quota: 500, CreatedAt: start + 2*valuePackageDaySeconds}))
+		require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "month-before-reset", Quota: 100, CreatedAt: beforeResetAt}))
+		require.Greater(t, beforeResetAt, currentWindowStart)
+		require.NoError(t, DB.Create(&ValuePackageQuotaReset{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ResetAt: resetAt, Source: ValuePackageQuotaResetSourceUserConsumeCount, CreatedByUserId: user.Id}).Error)
+		require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: month.Id, PackageType: month.PackageType, ModelGroup: month.ModelGroup, RequestId: "month-after-reset", Quota: 30, CreatedAt: afterResetAt}))
+
+		details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+		require.NoError(t, err)
+		require.NotNil(t, details)
+		require.EqualValues(t, 30, details.Used5h)
+		require.EqualValues(t, afterResetAt, details.Earliest5hCreatedAt)
+		require.EqualValues(t, afterResetAt+valuePackage5hWindowSeconds, details.ResetAt5h)
+		require.EqualValues(t, 30, details.Used7d)
+		require.EqualValues(t, afterResetAt, details.Earliest7dCreatedAt)
+		require.EqualValues(t, currentWindowEnd, details.ResetAt7d)
+		require.EqualValues(t, currentWindowEnd-now, details.ResetSeconds7d)
+		require.NotEqualValues(t, resetAt+valuePackage7dWindowSeconds, details.ResetAt7d)
+	})
+}
+
+func TestValuePackageWindowUsageDayCardIgnores7dLimit(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3039, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 1000
+	day.Limit5hAmount = 1000
+	day.Limit7dAmount = 50
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	sub := createActiveValuePackageSub(t, user.Id, day, now-valuePackageDaySeconds/24, now+valuePackageDaySeconds)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "day-ignores-7d", Quota: 80, CreatedAt: now - valuePackageDaySeconds/48}))
+
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.EqualValues(t, 80, used5h)
+	require.EqualValues(t, 0, used7d)
+
+	details, err := GetValuePackageWindowUsageDetails(user.Id, sub.Id, now)
+	require.NoError(t, err)
+	require.NotNil(t, details)
+	require.EqualValues(t, 80, details.Used5h)
+	require.EqualValues(t, 0, details.Used7d)
+	require.EqualValues(t, 0, details.Earliest7dCreatedAt)
+	require.EqualValues(t, 0, details.ResetAt7d)
+	require.EqualValues(t, 0, details.ResetSeconds7d)
+
+	state, err := GetValuePackageState(user.Id)
+	require.NoError(t, err)
+	require.NotNil(t, state)
+	require.NotNil(t, state.Usage)
+	require.EqualValues(t, 0, state.Usage.Used7d)
+	require.EqualValues(t, 0, state.Usage.Limit7d)
+	require.EqualValues(t, 0, state.Usage.Percent7d)
+	require.False(t, state.Usage.Limited7d)
+	require.EqualValues(t, 0, state.Usage.ResetAt7d)
+	require.EqualValues(t, 0, state.Usage.ResetSeconds7d)
+}
+
 func TestValuePackageWindowUsageDetailsDoesNotExtendResetWithLaterUsage(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3010, UserGroupTiyan)
 	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
 	now := common.GetTimestamp()
-	sub := createActiveValuePackageSub(t, user.Id, day, now-100, now+3600)
+	sub := createActiveValuePackageSub(t, user.Id, day, now-5*3600, now+3600)
 
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "earliest-window-usage", Quota: 50, CreatedAt: now - 4*3600}))
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "later-small-usage", Quota: 1, CreatedAt: now - 2*3600}))
@@ -457,10 +601,10 @@ func TestValuePackageWindowUsageDetailsDoesNotExtendResetWithLaterUsage(t *testi
 	require.EqualValues(t, now-4*3600, details.Earliest5hCreatedAt)
 	require.EqualValues(t, now+3600, details.ResetAt5h)
 	require.EqualValues(t, 3600, details.ResetSeconds5h)
-	require.EqualValues(t, 51, details.Used7d)
-	require.EqualValues(t, now-4*3600, details.Earliest7dCreatedAt)
-	require.EqualValues(t, now-4*3600+7*24*3600, details.ResetAt7d)
-	require.EqualValues(t, 7*24*3600-4*3600, details.ResetSeconds7d)
+	require.EqualValues(t, 0, details.Used7d)
+	require.EqualValues(t, 0, details.Earliest7dCreatedAt)
+	require.EqualValues(t, 0, details.ResetAt7d)
+	require.EqualValues(t, 0, details.ResetSeconds7d)
 }
 
 func TestValuePackageFiveHourWindowClearsAllUsageAtFirstUsageExpiry(t *testing.T) {
@@ -482,7 +626,7 @@ func TestValuePackageFiveHourWindowClearsAllUsageAtFirstUsageExpiry(t *testing.T
 	require.EqualValues(t, 0, details.Earliest5hCreatedAt)
 	require.EqualValues(t, 0, details.ResetAt5h)
 	require.EqualValues(t, 0, details.ResetSeconds5h)
-	require.EqualValues(t, 95, details.Used7d)
+	require.EqualValues(t, 0, details.Used7d)
 }
 
 func TestValuePackageFiveHourWindowRestartsFromNextUsageAfterClear(t *testing.T) {
@@ -506,7 +650,7 @@ func TestValuePackageFiveHourWindowRestartsFromNextUsageAfterClear(t *testing.T)
 	require.EqualValues(t, nextWindowStart, details.Earliest5hCreatedAt)
 	require.EqualValues(t, nextWindowStart+5*3600, details.ResetAt5h)
 	require.EqualValues(t, 270*60, details.ResetSeconds5h)
-	require.EqualValues(t, 107, details.Used7d)
+	require.EqualValues(t, 0, details.Used7d)
 }
 
 func TestValuePackageWindowUsageDetailsIgnoresZeroQuotaForReset(t *testing.T) {
@@ -514,7 +658,7 @@ func TestValuePackageWindowUsageDetailsIgnoresZeroQuotaForReset(t *testing.T) {
 	user := createValuePackageUser(t, 3009, UserGroupTiyan)
 	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
 	now := common.GetTimestamp()
-	sub := createActiveValuePackageSub(t, user.Id, day, now-100, now+3600)
+	sub := createActiveValuePackageSub(t, user.Id, day, now-5*3600, now+3600)
 
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "positive-usage", Quota: 100, CreatedAt: now - 4*3600}))
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "zero-usage", Quota: 0, CreatedAt: now - 3600}))
@@ -527,10 +671,10 @@ func TestValuePackageWindowUsageDetailsIgnoresZeroQuotaForReset(t *testing.T) {
 	require.EqualValues(t, now-4*3600, details.Earliest5hCreatedAt)
 	require.EqualValues(t, now+3600, details.ResetAt5h)
 	require.EqualValues(t, 3600, details.ResetSeconds5h)
-	require.EqualValues(t, 100, details.Used7d)
-	require.EqualValues(t, now-4*3600, details.Earliest7dCreatedAt)
-	require.EqualValues(t, now-4*3600+7*24*3600, details.ResetAt7d)
-	require.EqualValues(t, 7*24*3600-4*3600, details.ResetSeconds7d)
+	require.EqualValues(t, 0, details.Used7d)
+	require.EqualValues(t, 0, details.Earliest7dCreatedAt)
+	require.EqualValues(t, 0, details.ResetAt7d)
+	require.EqualValues(t, 0, details.ResetSeconds7d)
 }
 
 func TestValuePackageWindowUsageCountsUsageAfterLastReset(t *testing.T) {
@@ -561,7 +705,10 @@ func TestValuePackageWindowUsageCountsUsageAfterLastReset(t *testing.T) {
 	require.EqualValues(t, 25, details.Used5h)
 	require.EqualValues(t, now-900, details.Earliest5hCreatedAt)
 	require.EqualValues(t, now-900+5*3600, details.ResetAt5h)
-	require.EqualValues(t, 25, details.Used7d)
+	require.EqualValues(t, 0, details.Used7d)
+	require.EqualValues(t, 0, details.Earliest7dCreatedAt)
+	require.EqualValues(t, 0, details.ResetAt7d)
+	require.EqualValues(t, 0, details.ResetSeconds7d)
 }
 
 func TestValuePackageWindowUsageIgnoresFutureResetEvents(t *testing.T) {
@@ -589,8 +736,10 @@ func TestValuePackageWindowUsageIgnoresFutureResetEvents(t *testing.T) {
 	require.NotNil(t, details)
 	require.EqualValues(t, 40, details.Used5h)
 	require.EqualValues(t, now-900, details.Earliest5hCreatedAt)
-	require.EqualValues(t, 40, details.Used7d)
-	require.EqualValues(t, now-900, details.Earliest7dCreatedAt)
+	require.EqualValues(t, 0, details.Used7d)
+	require.EqualValues(t, 0, details.Earliest7dCreatedAt)
+	require.EqualValues(t, 0, details.ResetAt7d)
+	require.EqualValues(t, 0, details.ResetSeconds7d)
 }
 
 func TestConsumeValuePackageResetCountClampsFutureResetAtToNow(t *testing.T) {
@@ -740,7 +889,7 @@ func TestActivateValuePackageReturnsUsageSummary(t *testing.T) {
 	require.EqualValues(t, now+5*3600, state.Usage.ResetAt5h)
 	require.InDelta(t, 5*3600, state.Usage.ResetSeconds5h, 2)
 	require.False(t, state.Usage.Limited5h)
-	require.EqualValues(t, 10, state.Usage.Used7d)
+	require.EqualValues(t, 0, state.Usage.Used7d)
 	require.EqualValues(t, 0, state.Usage.Limit7d)
 	require.EqualValues(t, 0, state.Usage.ResetAt7d)
 	require.EqualValues(t, 0, state.Usage.ResetSeconds7d)
@@ -778,7 +927,7 @@ func TestGetValuePackageStateIncludesUsageSummary(t *testing.T) {
 	require.EqualValues(t, now+5*3600, state.Usage.ResetAt5h)
 	require.InDelta(t, 5*3600, state.Usage.ResetSeconds5h, 2)
 	require.False(t, state.Usage.Limited5h)
-	require.EqualValues(t, 70, state.Usage.Used7d)
+	require.EqualValues(t, 0, state.Usage.Used7d)
 	require.EqualValues(t, 0, state.Usage.Limit7d)
 	require.EqualValues(t, 0, state.Usage.Percent7d)
 	require.EqualValues(t, 0, state.Usage.ResetAt7d)
@@ -1349,7 +1498,7 @@ func TestPreConsumeValuePackageSubscriptionChecksRollingReservationWindows(t *te
 	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
 	require.NoError(t, err)
 	require.EqualValues(t, 100, used5h)
-	require.EqualValues(t, 100, used7d)
+	require.EqualValues(t, 0, used7d)
 }
 
 func TestPreConsumeValuePackageSubscriptionAllowsAfterFixedFiveHourWindowExpires(t *testing.T) {
@@ -1374,7 +1523,7 @@ func TestPreConsumeValuePackageSubscriptionAllowsAfterFixedFiveHourWindowExpires
 	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
 	require.NoError(t, err)
 	require.EqualValues(t, 20, used5h)
-	require.EqualValues(t, 120, used7d)
+	require.EqualValues(t, 0, used7d)
 }
 
 func TestRecordValuePackageUsageUpsertsBySubscriptionAndRequest(t *testing.T) {
@@ -1393,7 +1542,7 @@ func TestRecordValuePackageUsageUpsertsBySubscriptionAndRequest(t *testing.T) {
 	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
 	require.NoError(t, err)
 	require.EqualValues(t, 45, used5h)
-	require.EqualValues(t, 45, used7d)
+	require.EqualValues(t, 0, used7d)
 }
 
 func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T) {
@@ -1408,7 +1557,7 @@ func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T)
 	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
 
 	activeUser := createValuePackageUser(t, 3501, UserGroupTiyan)
-	activeSub := createActiveValuePackageSub(t, activeUser.Id, day, now-100, now+86400)
+	activeSub := createActiveValuePackageSub(t, activeUser.Id, day, now-7*3600, now+86400)
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", activeSub.Id).Updates(map[string]any{"amount_used": int64(700)}).Error)
 	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: activeUser.Id, Enabled: true, ActiveUserSubscriptionId: activeSub.Id}).Error)
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: activeUser.Id, UserSubscriptionId: activeSub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "active-5h", Quota: 100, CreatedAt: now - 3600}))
@@ -1454,7 +1603,7 @@ func TestListActiveValuePackageUsageRowsReturnsRealtimeWindowUsage(t *testing.T)
 	require.Equal(t, day.Id, row.Plan.Id)
 	require.NotNil(t, row.Usage)
 	require.EqualValues(t, 100, row.Usage.Used5h)
-	require.EqualValues(t, 300, row.Usage.Used7d)
+	require.EqualValues(t, 0, row.Usage.Used7d)
 	require.EqualValues(t, 1000, row.Usage.Limit5h)
 	require.EqualValues(t, 0, row.Usage.Limit7d)
 	require.EqualValues(t, 700, row.Usage.TotalUsed)
@@ -1487,7 +1636,7 @@ func TestListValuePackageManagementRowsIncludesResetCountAndUsage(t *testing.T) 
 	plan.Limit7dAmount = 500
 	require.NoError(t, DB.Save(&plan).Error)
 	user := createValuePackageUser(t, 3020, UserGroupTiyan)
-	sub := createActiveValuePackageSub(t, user.Id, plan, now-100, now+86400)
+	sub := createActiveValuePackageSub(t, user.Id, plan, now-3600, now+86400)
 	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 4}).Error)
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "mgmt-usage", Quota: 25, CreatedAt: now - 1800}))
 
@@ -1530,7 +1679,7 @@ func TestListValuePackageManagementRowsUsesFixedFiveHourWindow(t *testing.T) {
 	require.NotNil(t, result.Items[0].Usage)
 	require.EqualValues(t, 0, result.Items[0].Usage.Used5h)
 	require.EqualValues(t, 0, result.Items[0].Usage.ResetSeconds5h)
-	require.EqualValues(t, 95, result.Items[0].Usage.Used7d)
+	require.EqualValues(t, 0, result.Items[0].Usage.Used7d)
 }
 
 func TestListValuePackageManagementRowsFiltersAndPaginatesInDatabaseSemantics(t *testing.T) {
@@ -1666,7 +1815,7 @@ func TestRefundSubscriptionPreConsumeRevokesValuePackageUsageReservation(t *test
 	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, now)
 	require.NoError(t, err)
 	require.EqualValues(t, 100, used5h)
-	require.EqualValues(t, 100, used7d)
+	require.EqualValues(t, 0, used7d)
 
 	require.NoError(t, RefundSubscriptionPreConsume("vp-refund-reservation"))
 	var reloaded UserSubscription

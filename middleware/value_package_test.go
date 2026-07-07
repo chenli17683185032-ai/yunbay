@@ -99,7 +99,7 @@ func seedValuePackageMiddlewareStateForPackage(t *testing.T, packageType string,
 	}
 	require.NoError(t, model.DB.Create(&plan).Error)
 	now := common.GetTimestamp()
-	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, StartTime: now - 10, EndTime: now + int64(time.Hour/time.Second), Status: model.UserSubscriptionStatusActive, Source: "test"}
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, StartTime: now - int64((7*time.Hour)/time.Second), EndTime: now + int64(time.Hour/time.Second), Status: model.UserSubscriptionStatusActive, Source: "test"}
 	require.NoError(t, model.DB.Create(&sub).Error)
 	pref := model.UserValuePackagePreference{UserId: user.Id, Enabled: enabled, ActiveUserSubscriptionId: sub.Id}
 	require.NoError(t, model.DB.Create(&pref).Error)
