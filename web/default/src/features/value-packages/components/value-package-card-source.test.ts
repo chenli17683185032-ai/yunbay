@@ -61,3 +61,15 @@ test('value package card source keeps required user controls and limit copy', as
     /Closing package usage does not pause its countdown|停止使用.*继续计时|关闭.*不会暂停/
   )
 })
+
+test('value package reset quota button is rendered directly below the main action button', async () => {
+  const source = await readFile(sourcePath, 'utf8')
+
+  assert.match(source, /onResetQuota/)
+  assert.match(source, /Reset quota/)
+  assert.match(source, /Remaining reset count/)
+  assert.match(
+    source,
+    /<CardFooter[\s\S]*<Button[\s\S]*onClick=\{handleAction\}[\s\S]*\{actionLabel\}[\s\S]*<Button[\s\S]*onClick=\{handleResetQuota\}[\s\S]*\{t\('Reset quota'\)\}[\s\S]*<\/CardFooter>/
+  )
+})

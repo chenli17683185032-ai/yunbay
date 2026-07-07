@@ -126,6 +126,7 @@ export function ValuePackages() {
                     onPurchase={valuePackages.purchase}
                     onActivate={valuePackages.activate}
                     onDeactivate={valuePackages.deactivate}
+                    onResetQuota={valuePackages.resetQuota}
                   />
                 ))}
               </div>

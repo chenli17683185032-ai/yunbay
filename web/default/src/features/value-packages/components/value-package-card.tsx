@@ -23,6 +23,7 @@ import {
   Loader2,
   PauseCircle,
   Play,
+  RotateCcw,
   Shield,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -60,6 +61,7 @@ interface ValuePackageCardProps {
   onPurchase: (plan: ValuePackagePlan) => void
   onActivate: (userSubscriptionId: number) => void
   onDeactivate: () => void
+  onResetQuota: (userSubscriptionId?: number) => void
 }
 
 function getValuePackageDisplayCurrency(currencyOverride?: string): string {
@@ -243,6 +245,7 @@ export function ValuePackageCard({
   onPurchase,
   onActivate,
   onDeactivate,
+  onResetQuota,
 }: ValuePackageCardProps) {
   const { t } = useTranslation()
   const cardState = getPackageCardState(plan, state)
@@ -251,11 +254,15 @@ export function ValuePackageCard({
     plan.ldxp_product_name &&
     Number(plan.ldxp_product_amount) > 0
   )
-  const isBusy =
+  const resetTargetSubscriptionId = cardState.userSubscriptionId || undefined
+  const resetBusy =
+    actionKey === `reset-quota-${resetTargetSubscriptionId || 'active'}`
+  const mainActionBusy =
     actionKey === `purchase-${plan.id}` ||
     actionKey === `activate-${cardState.userSubscriptionId || 0}` ||
     actionKey === 'deactivate' ||
     actionKey === `redeem-${plan.id}`
+  const isBusy = mainActionBusy || resetBusy
   const requiresPayment =
     cardState.kind === 'purchase' || cardState.kind === 'expired'
   const disabled =
@@ -278,6 +285,15 @@ export function ValuePackageCard({
   const exhaustedMessage =
     usage?.exhausted_message ||
     '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
+  const resetCount = Number(state?.preference?.reset_count || 0)
+  const canShowResetQuota =
+    cardState.kind === 'running' || cardState.kind === 'start'
+  const resetDisabled =
+    !canShowResetQuota ||
+    resetBusy ||
+    mainActionBusy ||
+    resetCount <= 0 ||
+    !resetTargetSubscriptionId
 
   const handleRedeemCode = () => {
     onRedeemCode(plan.id)
@@ -310,6 +326,23 @@ export function ValuePackageCard({
     if (cardState.kind === 'purchase' || cardState.kind === 'expired') {
       onPurchase(plan)
     }
+  }
+
+  const handleResetQuota = () => {
+    if (resetDisabled) {
+      return
+    }
+
+    const confirmed = window.confirm(
+      t(
+        "This will consume 1 reset count and clear your current package's 5-hour and 7-day usage windows. It will not restore total quota or extend expiration."
+      )
+    )
+    if (!confirmed) {
+      return
+    }
+
+    onResetQuota(resetTargetSubscriptionId)
   }
 
   return (
@@ -487,21 +520,42 @@ export function ValuePackageCard({
         ) : null}
       </CardContent>
 
-      <CardFooter className='bg-muted/35 p-4 sm:p-5'>
+      <CardFooter className='bg-muted/35 flex flex-col gap-2 p-4 sm:p-5'>
         <Button
           className='w-full'
           variant={cardState.kind === 'running' ? 'outline' : 'default'}
           disabled={disabled}
           onClick={handleAction}
         >
-          {isBusy ? (
+          {mainActionBusy ? (
             <Loader2 className='animate-spin' data-icon='inline-start' />
           ) : null}
-          {cardState.kind === 'start' && !isBusy ? (
+          {cardState.kind === 'start' && !mainActionBusy ? (
             <Play data-icon='inline-start' />
           ) : null}
           {actionLabel}
         </Button>
+        {canShowResetQuota ? (
+          <>
+            <Button
+              type='button'
+              className='w-full'
+              variant='outline'
+              disabled={resetDisabled}
+              onClick={handleResetQuota}
+            >
+              {resetBusy ? (
+                <Loader2 className='animate-spin' data-icon='inline-start' />
+              ) : (
+                <RotateCcw data-icon='inline-start' />
+              )}
+              {t('Reset quota')}
+            </Button>
+            <div className='text-muted-foreground text-center text-xs'>
+              {t('Remaining reset count')}: {resetCount}
+            </div>
+          </>
+        ) : null}
       </CardFooter>
     </Card>
   )

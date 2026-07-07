@@ -81,6 +81,17 @@ export async function deactivateValuePackage(): Promise<
   return res.data
 }
 
+export async function resetValuePackageQuota(
+  userSubscriptionId?: number
+): Promise<ApiResponse<ValuePackageState>> {
+  const payload =
+    userSubscriptionId && userSubscriptionId > 0
+      ? { user_subscription_id: userSubscriptionId }
+      : {}
+  const res = await api.post('/api/value-packages/reset-quota', payload)
+  return res.data
+}
+
 export async function markVipUpgradeModalSeen(): Promise<
   ApiResponse<{ vip_upgrade_modal_seen: boolean }>
 > {

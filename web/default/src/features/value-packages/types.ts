@@ -119,6 +119,7 @@ export interface UserValuePackagePreference {
   user_id: number
   enabled: boolean
   active_user_subscription_id: number
+  reset_count: number
   created_at: number
   updated_at: number
 }

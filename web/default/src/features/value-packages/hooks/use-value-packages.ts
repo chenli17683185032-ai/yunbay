@@ -35,6 +35,7 @@ import {
   deactivateValuePackage,
   getValuePackagePlans,
   getValuePackagePurchaseIntent,
+  resetValuePackageQuota,
 } from '../api'
 import type {
   ValuePackageLdxpSessionResponse,
@@ -285,6 +286,36 @@ export function useValuePackages() {
     }
   }, [syncGlobalState, t])
 
+
+  const resetQuota = useCallback(
+    async (userSubscriptionId?: number) => {
+      const actionSubscriptionId = userSubscriptionId || 0
+      setActionKey(`reset-quota-${actionSubscriptionId || 'active'}`)
+      try {
+        const response = await resetValuePackageQuota(userSubscriptionId)
+        if (!isApiSuccess(response) || !response.data) {
+          const message = getErrorMessage(
+            response.message,
+            t('Failed to reset value package quota')
+          )
+          toast.error(message)
+          return false
+        }
+
+        setState(response.data)
+        syncGlobalState(response.data)
+        toast.success(t('Value package quota reset'))
+        return true
+      } catch (_error) {
+        toast.error(t('Failed to reset value package quota'))
+        return false
+      } finally {
+        setActionKey(null)
+      }
+    },
+    [syncGlobalState, t]
+  )
+
   const cancelPayment = useCallback(async () => {
     const sessionId = paymentSession?.session.session_id
     if (!sessionId || activeSessionIdRef.current !== sessionId) {
@@ -441,6 +472,7 @@ export function useValuePackages() {
     purchase,
     activate,
     deactivate,
+    resetQuota,
     cancelPayment,
     resetPayment,
   }
