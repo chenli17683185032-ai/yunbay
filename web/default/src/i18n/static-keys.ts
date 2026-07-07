@@ -30,6 +30,7 @@ export const STATIC_I18N_KEYS = [
   // Sidebar views (drill-in workspaces)
   'System Settings',
   'Back to Dashboard',
+  'Value Package Management',
 
   // System settings sidebar
   'System Administration',

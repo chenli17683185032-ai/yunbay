@@ -18,12 +18,31 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getActiveValuePackageBillingLabel, getActiveValuePackageBillingRatio } from './billing-display'
+import {
+  getActiveValuePackageBillingLabel,
+  getActiveValuePackageBillingRatio,
+} from './billing-display'
 
 test('active billing ratio comes from backend billing state', () => {
   const state = {
-    preference: { id: 1, user_id: 1, enabled: true, active_user_subscription_id: 2, created_at: 1, updated_at: 1 },
-    billing: { active: true, routing_group: '', package_group: 'month-card', effective_ratio: 1, original_group_ratio: 0, plan_title: '月卡', plan_id: 2 },
+    preference: {
+      id: 1,
+      user_id: 1,
+      enabled: true,
+      active_user_subscription_id: 2,
+      reset_count: 0,
+      created_at: 1,
+      updated_at: 1,
+    },
+    billing: {
+      active: true,
+      routing_group: '',
+      package_group: 'month-card',
+      effective_ratio: 1,
+      original_group_ratio: 0,
+      plan_title: '月卡',
+      plan_id: 2,
+    },
   }
 
   assert.equal(getActiveValuePackageBillingRatio(state), 1)
@@ -32,8 +51,24 @@ test('active billing ratio comes from backend billing state', () => {
 
 test('inactive package has no billing ratio', () => {
   const state = {
-    preference: { id: 1, user_id: 1, enabled: false, active_user_subscription_id: 0, created_at: 1, updated_at: 2 },
-    billing: { active: false, routing_group: '', package_group: '', effective_ratio: 0, original_group_ratio: 0, plan_title: '', plan_id: 0 },
+    preference: {
+      id: 1,
+      user_id: 1,
+      enabled: false,
+      active_user_subscription_id: 0,
+      reset_count: 0,
+      created_at: 1,
+      updated_at: 2,
+    },
+    billing: {
+      active: false,
+      routing_group: '',
+      package_group: '',
+      effective_ratio: 0,
+      original_group_ratio: 0,
+      plan_title: '',
+      plan_id: 0,
+    },
   }
 
   assert.equal(getActiveValuePackageBillingRatio(state), undefined)

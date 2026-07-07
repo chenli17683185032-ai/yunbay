@@ -70,6 +70,15 @@ test('value package reset quota button is rendered directly below the main actio
   assert.match(source, /Remaining reset count/)
   assert.match(
     source,
+    /cardState\.kind === 'running' && state\?\.preference\?\.enabled === true/
+  )
+  const resetQuotaGate =
+    source.match(
+      /const canShowResetQuota =[\s\S]*?const resetDisabled =/
+    )?.[0] ?? ''
+  assert.doesNotMatch(resetQuotaGate, /cardState\.kind === 'start'/)
+  assert.match(
+    source,
     /<CardFooter[\s\S]*<Button[\s\S]*onClick=\{handleAction\}[\s\S]*\{actionLabel\}[\s\S]*<Button[\s\S]*onClick=\{handleResetQuota\}[\s\S]*\{t\('Reset quota'\)\}[\s\S]*<\/CardFooter>/
   )
 })

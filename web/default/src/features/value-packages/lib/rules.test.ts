@@ -82,6 +82,7 @@ function createPreference(
     user_id: 7,
     enabled: true,
     active_user_subscription_id: 501,
+    reset_count: 0,
     created_at: 0,
     updated_at: 0,
     ...overrides,

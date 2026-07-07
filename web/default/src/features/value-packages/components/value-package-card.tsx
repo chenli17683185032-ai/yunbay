@@ -42,12 +42,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import { formatValuePackageResetLine } from '../lib/reset-time'
 import {
   getPackageCardState,
   getPackageLevelLabel,
   type ValuePackageCardStateKind,
 } from '../lib/rules'
-import { formatValuePackageResetLine } from '../lib/reset-time'
 import type { ValuePackagePlan, ValuePackageState } from '../types'
 
 interface ValuePackageCardProps {
@@ -287,7 +287,7 @@ export function ValuePackageCard({
     '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
   const resetCount = Number(state?.preference?.reset_count || 0)
   const canShowResetQuota =
-    cardState.kind === 'running' || cardState.kind === 'start'
+    cardState.kind === 'running' && state?.preference?.enabled === true
   const resetDisabled =
     !canShowResetQuota ||
     resetBusy ||
