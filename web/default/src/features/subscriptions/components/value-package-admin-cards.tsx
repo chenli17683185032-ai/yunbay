@@ -34,6 +34,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
 import { getAdminPlans } from '../api'
 import { VALUE_PACKAGE_TYPES } from '../constants'
+import {
+  getValuePackageTotalLimitLabelKey,
+  shouldExposeValuePackage7dPeriodLimit,
+  VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY,
+} from '../lib/value-package-limit-labels'
 import type { PlanRecord, SubscriptionPlan } from '../types'
 import { useSubscriptions } from './subscriptions-provider'
 
@@ -252,6 +257,18 @@ export function ValuePackageAdminCards() {
                     </div>
                     <div className='flex justify-between gap-3'>
                       <span className='text-muted-foreground'>
+                        {t(
+                          getValuePackageTotalLimitLabelKey(
+                            plan.package_type
+                          ) || 'Package total limit'
+                        )}
+                      </span>
+                      <span className='font-medium'>
+                        {quotaUnitsToDollars(Number(plan.total_amount || 0))}
+                      </span>
+                    </div>
+                    <div className='flex justify-between gap-3'>
+                      <span className='text-muted-foreground'>
                         {t('Model group')}
                       </span>
                       <span className='font-medium'>
@@ -268,20 +285,26 @@ export function ValuePackageAdminCards() {
                     </div>
                     <div className='flex justify-between gap-3'>
                       <span className='text-muted-foreground'>
-                        limit_5h_amount
+                        {t('5-hour limit')}
                       </span>
                       <span className='font-medium'>
                         {quotaUnitsToDollars(Number(plan.limit_5h_amount || 0))}
                       </span>
                     </div>
-                    <div className='flex justify-between gap-3'>
-                      <span className='text-muted-foreground'>
-                        limit_7d_amount
-                      </span>
-                      <span className='font-medium'>
-                        {quotaUnitsToDollars(Number(plan.limit_7d_amount || 0))}
-                      </span>
-                    </div>
+                    {shouldExposeValuePackage7dPeriodLimit(
+                      plan.package_type
+                    ) && Number(plan.limit_7d_amount || 0) > 0 ? (
+                      <div className='flex justify-between gap-3'>
+                        <span className='text-muted-foreground'>
+                          {t(VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY)}
+                        </span>
+                        <span className='font-medium'>
+                          {quotaUnitsToDollars(
+                            Number(plan.limit_7d_amount || 0)
+                          )}
+                        </span>
+                      </div>
+                    ) : null}
                     <div className='text-muted-foreground truncate text-xs'>
                       ldxp_product_url:{' '}
                       {plan.ldxp_product_url || t('Not configured')}

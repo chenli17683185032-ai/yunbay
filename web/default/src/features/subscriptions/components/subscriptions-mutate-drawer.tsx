@@ -88,6 +88,13 @@ import {
   formValuesToPlanPayload,
   type PlanFormValues,
 } from '../lib'
+import {
+  getValuePackageTotalLimitDescriptionKey,
+  getValuePackageTotalLimitLabelKey,
+  shouldExposeValuePackage7dPeriodLimit,
+  VALUE_PACKAGE_7D_PERIOD_LIMIT_DESCRIPTION_KEY,
+  VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY,
+} from '../lib/value-package-limit-labels'
 import type { PlanRecord } from '../types'
 import { useSubscriptions } from './subscriptions-provider'
 
@@ -153,6 +160,15 @@ export function SubscriptionsMutateDrawer({
   const planKind = form.watch('plan_kind')
   const isValuePackage = planKind === 'value_package'
   const packageType = form.watch('package_type')
+  const showValuePackage7dPeriodLimit =
+    isValuePackage && shouldExposeValuePackage7dPeriodLimit(packageType)
+  const totalLimitLabelKey =
+    (isValuePackage && getValuePackageTotalLimitLabelKey(packageType)) ||
+    'Received amount'
+  const totalLimitDescriptionKey =
+    (isValuePackage &&
+      getValuePackageTotalLimitDescriptionKey(packageType)) ||
+    '0 means unlimited. The value is converted to quota units when saved.'
   const durationUnit = form.watch('duration_unit')
   const resetPeriod = form.watch('quota_reset_period')
   // Gate "+ Create on Pancake" on the same checks the mint handler runs.
@@ -181,6 +197,12 @@ export function SubscriptionsMutateDrawer({
       })
       form.setValue('custom_seconds', duration.custom_seconds, {
         shouldDirty: true,
+      })
+    }
+    if (!shouldExposeValuePackage7dPeriodLimit(packageType)) {
+      form.setValue('limit_7d_amount', 0, {
+        shouldDirty: true,
+        shouldValidate: true,
       })
     }
   }, [form, isValuePackage, packageType])
@@ -426,7 +448,7 @@ export function SubscriptionsMutateDrawer({
                   name='total_amount'
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>{t('Received amount')}</FormLabel>
+                      <FormLabel>{t(totalLimitLabelKey)}</FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -438,9 +460,7 @@ export function SubscriptionsMutateDrawer({
                         />
                       </FormControl>
                       <FormDescription>
-                        {t(
-                          '0 means unlimited. The value is converted to quota units when saved.'
-                        )}
+                        {t(totalLimitDescriptionKey)}
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -720,31 +740,35 @@ export function SubscriptionsMutateDrawer({
                     )}
                   />
 
-                  <FormField
-                    control={form.control}
-                    name='limit_7d_amount'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>limit_7d_amount</FormLabel>
-                        <FormControl>
-                          <Input
-                            {...field}
-                            type='number'
-                            min={0}
-                            onChange={(e) =>
-                              field.onChange(parseFloat(e.target.value) || 0)
-                            }
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {t(
-                            '7-day limit in displayed dollars; converted to quota units when saved.'
-                          )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                  {showValuePackage7dPeriodLimit ? (
+                    <FormField
+                      control={form.control}
+                      name='limit_7d_amount'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            {t(VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY)}
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              type='number'
+                              min={0}
+                              onChange={(e) =>
+                                field.onChange(parseFloat(e.target.value) || 0)
+                              }
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              VALUE_PACKAGE_7D_PERIOD_LIMIT_DESCRIPTION_KEY
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ) : null}
                 </div>
 
                 <FormField

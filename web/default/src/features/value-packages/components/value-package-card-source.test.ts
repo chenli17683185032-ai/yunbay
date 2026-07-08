@@ -28,9 +28,12 @@ test('value package card source keeps required user controls and limit copy', as
   assert.match(source, /▶/)
   assert.match(source, /Close package usage|关闭使用/)
   assert.match(source, /5-hour limit|5 小时限额/)
-  assert.match(source, /7-day limit|7 天限额/)
+  assert.match(source, /VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY/)
   assert.match(source, /Progress/)
   assert.match(source, /Package total limit/)
+  assert.match(source, /getValuePackageTotalLimitLabelKey/)
+  assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
+  assert.match(source, /VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY/)
   assert.match(source, /formatUsageAmount/)
   assert.match(source, /getProgressToneClass/)
   assert.match(source, /formatValuePackageResetLine/)
@@ -45,7 +48,19 @@ test('value package card source keeps required user controls and limit copy', as
   assert.match(source, /Math\.round\(amount \|\| 0\)/)
   assert.match(
     source,
-    /label=\{t\('Package total limit'\)\}[\s\S]*?percent=\{usage\.total_percent\}/
+    /getValuePackageTotalLimitLabelKey\(plan\.package_type\)[\s\S]*?'Package total limit'[\s\S]*?percent=\{usage\.total_percent\}/
+  )
+  assert.match(
+    source,
+    /show7dPeriodLimit && Number\(plan\.limit_7d_amount \|\| 0\) > 0/
+  )
+  assert.match(
+    source,
+    /show7dPeriodLimit && usage\.limit_7d > 0/
+  )
+  assert.match(
+    source,
+    /usage &&\s*\([\s\S]*?usage\.total_limit > 0[\s\S]*?usage\.limit_5h > 0[\s\S]*?\(show7dPeriodLimit && usage\.limit_7d > 0\)/
   )
   assert.match(source, /getValuePackageDisplayCurrency/)
   assert.match(source, /currencyOverride/)

@@ -42,6 +42,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
+import {
+  getValuePackageTotalLimitLabelKey,
+  shouldExposeValuePackage7dPeriodLimit,
+  VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY,
+  VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY,
+} from '@/features/subscriptions/lib/value-package-limit-labels'
 import { formatValuePackageResetLine } from '../lib/reset-time'
 import {
   getPackageCardState,
@@ -275,13 +281,19 @@ export function ValuePackageCard({
       ? t('Not available yet')
       : getActionLabel(cardState.kind, t)
   const packageLabel = getPackageLevelLabel(plan.package_type)
+  const show7dPeriodLimit = shouldExposeValuePackage7dPeriodLimit(
+    plan.package_type
+  )
   const benefits = getBenefits(plan, t)
   const displayPrice = Number(
     plan.ldxp_product_amount || plan.price_amount || 0
   )
   const usage = state?.subscription?.plan_id === plan.id ? state.usage : null
   const hasUsageProgress =
-    usage && (usage.total_limit > 0 || usage.limit_5h > 0 || usage.limit_7d > 0)
+    usage &&
+    (usage.total_limit > 0 ||
+      usage.limit_5h > 0 ||
+      (show7dPeriodLimit && usage.limit_7d > 0))
   const exhaustedMessage =
     usage?.exhausted_message ||
     '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
@@ -333,11 +345,7 @@ export function ValuePackageCard({
       return
     }
 
-    const confirmed = window.confirm(
-      t(
-        "This will consume 1 reset count and clear your current package's 5-hour and 7-day usage windows. It will not restore total quota or extend expiration."
-      )
-    )
+    const confirmed = window.confirm(t(VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY))
     if (!confirmed) {
       return
     }
@@ -419,20 +427,25 @@ export function ValuePackageCard({
               {formatLimitAmount(Number(plan.limit_5h_amount || 0), t)}
             </div>
           </div>
-          <div className='rounded-lg border p-3'>
-            <div className='text-muted-foreground text-xs font-medium'>
-              {t('7-day limit')}
+          {show7dPeriodLimit && Number(plan.limit_7d_amount || 0) > 0 ? (
+            <div className='rounded-lg border p-3'>
+              <div className='text-muted-foreground text-xs font-medium'>
+                {t(VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY)}
+              </div>
+              <div className='mt-1 font-semibold tabular-nums'>
+                {formatLimitAmount(Number(plan.limit_7d_amount || 0), t)}
+              </div>
             </div>
-            <div className='mt-1 font-semibold tabular-nums'>
-              {formatLimitAmount(Number(plan.limit_7d_amount || 0), t)}
-            </div>
-          </div>
+          ) : null}
         </div>
 
         {hasUsageProgress ? (
           <div className='flex flex-col gap-3 rounded-lg border p-3'>
             <LimitProgressRow
-              label={t('Package total limit')}
+              label={t(
+                getValuePackageTotalLimitLabelKey(plan.package_type) ||
+                  'Package total limit'
+              )}
               used={usage.total_used}
               limit={usage.total_limit}
               percent={usage.total_percent}
@@ -446,15 +459,17 @@ export function ValuePackageCard({
               limited={usage.limited_5h}
               showReset
             />
-            <LimitProgressRow
-              label={t('7-day limit')}
-              used={usage.used_7d}
-              limit={usage.limit_7d}
-              percent={usage.percent_7d}
-              resetSeconds={usage.reset_seconds_7d}
-              limited={usage.limited_7d}
-              showReset
-            />
+            {show7dPeriodLimit && usage.limit_7d > 0 ? (
+              <LimitProgressRow
+                label={t(VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY)}
+                used={usage.used_7d}
+                limit={usage.limit_7d}
+                percent={usage.percent_7d}
+                resetSeconds={usage.reset_seconds_7d}
+                limited={usage.limited_7d}
+                showReset
+              />
+            ) : null}
           </div>
         ) : null}
 

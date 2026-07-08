@@ -31,3 +31,17 @@ test('value package admin cards show stats and redemption entry on each card', a
   assert.match(source, /Generate Codes/)
   assert.match(source, /setOpen\('generate-redemptions'\)/)
 })
+
+test('value package admin cards use dynamic total and month-only 7d period labels', async () => {
+  const source = await readFile(sourcePath, 'utf8')
+
+  assert.match(source, /getValuePackageTotalLimitLabelKey/)
+  assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
+  assert.match(source, /VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY/)
+  assert.match(source, /Number\(plan\.total_amount \|\| 0\)/)
+  assert.match(source, /\{t\('5-hour limit'\)\}/)
+  assert.match(
+    source,
+    /shouldExposeValuePackage7dPeriodLimit\([\s\S]*?plan\.package_type[\s\S]*?\) && Number\(plan\.limit_7d_amount \|\| 0\) > 0/
+  )
+})

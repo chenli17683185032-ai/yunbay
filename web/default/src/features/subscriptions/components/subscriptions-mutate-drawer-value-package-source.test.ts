@@ -51,3 +51,13 @@ test('mutate drawer source exposes complete value package fields', async () => {
   assert.match(source, /disabled=\{isValuePackage\}/)
   assert.match(source, /保存后用户购买将直接调用现有联动小铺支付系统创建付款会话|existing LDXP payment system/)
 })
+
+test('mutate drawer source uses dynamic value package total and month-only 7d period labels', async () => {
+  const source = await readFile(sourcePath, 'utf8')
+
+  assert.match(source, /getValuePackageTotalLimitLabelKey/)
+  assert.match(source, /getValuePackageTotalLimitDescriptionKey/)
+  assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
+  assert.match(source, /VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY/)
+  assert.doesNotMatch(source, /<FormLabel>limit_7d_amount<\/FormLabel>/)
+})
