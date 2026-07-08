@@ -65,8 +65,8 @@ export const VALUE_PACKAGE_TYPES = [
     value: 'month',
     labelKey: 'Month Card',
     level: 3,
-    durationUnit: 'month',
-    durationValue: 1,
+    durationUnit: 'day',
+    durationValue: 30,
   },
 ] as const
 

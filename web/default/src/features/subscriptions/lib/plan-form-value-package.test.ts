@@ -18,12 +18,26 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { getValuePackageDuration } from '../constants'
 import type { SubscriptionPlan } from '../types'
 import {
   formValuesToPlanPayload,
   planToFormValues,
   PLAN_FORM_DEFAULTS,
 } from './plan-form'
+
+test('value package durations use fixed day-based validity windows', () => {
+  assert.deepEqual(getValuePackageDuration('week'), {
+    duration_unit: 'day',
+    duration_value: 7,
+    custom_seconds: 0,
+  })
+  assert.deepEqual(getValuePackageDuration('month'), {
+    duration_unit: 'day',
+    duration_value: 30,
+    custom_seconds: 0,
+  })
+})
 
 test('value package limit fields convert dollars to quota payload', () => {
   const values = {
@@ -72,6 +86,57 @@ test('value package package_type controls submitted duration', () => {
   assert.equal(payload.plan.duration_unit, 'day')
   assert.equal(payload.plan.duration_value, 7)
   assert.equal(payload.plan.custom_seconds, 0)
+})
+
+test('week value package payload uses 7-day duration and clears stale 7-day period limit', () => {
+  const values = {
+    ...PLAN_FORM_DEFAULTS,
+    title: '周卡',
+    plan_kind: 'value_package' as const,
+    package_type: 'week' as const,
+    total_amount: 700,
+    limit_7d_amount: 99,
+  }
+
+  const payload = formValuesToPlanPayload(values)
+
+  assert.equal(payload.plan.duration_unit, 'day')
+  assert.equal(payload.plan.duration_value, 7)
+  assert.equal(typeof payload.plan.total_amount, 'number')
+  assert.equal(payload.plan.limit_7d_amount, 0)
+})
+
+test('month value package payload uses 30-day duration and keeps positive 7-day period limit', () => {
+  const values = {
+    ...PLAN_FORM_DEFAULTS,
+    title: '月卡',
+    plan_kind: 'value_package' as const,
+    package_type: 'month' as const,
+    total_amount: 3000,
+    limit_7d_amount: 700,
+  }
+
+  const payload = formValuesToPlanPayload(values)
+
+  assert.equal(payload.plan.duration_unit, 'day')
+  assert.equal(payload.plan.duration_value, 30)
+  assert.equal(typeof payload.plan.total_amount, 'number')
+  assert.equal(typeof payload.plan.limit_7d_amount, 'number')
+  assert.ok(Number(payload.plan.limit_7d_amount) > 0)
+})
+
+test('day value package payload clears stale 7-day period limit', () => {
+  const values = {
+    ...PLAN_FORM_DEFAULTS,
+    title: '日卡',
+    plan_kind: 'value_package' as const,
+    package_type: 'day' as const,
+    limit_7d_amount: 500,
+  }
+
+  const payload = formValuesToPlanPayload(values)
+
+  assert.equal(payload.plan.limit_7d_amount, 0)
 })
 
 test('planToFormValues preserves per-card ldxp payment config', () => {

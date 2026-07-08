@@ -21,6 +21,7 @@ import type { TFunction } from 'i18next'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 import { getValuePackageDuration, getValuePackageLevel } from '../constants'
 import type { SubscriptionPlan, PlanPayload } from '../types'
+import { shouldExposeValuePackage7dPeriodLimit } from './value-package-limit-labels'
 
 export function getPlanFormSchema(t: TFunction) {
   return z.object({
@@ -170,9 +171,11 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
       limit_5h_amount: parseQuotaFromDollars(
         Number(values.limit_5h_amount || 0)
       ),
-      limit_7d_amount: parseQuotaFromDollars(
-        Number(values.limit_7d_amount || 0)
-      ),
+      limit_7d_amount: shouldExposeValuePackage7dPeriodLimit(
+        values.package_type
+      )
+        ? parseQuotaFromDollars(Number(values.limit_7d_amount || 0))
+        : 0,
       benefits: values.benefits || '',
       ldxp_product_url: values.ldxp_product_url || '',
       ldxp_product_name: values.ldxp_product_name || '',
