@@ -303,7 +303,7 @@ func TestValuePackageMiddlewareKeepsOriginalUserGroupForPermissions(t *testing.T
 	require.Equal(t, model.UserGroupVIP, reloaded.Group)
 }
 
-func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
+func TestValuePackageMiddlewareRejectsOverPeriodWindows(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
 	now := common.GetTimestamp()
@@ -326,9 +326,17 @@ func TestValuePackageMiddlewareRejectsOverRollingWindows(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"day-card"`)
 
 	weekUser, weekPlan, weekSub := seedValuePackageMiddlewareStateForPackage(t, model.ValuePackageTypeWeek, model.ValuePackageLevelWeek, true, 0, 100, 1)
-	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: weekUser.Id, UserSubscriptionId: weekSub.Id, PlanId: weekPlan.Id, PackageType: weekPlan.PackageType, ModelGroup: weekPlan.ModelGroup, RequestId: "week-hit-7d", Quota: 100, CreatedAt: now - int64(6*time.Hour/time.Second)}))
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: weekUser.Id, UserSubscriptionId: weekSub.Id, PlanId: weekPlan.Id, PackageType: weekPlan.PackageType, ModelGroup: weekPlan.ModelGroup, RequestId: "week-legacy-7d-ignored", Quota: 100, CreatedAt: now - int64(6*time.Hour/time.Second)}))
 
 	recorder = runValuePackageMiddlewareRequest(t, weekUser.Id, "gpt-plus")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"week-card"`)
+
+	monthUser, monthPlan, monthSub := seedValuePackageMiddlewareStateForPackage(t, model.ValuePackageTypeMonth, model.ValuePackageLevelMonth, true, 0, 100, 1)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: monthUser.Id, UserSubscriptionId: monthSub.Id, PlanId: monthPlan.Id, PackageType: monthPlan.PackageType, ModelGroup: monthPlan.ModelGroup, RequestId: "month-hit-7d-period", Quota: 100, CreatedAt: now - int64(6*time.Hour/time.Second)}))
+
+	recorder = runValuePackageMiddlewareRequest(t, monthUser.Id, "gpt-plus")
 
 	require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), model.ValuePackageQuotaExhaustedUserMessage)

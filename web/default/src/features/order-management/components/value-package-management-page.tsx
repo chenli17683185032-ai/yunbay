@@ -70,6 +70,7 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { SectionPageLayout } from '@/components/layout'
+import { shouldExposeValuePackage7dPeriodLimit } from '@/features/subscriptions/lib/value-package-limit-labels'
 import { formatValuePackageResetLine } from '@/features/value-packages/lib/reset-time'
 import {
   adjustOrderManagementValuePackageResetCount,
@@ -162,6 +163,38 @@ function WindowQuotaCell({
         {resetLine}
       </div>
     </div>
+  )
+}
+
+function Period7dQuotaCell({
+  packageType,
+  used,
+  limit,
+  percent,
+  resetSeconds,
+  limited,
+}: {
+  packageType?: string
+  used: number
+  limit: number
+  percent: number
+  resetSeconds?: number
+  limited?: boolean
+}) {
+  const { t } = useTranslation()
+
+  if (!shouldExposeValuePackage7dPeriodLimit(packageType) || limit <= 0) {
+    return <span className='text-muted-foreground'>{t('Not applicable')}</span>
+  }
+
+  return (
+    <WindowQuotaCell
+      used={used}
+      limit={limit}
+      percent={percent}
+      resetSeconds={resetSeconds}
+      limited={limited}
+    />
   )
 }
 
@@ -501,7 +534,7 @@ export function ValuePackageManagementPage() {
                 <CardTitle>{t('Value Package Management')}</CardTitle>
                 <CardDescription>
                   {t('Reset count')} / {t('5-hour remaining')} /{' '}
-                  {t('7-day remaining')}
+                  {t('7-day period remaining')}
                 </CardDescription>
               </CardHeader>
               <CardContent className='min-h-0 flex-1'>
@@ -514,7 +547,7 @@ export function ValuePackageManagementPage() {
                         <TableHead>{t('Status')}</TableHead>
                         <TableHead>{t('Reset count')}</TableHead>
                         <TableHead>{t('5-hour remaining')}</TableHead>
-                        <TableHead>{t('7-day remaining')}</TableHead>
+                        <TableHead>{t('7-day period remaining')}</TableHead>
                         <TableHead>{t('Package total remaining')}</TableHead>
                         <TableHead>{t('Last reset')}</TableHead>
                         <TableHead>{t('Expires at')}</TableHead>
@@ -539,7 +572,7 @@ export function ValuePackageManagementPage() {
                                 </EmptyTitle>
                                 <EmptyDescription>
                                   {t(
-                                    'Users who enable day, week, or month cards will appear here with synced 5-hour and 7-day usage.'
+                                    'Users who enable value package cards will appear here with synced 5-hour, month-card 7-day period, and package total usage.'
                                   )}
                                 </EmptyDescription>
                               </EmptyHeader>
@@ -602,7 +635,8 @@ export function ValuePackageManagementPage() {
                                 />
                               </TableCell>
                               <TableCell>
-                                <WindowQuotaCell
+                                <Period7dQuotaCell
+                                  packageType={row.package_type}
                                   used={usage?.used_7d || 0}
                                   limit={usage?.limit_7d || 0}
                                   percent={usage?.percent_7d || 0}

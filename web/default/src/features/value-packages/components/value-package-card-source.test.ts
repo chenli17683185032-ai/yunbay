@@ -21,6 +21,10 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const sourcePath = new URL('./value-package-card.tsx', import.meta.url)
+const staleDefaultBenefitCopy = [
+  '5-hour limit and 7-day limit ',
+  'protection',
+].join('')
 
 test('value package card source keeps required user controls and limit copy', async () => {
   const source = await readFile(sourcePath, 'utf8')
@@ -31,6 +35,8 @@ test('value package card source keeps required user controls and limit copy', as
   assert.match(source, /VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY/)
   assert.match(source, /Progress/)
   assert.match(source, /Package total limit/)
+  assert.match(source, /Package total limit and 5-hour protection/)
+  assert.equal(source.includes(staleDefaultBenefitCopy), false)
   assert.match(source, /getValuePackageTotalLimitLabelKey/)
   assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
   assert.match(source, /VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY/)
@@ -54,10 +60,7 @@ test('value package card source keeps required user controls and limit copy', as
     source,
     /show7dPeriodLimit && Number\(plan\.limit_7d_amount \|\| 0\) > 0/
   )
-  assert.match(
-    source,
-    /show7dPeriodLimit && usage\.limit_7d > 0/
-  )
+  assert.match(source, /show7dPeriodLimit && usage\.limit_7d > 0/)
   assert.match(
     source,
     /usage &&\s*\([\s\S]*?usage\.total_limit > 0[\s\S]*?usage\.limit_5h > 0[\s\S]*?\(show7dPeriodLimit && usage\.limit_7d > 0\)/

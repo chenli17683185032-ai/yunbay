@@ -1335,6 +1335,7 @@ func normalizeValuePackageFixedDurationFields(plan *SubscriptionPlan) {
 		plan.DurationUnit = SubscriptionDurationDay
 		plan.DurationValue = 7
 		plan.CustomSeconds = 0
+		plan.Limit7dAmount = 0
 	case ValuePackageTypeMonth:
 		plan.DurationUnit = SubscriptionDurationDay
 		plan.DurationValue = 30
@@ -2974,7 +2975,7 @@ func calcValuePackageAnchoredWindow(startTime int64, endTime int64, windowSecond
 }
 
 func valuePackageHas7dWindow(plan *SubscriptionPlan) bool {
-	return plan != nil && plan.IsValuePackage() && plan.PackageType != ValuePackageTypeDay && plan.Limit7dAmount > 0
+	return plan != nil && plan.IsValuePackage() && plan.PackageType == ValuePackageTypeMonth && plan.Limit7dAmount > 0
 }
 
 func valuePackageResetClears7d(plan *SubscriptionPlan) bool {

@@ -375,7 +375,6 @@ func validAdminValuePackagePlanForTest(packageType string) model.SubscriptionPla
 	switch packageType {
 	case model.ValuePackageTypeWeek:
 		level = model.ValuePackageLevelWeek
-		limit7dAmount = 1000
 	case model.ValuePackageTypeMonth:
 		level = model.ValuePackageLevelMonth
 		limit7dAmount = 1000
@@ -1097,11 +1096,19 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageValidationCases(t 
 			mutate: func(plan *model.SubscriptionPlan) {
 				plan.Limit7dAmount = 1
 			},
-			message: "日卡不支持7天额度",
+			message: "日卡和周卡不支持7天阶段限额",
 		},
 		{
-			name:        "7d lower than 5h",
+			name:        "week 7d limit unsupported",
 			packageType: model.ValuePackageTypeWeek,
+			mutate: func(plan *model.SubscriptionPlan) {
+				plan.Limit7dAmount = 1
+			},
+			message: "日卡和周卡不支持7天阶段限额",
+		},
+		{
+			name:        "month 7d lower than 5h",
+			packageType: model.ValuePackageTypeMonth,
 			mutate: func(plan *model.SubscriptionPlan) {
 				plan.Limit5hAmount = 1000
 				plan.Limit7dAmount = 999

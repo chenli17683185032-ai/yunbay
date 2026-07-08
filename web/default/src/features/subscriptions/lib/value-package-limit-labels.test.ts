@@ -39,6 +39,16 @@ const staleLocaleKeys = [
     '7-day limit',
     ' in displayed dollars; converted to quota units when saved.',
   ].join(''),
+  ['7-day ', 'remaining'].join(''),
+  [
+    'Realtime 5-hour and 7-day remaining ',
+    'quota for active day, week, and month card users.',
+  ].join(''),
+  [
+    'Users who enable day, week, or month cards will appear here with synced 5-hour and 7-day ',
+    'usage.',
+  ].join(''),
+  ['5-hour limit and 7-day limit ', 'protection'].join(''),
 ]
 
 test('value package total limit labels describe the full valid period', () => {
@@ -69,7 +79,11 @@ test('value package limit locales do not keep stale rolling-window-era copy', ()
       .translation as Record<string, string>
 
     for (const staleKey of staleLocaleKeys) {
-      assert.equal(translation[staleKey], undefined, `${localeName}: ${staleKey}`)
+      assert.equal(
+        translation[staleKey],
+        undefined,
+        `${localeName}: ${staleKey}`
+      )
     }
   }
 })

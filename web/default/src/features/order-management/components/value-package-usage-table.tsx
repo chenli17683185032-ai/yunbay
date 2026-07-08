@@ -39,6 +39,7 @@ import {
 } from '@/components/ui/table'
 import { TitledCard } from '@/components/ui/titled-card'
 import { VALUE_PACKAGE_TYPES } from '@/features/subscriptions/constants'
+import { shouldExposeValuePackage7dPeriodLimit } from '@/features/subscriptions/lib/value-package-limit-labels'
 import { formatValuePackageResetLine } from '@/features/value-packages/lib/reset-time'
 import type {
   OrderManagementValuePackageUsageRow,
@@ -114,6 +115,38 @@ function WindowQuotaCell({
   )
 }
 
+function Period7dQuotaCell({
+  packageType,
+  used,
+  limit,
+  percent,
+  resetSeconds,
+  limited,
+}: {
+  packageType?: string
+  used: number
+  limit: number
+  percent: number
+  resetSeconds?: number
+  limited?: boolean
+}) {
+  const { t } = useTranslation()
+
+  if (!shouldExposeValuePackage7dPeriodLimit(packageType) || limit <= 0) {
+    return <span className='text-muted-foreground'>{t('Not applicable')}</span>
+  }
+
+  return (
+    <WindowQuotaCell
+      used={used}
+      limit={limit}
+      percent={percent}
+      resetSeconds={resetSeconds}
+      limited={limited}
+    />
+  )
+}
+
 function TotalRemainingCell({
   usage,
 }: {
@@ -148,13 +181,11 @@ export function ValuePackageUsageTable({
     <TitledCard
       title={t('Value Package Realtime Usage')}
       description={t(
-        'Realtime 5-hour and 7-day remaining quota for active day, week, and month card users.'
+        'Realtime 5-hour remaining, month-card 7-day period remaining, and package total quota for active value package users.'
       )}
       icon={<Sparkles className='size-4' />}
       action={
-        <Badge variant='secondary'>
-          {t('Auto-refresh every 15 seconds')}
-        </Badge>
+        <Badge variant='secondary'>{t('Auto-refresh every 15 seconds')}</Badge>
       }
       contentClassName='flex flex-col gap-3'
     >
@@ -173,7 +204,7 @@ export function ValuePackageUsageTable({
             <EmptyTitle>{t('No active value package users')}</EmptyTitle>
             <EmptyDescription>
               {t(
-                'Users who enable day, week, or month cards will appear here with synced 5-hour and 7-day usage.'
+                'Users who enable value package cards will appear here with synced 5-hour, month-card 7-day period, and package total usage.'
               )}
             </EmptyDescription>
           </EmptyHeader>
@@ -186,7 +217,7 @@ export function ValuePackageUsageTable({
               <TableHead>{t('Package')}</TableHead>
               <TableHead>{t('Model group')}</TableHead>
               <TableHead>{t('5-hour remaining')}</TableHead>
-              <TableHead>{t('7-day remaining')}</TableHead>
+              <TableHead>{t('7-day period remaining')}</TableHead>
               <TableHead>{t('Package total remaining')}</TableHead>
               <TableHead>{t('Expires at')}</TableHead>
             </TableRow>
@@ -235,7 +266,8 @@ export function ValuePackageUsageTable({
                     />
                   </TableCell>
                   <TableCell>
-                    <WindowQuotaCell
+                    <Period7dQuotaCell
+                      packageType={row.plan.package_type}
                       used={usage?.used_7d || 0}
                       limit={usage?.limit_7d || 0}
                       percent={usage?.percent_7d || 0}

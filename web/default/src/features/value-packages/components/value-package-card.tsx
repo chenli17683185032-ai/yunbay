@@ -218,7 +218,7 @@ function getBenefits(
   return [
     t('Dedicated package model group'),
     t('Independent concurrency control'),
-    t('5-hour limit and 7-day limit protection'),
+    t('Package total limit and 5-hour protection'),
   ]
 }
 

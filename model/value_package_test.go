@@ -426,11 +426,12 @@ func TestNormalizeValuePackagePlanUsesFixedDurations(t *testing.T) {
 	require.EqualValues(t, 0, day.CustomSeconds)
 	require.EqualValues(t, 0, day.Limit7dAmount)
 
-	week := SubscriptionPlan{PlanKind: SubscriptionPlanKindValuePackage, PackageType: ValuePackageTypeWeek, DurationUnit: SubscriptionDurationMonth, DurationValue: 99}
+	week := SubscriptionPlan{PlanKind: SubscriptionPlanKindValuePackage, PackageType: ValuePackageTypeWeek, DurationUnit: SubscriptionDurationMonth, DurationValue: 99, Limit7dAmount: 123}
 	normalizeValuePackagePlan(&week)
 	require.Equal(t, SubscriptionDurationDay, week.DurationUnit)
 	require.Equal(t, 7, week.DurationValue)
 	require.EqualValues(t, 0, week.CustomSeconds)
+	require.EqualValues(t, 0, week.Limit7dAmount)
 
 	month := SubscriptionPlan{PlanKind: SubscriptionPlanKindValuePackage, PackageType: ValuePackageTypeMonth, DurationUnit: SubscriptionDurationMonth, DurationValue: 1}
 	normalizeValuePackagePlan(&month)
@@ -474,7 +475,7 @@ func TestValuePackageWindowUsageAnchors7dToSubscriptionStart(t *testing.T) {
 }
 
 func TestValuePackageWindowUsageResetScopeByPackageType(t *testing.T) {
-	t.Run("week reset clears 5h only", func(t *testing.T) {
+	t.Run("week reset clears 5h only and ignores legacy 7d limit", func(t *testing.T) {
 		setupValuePackageTestDB(t)
 		user := createValuePackageUser(t, 3019, UserGroupTiyan)
 		week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
@@ -500,10 +501,10 @@ func TestValuePackageWindowUsageResetScopeByPackageType(t *testing.T) {
 		require.EqualValues(t, 30, details.Used5h)
 		require.EqualValues(t, afterResetAt, details.Earliest5hCreatedAt)
 		require.EqualValues(t, afterResetAt+valuePackage5hWindowSeconds, details.ResetAt5h)
-		require.EqualValues(t, 130, details.Used7d)
-		require.EqualValues(t, beforeResetAt, details.Earliest7dCreatedAt)
-		require.EqualValues(t, start+valuePackage7dWindowSeconds, details.ResetAt7d)
-		require.EqualValues(t, start+valuePackage7dWindowSeconds-now, details.ResetSeconds7d)
+		require.EqualValues(t, 0, details.Used7d)
+		require.EqualValues(t, 0, details.Earliest7dCreatedAt)
+		require.EqualValues(t, 0, details.ResetAt7d)
+		require.EqualValues(t, 0, details.ResetSeconds7d)
 	})
 
 	t.Run("month reset clears 5h and current 7d phase", func(t *testing.T) {
@@ -1544,7 +1545,7 @@ func TestCompleteSubscriptionOrderRejectsAlreadySuccessfulValuePackageOrder(t *t
 	require.Contains(t, err.Error(), "超值套餐仅支持联动小铺购买")
 }
 
-func TestPreConsumeValuePackageSubscriptionChecksRollingReservationWindows(t *testing.T) {
+func TestPreConsumeValuePackageSubscriptionChecksFixedPeriodReservationWindows(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3310, UserGroupTiyan)
 	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
@@ -1556,7 +1557,7 @@ func TestPreConsumeValuePackageSubscriptionChecksRollingReservationWindows(t *te
 	sub := createActiveValuePackageSub(t, user.Id, day, now-10, now+3600)
 	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: day.Id, PackageType: day.PackageType, ModelGroup: day.ModelGroup, RequestId: "existing-90", Quota: 90, CreatedAt: now}))
 
-	_, err := PreConsumeValuePackageSubscription("rolling-reserve-too-large", user.Id, sub.Id, 20)
+	_, err := PreConsumeValuePackageSubscription("period-reserve-too-large", user.Id, sub.Id, 20)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "subscription quota insufficient")
 
@@ -1564,10 +1565,10 @@ func TestPreConsumeValuePackageSubscriptionChecksRollingReservationWindows(t *te
 	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
 	require.EqualValues(t, 0, reloaded.AmountUsed)
 	var failedCount int64
-	require.NoError(t, DB.Model(&ValuePackageUsageRecord{}).Where("request_id = ?", "rolling-reserve-too-large").Count(&failedCount).Error)
+	require.NoError(t, DB.Model(&ValuePackageUsageRecord{}).Where("request_id = ?", "period-reserve-too-large").Count(&failedCount).Error)
 	require.EqualValues(t, 0, failedCount)
 
-	result, err := PreConsumeValuePackageSubscription("rolling-reserve-fits", user.Id, sub.Id, 10)
+	result, err := PreConsumeValuePackageSubscription("period-reserve-fits", user.Id, sub.Id, 10)
 	require.NoError(t, err)
 	require.Equal(t, sub.Id, result.UserSubscriptionId)
 	require.EqualValues(t, 10, result.PreConsumed)
@@ -1602,7 +1603,7 @@ func TestPreConsumeValuePackageSubscriptionIgnoresDayCard7dLimit(t *testing.T) {
 	require.EqualValues(t, 0, used7d)
 }
 
-func TestPreConsumeValuePackageSubscriptionWeekResetDoesNotClear7dLimit(t *testing.T) {
+func TestPreConsumeValuePackageSubscriptionIgnoresWeekCard7dPeriodLimit(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3321, UserGroupTiyan)
 	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
@@ -1615,21 +1616,21 @@ func TestPreConsumeValuePackageSubscriptionWeekResetDoesNotClear7dLimit(t *testi
 	sub := createActiveValuePackageSub(t, user.Id, week, start, start+valuePackageWeekSeconds)
 	resetAt := now - 30*60
 	beforeResetAt := resetAt - 30*60
-	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: week.Id, PackageType: week.PackageType, ModelGroup: week.ModelGroup, RequestId: "preconsume-week-before-reset", Quota: 45, CreatedAt: beforeResetAt}))
-	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(45)).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: week.Id, PackageType: week.PackageType, ModelGroup: week.ModelGroup, RequestId: "preconsume-week-before-reset", Quota: 60, CreatedAt: beforeResetAt}))
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(60)).Error)
 	require.NoError(t, DB.Create(&ValuePackageQuotaReset{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: week.Id, PackageType: week.PackageType, ResetAt: resetAt, Source: ValuePackageQuotaResetSourceUserConsumeCount, CreatedByUserId: user.Id}).Error)
 
-	_, err := PreConsumeValuePackageSubscription("preconsume-week-reset-keeps-7d", user.Id, sub.Id, 10)
+	result, err := PreConsumeValuePackageSubscription("preconsume-week-ignores-7d", user.Id, sub.Id, 10)
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "7d period limit exceeded")
-	require.NotContains(t, err.Error(), "rolling")
-	var reloaded UserSubscription
-	require.NoError(t, DB.First(&reloaded, sub.Id).Error)
-	require.EqualValues(t, 45, reloaded.AmountUsed)
-	var failedCount int64
-	require.NoError(t, DB.Model(&ValuePackageUsageRecord{}).Where("request_id = ?", "preconsume-week-reset-keeps-7d").Count(&failedCount).Error)
-	require.EqualValues(t, 0, failedCount)
+	require.NoError(t, err)
+	require.Equal(t, sub.Id, result.UserSubscriptionId)
+	require.EqualValues(t, 10, result.PreConsumed)
+	require.EqualValues(t, 60, result.AmountUsedBefore)
+	require.EqualValues(t, 70, result.AmountUsedAfter)
+	used5h, used7d, err := GetValuePackageWindowUsage(user.Id, sub.Id, common.GetTimestamp())
+	require.NoError(t, err)
+	require.EqualValues(t, 10, used5h)
+	require.EqualValues(t, 0, used7d)
 }
 
 func TestPreConsumeValuePackageSubscriptionMonthResetClearsCurrent7dLimit(t *testing.T) {
@@ -1903,6 +1904,36 @@ func TestListValuePackageManagementRowsUsesFixedFiveHourWindow(t *testing.T) {
 	require.EqualValues(t, 0, result.Items[0].Usage.Used5h)
 	require.EqualValues(t, 0, result.Items[0].Usage.ResetSeconds5h)
 	require.EqualValues(t, 0, result.Items[0].Usage.Used7d)
+}
+
+func TestListValuePackageManagementRowsWeekCardIgnoresLegacy7dLimit(t *testing.T) {
+	setupValuePackageTestDB(t)
+	now := common.GetTimestamp()
+	plan := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	plan.TotalAmount = 1000
+	plan.Limit5hAmount = 1000
+	plan.Limit7dAmount = 50
+	require.NoError(t, DB.Save(&plan).Error)
+	user := createValuePackageUser(t, 3023, UserGroupTiyan)
+	start := now - 2*valuePackageDaySeconds
+	sub := createActiveValuePackageSub(t, user.Id, plan, start, start+valuePackageWeekSeconds)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", int64(60)).Error)
+	require.NoError(t, DB.Create(&UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "mgmt-week-legacy-7d", Quota: 60, CreatedAt: now - valuePackageDaySeconds}))
+
+	result, err := ListValuePackageManagementRows(ValuePackageManagementFilter{Keyword: user.Username, PackageType: "all", Active: "active", Page: 1, PageSize: 20}, now)
+
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Total)
+	require.Len(t, result.Items, 1)
+	row := result.Items[0]
+	require.NotNil(t, row.Usage)
+	require.EqualValues(t, 0, row.Usage.Used7d)
+	require.EqualValues(t, 0, row.Usage.Limit7d)
+	require.EqualValues(t, 0, row.Usage.Percent7d)
+	require.False(t, row.Usage.Limited7d)
+	require.EqualValues(t, 0, row.Usage.ResetAt7d)
+	require.EqualValues(t, 0, row.Usage.ResetSeconds7d)
 }
 
 func TestListValuePackageManagementRowsFiltersAndPaginatesInDatabaseSemantics(t *testing.T) {

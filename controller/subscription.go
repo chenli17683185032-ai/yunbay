@@ -203,10 +203,10 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	if requestedLimit5hAmount < 0 || requestedLimit7dAmount < 0 {
 		return "套餐额度不能为负数"
 	}
-	if plan.PackageType == model.ValuePackageTypeDay && requestedLimit7dAmount != 0 {
-		return "日卡不支持7天额度"
+	if (plan.PackageType == model.ValuePackageTypeDay || plan.PackageType == model.ValuePackageTypeWeek) && requestedLimit7dAmount != 0 {
+		return "日卡和周卡不支持7天阶段限额"
 	}
-	if plan.PackageType != model.ValuePackageTypeDay && requestedLimit5hAmount > 0 && requestedLimit7dAmount > 0 && requestedLimit7dAmount < requestedLimit5hAmount {
+	if plan.PackageType == model.ValuePackageTypeMonth && requestedLimit5hAmount > 0 && requestedLimit7dAmount > 0 && requestedLimit7dAmount < requestedLimit5hAmount {
 		return "7天额度不能小于5小时额度"
 	}
 	if plan.Enabled {
