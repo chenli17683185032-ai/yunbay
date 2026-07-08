@@ -2814,9 +2814,12 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 			if err != nil {
 				return err
 			}
-			start7d := maxInt64(now-7*24*3600, lastResetAt)
+			lowerBound := valuePackageSubscriptionAnchorStart(&sub, now)
+			if lowerBound <= 0 {
+				lowerBound = now - valuePackage7dWindowSeconds
+			}
 			var usageRecords []ValuePackageUsageRecord
-			if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND (quota > ? OR request_id = ?)", userId, sub.Id, start7d, now, 0, requestId).
+			if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND (quota > ? OR request_id = ?)", userId, sub.Id, lowerBound, now, 0, requestId).
 				Order("created_at asc, id asc").
 				Find(&usageRecords).Error; err != nil {
 				return err
@@ -2842,13 +2845,12 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 					CreatedAt:          now,
 				})
 			}
-			next5h, _ := valuePackageFixedWindowUsageDetails(nextUsageRecords, 5*3600, now)
-			next7d, _ := valuePackageRollingUsageDetails(nextUsageRecords)
-			if plan.Limit5hAmount > 0 && next5h > plan.Limit5hAmount {
+			nextDetails := buildValuePackageWindowUsageDetailsFromRecords(&sub, plan, nextUsageRecords, lastResetAt, now)
+			if plan.Limit5hAmount > 0 && nextDetails.Used5h > plan.Limit5hAmount {
 				return fmt.Errorf("subscription quota insufficient: %s, 5h limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
 			}
-			if plan.Limit7dAmount > 0 && next7d > plan.Limit7dAmount {
-				return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
+			if valuePackageHas7dWindow(plan) && nextDetails.Used7d > plan.Limit7dAmount {
+				return fmt.Errorf("subscription quota insufficient: %s, 7d period limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, targetQuota)
 			}
 		}
 
@@ -2932,13 +2934,6 @@ func getLastValuePackageQuotaResetAtTx(tx *gorm.DB, userId int, userSubscription
 		Select("COALESCE(MAX(reset_at), 0)").
 		Scan(&resetAt).Error
 	return resetAt, err
-}
-
-func maxInt64(a int64, b int64) int64 {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func valuePackageSubscriptionAnchorStart(sub *UserSubscription, now int64) int64 {
@@ -3431,15 +3426,15 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 		if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < amount {
 			return fmt.Errorf("subscription quota insufficient: %s, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
-		used5h, used7d, err := getValuePackageWindowUsageTx(tx, userId, sub.Id, now)
+		usageDetails, err := getValuePackageWindowUsageDetailsTx(tx, userId, sub.Id, now)
 		if err != nil {
 			return err
 		}
-		if plan.Limit5hAmount > 0 && used5h+amount > plan.Limit5hAmount {
+		if plan.Limit5hAmount > 0 && usageDetails.Used5h+amount > plan.Limit5hAmount {
 			return fmt.Errorf("subscription quota insufficient: %s, 5h limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
-		if plan.Limit7dAmount > 0 && used7d+amount > plan.Limit7dAmount {
-			return fmt.Errorf("subscription quota insufficient: %s, 7d rolling limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
+		if valuePackageHas7dWindow(plan) && usageDetails.Used7d+amount > plan.Limit7dAmount {
+			return fmt.Errorf("subscription quota insufficient: %s, 7d period limit exceeded, need=%d", ValuePackageQuotaExhaustedUserMessage, amount)
 		}
 
 		record := &SubscriptionPreConsumeRecord{
