@@ -5104,6 +5104,15 @@
     "永续的 Vibe Coding 助手": "Assistant Vibe Coding persistant",
     "永续的 Vibe Coding 助手，无需再担心掉线。": "Un assistant Vibe Coding persistant, sans craindre les déconnexions.",
     "，": ", ",
-    "，and ": ", and "
+    "，and ": ", and ",
+    "1-day total limit": "Limite totale sur 1 jour",
+    "7-day total limit": "Limite totale sur 7 jours",
+    "30-day total limit": "Limite totale sur 30 jours",
+    "7-day period limit": "Limite par période de 7 jours",
+    "Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.": "Les cartes journalières peuvent utiliser ce quota total depuis l'activation jusqu'à l'expiration après 1 jour. 0 signifie aucun plafond total.",
+    "Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.": "Les cartes hebdomadaires peuvent utiliser ce quota total depuis l'activation jusqu'à l'expiration après 7 jours. 0 signifie aucun plafond total.",
+    "Month cards can use this total quota from activation time until the 30-day expiration. 0 means unlimited total quota.": "Les cartes mensuelles peuvent utiliser ce quota total depuis l'activation jusqu'à l'expiration après 30 jours. 0 signifie aucun plafond total.",
+    "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.": "Quota périodique facultatif pour les cartes mensuelles. Il se réinitialise tous les 7 jours fixes depuis l'activation, et la réinitialisation d'une carte mensuelle peut effacer l'usage de la période de 7 jours en cours. 0 désactive cette limite.",
+    "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.": "Cette action consommera 1 réinitialisation. Les cartes journalières et hebdomadaires effacent seulement la fenêtre d'usage de 5 heures. Les cartes mensuelles effacent à la fois la fenêtre de 5 heures et l'usage de la période de 7 jours en cours. Cela ne restaure pas le quota total et ne prolonge pas l'expiration."
   }
 }

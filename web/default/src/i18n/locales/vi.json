@@ -5104,6 +5104,15 @@
     "永续的 Vibe Coding 助手": "Trợ lý Vibe Coding bền vững",
     "永续的 Vibe Coding 助手，无需再担心掉线。": "Trợ lý Vibe Coding bền vững, không cần lo bị ngắt kết nối.",
     "，": ", ",
-    "，and ": ", and "
+    "，and ": ", and ",
+    "1-day total limit": "Giới hạn tổng 1 ngày",
+    "7-day total limit": "Giới hạn tổng 7 ngày",
+    "30-day total limit": "Giới hạn tổng 30 ngày",
+    "7-day period limit": "Giới hạn theo chu kỳ 7 ngày",
+    "Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.": "Thẻ ngày có thể dùng tổng hạn mức này từ thời điểm kích hoạt đến khi hết hạn sau 1 ngày. 0 nghĩa là không giới hạn tổng hạn mức.",
+    "Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.": "Thẻ tuần có thể dùng tổng hạn mức này từ thời điểm kích hoạt đến khi hết hạn sau 7 ngày. 0 nghĩa là không giới hạn tổng hạn mức.",
+    "Month cards can use this total quota from activation time until the 30-day expiration. 0 means unlimited total quota.": "Thẻ tháng có thể dùng tổng hạn mức này từ thời điểm kích hoạt đến khi hết hạn sau 30 ngày. 0 nghĩa là không giới hạn tổng hạn mức.",
+    "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.": "Hạn mức chu kỳ tùy chọn cho thẻ tháng. Hạn mức này tự đặt lại theo mỗi chu kỳ cố định 7 ngày tính từ thời điểm kích hoạt, và thao tác đặt lại thẻ tháng có thể xóa mức dùng của chu kỳ 7 ngày hiện tại. 0 sẽ tắt giới hạn chu kỳ này.",
+    "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.": "Thao tác này sẽ tiêu hao 1 lượt đặt lại. Thẻ ngày và thẻ tuần chỉ xóa cửa sổ sử dụng 5 giờ. Thẻ tháng xóa cả cửa sổ 5 giờ và mức dùng của chu kỳ 7 ngày hiện tại. Thao tác này không khôi phục tổng hạn mức và không gia hạn thời hạn."
   }
 }

@@ -5104,6 +5104,15 @@
     "永续的 Vibe Coding 助手": "Постоянный помощник Vibe Coding",
     "永续的 Vibe Coding 助手，无需再担心掉线。": "Постоянный помощник Vibe Coding, чтобы больше не беспокоиться об отключениях.",
     "，": ", ",
-    "，and ": ", and "
+    "，and ": ", and ",
+    "1-day total limit": "Общий лимит на 1 день",
+    "7-day total limit": "Общий лимит на 7 дней",
+    "30-day total limit": "Общий лимит на 30 дней",
+    "7-day period limit": "Лимит за 7-дневный период",
+    "Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.": "Дневные карты могут использовать эту общую квоту с момента активации до истечения 1 дня. 0 означает отсутствие общего лимита.",
+    "Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.": "Недельные карты могут использовать эту общую квоту с момента активации до истечения 7 дней. 0 означает отсутствие общего лимита.",
+    "Month cards can use this total quota from activation time until the 30-day expiration. 0 means unlimited total quota.": "Месячные карты могут использовать эту общую квоту с момента активации до истечения 30 дней. 0 означает отсутствие общего лимита.",
+    "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.": "Необязательная периодическая квота для месячной карты. Она сбрасывается каждые фиксированные 7 дней с момента активации, а сброс месячной карты может очистить использование текущего 7-дневного периода. 0 отключает этот периодический лимит.",
+    "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.": "Это спишет 1 сброс. Дневные и недельные карты очищают только 5-часовое окно использования. Месячные карты очищают и 5-часовое окно, и использование текущего 7-дневного периода. Это не восстановит общую квоту и не продлит срок действия."
   }
 }

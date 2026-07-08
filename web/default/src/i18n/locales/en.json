@@ -5104,6 +5104,15 @@
     "永续的 Vibe Coding 助手": "Persistent Vibe Coding assistant",
     "永续的 Vibe Coding 助手，无需再担心掉线。": "A persistent Vibe Coding assistant, so you no longer need to worry about disconnects.",
     "，": ", ",
-    "，and ": ", and "
+    "，and ": ", and ",
+    "1-day total limit": "1-day total limit",
+    "7-day total limit": "7-day total limit",
+    "30-day total limit": "30-day total limit",
+    "7-day period limit": "7-day period limit",
+    "Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.": "Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.",
+    "Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.": "Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.",
+    "Month cards can use this total quota from activation time until the 30-day expiration. 0 means unlimited total quota.": "Month cards can use this total quota from activation time until the 30-day expiration. 0 means unlimited total quota.",
+    "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.": "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.",
+    "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.": "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration."
   }
 }
