@@ -139,6 +139,22 @@ test('day value package payload clears stale 7-day period limit', () => {
   assert.equal(payload.plan.limit_7d_amount, 0)
 })
 
+test('subscription payload clears hidden value package 7d period limit', () => {
+  const values = {
+    ...PLAN_FORM_DEFAULTS,
+    title: '普通订阅',
+    plan_kind: 'subscription' as const,
+    package_type: 'month' as const,
+    limit_7d_amount: 700,
+  }
+
+  const payload = formValuesToPlanPayload(values)
+
+  assert.equal(payload.plan.plan_kind, 'subscription')
+  assert.equal(payload.plan.package_type, undefined)
+  assert.equal(payload.plan.limit_7d_amount, 0)
+})
+
 test('planToFormValues preserves per-card ldxp payment config', () => {
   const plan: SubscriptionPlan = {
     id: 1,

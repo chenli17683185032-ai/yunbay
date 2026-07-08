@@ -171,7 +171,7 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
       limit_5h_amount: parseQuotaFromDollars(
         Number(values.limit_5h_amount || 0)
       ),
-      limit_7d_amount: shouldExposeValuePackage7dPeriodLimit(
+      limit_7d_amount: isValuePackage && shouldExposeValuePackage7dPeriodLimit(
         values.package_type
       )
         ? parseQuotaFromDollars(Number(values.limit_7d_amount || 0))
