@@ -1111,6 +1111,21 @@ func TestCompleteValuePackageOrderCreatesMonthCardForThirtyDays(t *testing.T) {
 		"duration_value": 1,
 		"custom_seconds": 0,
 	}).Error)
+	var legacyPlan SubscriptionPlan
+	require.NoError(t, DB.First(&legacyPlan, month.Id).Error)
+	require.Equal(t, SubscriptionDurationMonth, legacyPlan.DurationUnit)
+	require.Equal(t, 1, legacyPlan.DurationValue)
+	require.EqualValues(t, 0, legacyPlan.CustomSeconds)
+	normalizeValuePackagePlan(&legacyPlan)
+	require.Equal(t, SubscriptionDurationDay, legacyPlan.DurationUnit)
+	require.Equal(t, 30, legacyPlan.DurationValue)
+	require.EqualValues(t, 0, legacyPlan.CustomSeconds)
+	fixedStart := time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC)
+	fixedEnd, err := calcPlanEndTime(fixedStart, &legacyPlan)
+	require.NoError(t, err)
+	require.EqualValues(t, valuePackageMonthSeconds, fixedEnd-fixedStart.Unix())
+	require.NotEqualValues(t, valuePackageMonthSeconds, fixedStart.AddDate(0, 1, 0).Unix()-fixedStart.Unix())
+
 	now := common.GetTimestamp()
 	order := SubscriptionOrder{UserId: user.Id, PlanId: month.Id, Money: month.PriceAmount, TradeNo: "vp-month-legacy-duration-order", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
 	require.NoError(t, DB.Create(&order).Error)
