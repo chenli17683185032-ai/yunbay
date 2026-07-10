@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -187,6 +188,10 @@ func WorkerClaimLdxpTopupSession(c *gin.Context) {
 	}
 	session, err := service.ClaimLdxpTopupSession(req.WorkerID, cfg)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.Status(http.StatusNotFound)
+			return
+		}
 		common.ApiError(c, err)
 		return
 	}

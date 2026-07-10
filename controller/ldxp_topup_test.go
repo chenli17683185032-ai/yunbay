@@ -257,6 +257,29 @@ func TestWorkerClaimRequiresToken(t *testing.T) {
 	assert.Equal(t, false, body["success"])
 }
 
+func TestWorkerClaimLdxpTopupSessionReturns404WhenQueueIsEmpty(t *testing.T) {
+	setupLdxpTopupControllerTest(t)
+
+	recorder := performLdxpControllerRequest(WorkerClaimLdxpTopupSession, http.MethodPost, "/ldxp/worker/sessions/claim", gin.H{
+		"worker_id": "worker-a",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+
+	assert.Equal(t, http.StatusNotFound, recorder.Code)
+}
+
+func TestWorkerClaimLdxpTopupSessionDoesNotHideDatabaseErrors(t *testing.T) {
+	db := setupLdxpTopupControllerTest(t)
+	require.NoError(t, db.Migrator().DropTable(&model.LdxpTopupSession{}))
+
+	recorder := performLdxpControllerRequest(WorkerClaimLdxpTopupSession, http.MethodPost, "/ldxp/worker/sessions/claim", gin.H{
+		"worker_id": "worker-a",
+	}, 0, map[string]string{"X-LDXP-Worker-Token": ldxpControllerTestWorkerToken})
+
+	assert.NotEqual(t, http.StatusNotFound, recorder.Code)
+	body := decodeTestResponse(t, recorder)
+	assert.Equal(t, false, body["success"])
+}
+
 func TestWorkerGetLdxpSessionActiveReflectsUserCancel(t *testing.T) {
 	setupLdxpTopupControllerTest(t)
 	user := createLdxpControllerTestUser(t, "ldxp_worker_active")

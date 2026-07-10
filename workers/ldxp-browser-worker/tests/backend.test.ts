@@ -209,7 +209,7 @@ test('claimPaidWatchSession posts worker id and returns qr-ready watch data', as
   }
 })
 
-test('claimSession treats 404 and empty success data as no job', async () => {
+test('claimSession treats a plain-text 404 as no job without parsing JSON', async () => {
   const noJob = await withServer((_req, res) => {
     res.statusCode = 404
     res.end('not found')
@@ -219,7 +219,9 @@ test('claimSession treats 404 and empty success data as no job', async () => {
   } finally {
     await noJob.close()
   }
+})
 
+test('claimSession treats empty success data as no job', async () => {
   const emptyData = await withServer((_req, res) => {
     res.setHeader('content-type', 'application/json')
     res.end(JSON.stringify({ success: true, data: null }))
@@ -228,6 +230,20 @@ test('claimSession treats 404 and empty success data as no job', async () => {
     assert.equal(await claimSession(config(emptyData.baseUrl)), null)
   } finally {
     await emptyData.close()
+  }
+})
+
+test('claimSession rejects a real backend error', async () => {
+  const server = await withServer((_req, res) => {
+    res.statusCode = 500
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ success: false, message: 'database unavailable' }))
+  })
+
+  try {
+    await assert.rejects(() => claimSession(config(server.baseUrl)), /database unavailable/)
+  } finally {
+    await server.close()
   }
 })
 
