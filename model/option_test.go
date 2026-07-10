@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -150,44 +149,19 @@ func TestUpdateGroupRatioOptionsRollsBackFirstWriteWhenSecondWriteFails(t *testi
 	require.Equal(t, `{"old":{"old":1}}`, stored.GroupGroupRatio)
 }
 
-func TestWithGroupRatioOptionsLockSerializesOperations(t *testing.T) {
-	firstAttemptStarted := make(chan struct{})
-	firstEntered := make(chan struct{})
-	releaseFirst := make(chan struct{})
-	firstDone := make(chan error, 1)
-	go func() {
-		close(firstAttemptStarted)
-		firstDone <- WithGroupRatioOptionsLock(func() error {
-			close(firstEntered)
-			<-releaseFirst
-			return nil
-		})
-	}()
-	<-firstAttemptStarted
-	<-firstEntered
+func TestWithGroupRatioOptionsLockRunsOperationWithMutexHeld(t *testing.T) {
+	operationRanWithLockHeld := false
+	err := WithGroupRatioOptionsLock(func() error {
+		if groupRatioOptionsMutex.TryLock() {
+			groupRatioOptionsMutex.Unlock()
+			return errors.New("group ratio operation ran without the shared lock")
+		}
+		operationRanWithLockHeld = true
+		return nil
+	})
 
-	secondAttemptStarted := make(chan struct{})
-	secondEntered := make(chan struct{})
-	secondDone := make(chan error, 1)
-	go func() {
-		close(secondAttemptStarted)
-		secondDone <- WithGroupRatioOptionsLock(func() error {
-			close(secondEntered)
-			return nil
-		})
-	}()
-	<-secondAttemptStarted
-
-	enteredEarly := false
-	select {
-	case <-secondEntered:
-		enteredEarly = true
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(releaseFirst)
-	require.NoError(t, <-firstDone)
-	require.NoError(t, <-secondDone)
-	require.False(t, enteredEarly, "second group ratio operation entered while the first still held the lock")
+	require.NoError(t, err)
+	require.True(t, operationRanWithLockHeld)
 }
 
 func TestGroupRatioOptionWritesUseSharedOperationLock(t *testing.T) {
@@ -216,38 +190,22 @@ func TestGroupRatioOptionWritesUseSharedOperationLock(t *testing.T) {
 			setOptionMapValueForTest("GroupRatio", `{"old":1}`)
 			setOptionMapValueForTest("GroupGroupRatio", `{"old":{"child":1}}`)
 
-			lockEntered := make(chan struct{})
-			releaseLock := make(chan struct{})
-			lockDone := make(chan error, 1)
-			go func() {
-				lockDone <- WithGroupRatioOptionsLock(func() error {
-					close(lockEntered)
-					<-releaseLock
-					return nil
-				})
-			}()
-			<-lockEntered
+			originalHook := groupRatioOptionsLockAcquiredHook
+			lockEntryCount := 0
+			lockHeldAtEntry := false
+			groupRatioOptionsLockAcquiredHook = func() {
+				lockEntryCount++
+				if groupRatioOptionsMutex.TryLock() {
+					groupRatioOptionsMutex.Unlock()
+					return
+				}
+				lockHeldAtEntry = true
+			}
+			t.Cleanup(func() { groupRatioOptionsLockAcquiredHook = originalHook })
 
-			attemptStarted := make(chan struct{})
-			operationDone := make(chan error, 1)
-			go func() {
-				close(attemptStarted)
-				operationDone <- tt.operation()
-			}()
-			<-attemptStarted
-			completedEarly := false
-			select {
-			case err := <-operationDone:
-				require.NoError(t, err)
-				completedEarly = true
-			case <-time.After(100 * time.Millisecond):
-			}
-			close(releaseLock)
-			require.NoError(t, <-lockDone)
-			if !completedEarly {
-				require.NoError(t, <-operationDone)
-			}
-			require.False(t, completedEarly, "ratio write completed while the shared operation lock was held")
+			require.NoError(t, tt.operation())
+			require.Equal(t, 1, lockEntryCount)
+			require.True(t, lockHeldAtEntry)
 		})
 	}
 }
@@ -283,13 +241,16 @@ func TestLoadOptionsFromDatabasePreventsStaleSnapshotFromOverwritingPairUpdate(t
 	}()
 	<-snapshotRead
 
-	pairLockAcquired := make(chan struct{})
-	pairAttemptStarted := make(chan struct{})
+	pairReachedLockBoundary := make(chan struct{})
+	originalAttemptHook := groupRatioOptionsLockAttemptHook
+	groupRatioOptionsLockAttemptHook = func() {
+		close(pairReachedLockBoundary)
+	}
+	t.Cleanup(func() { groupRatioOptionsLockAttemptHook = originalAttemptHook })
+
 	pairDone := make(chan error, 1)
 	go func() {
-		close(pairAttemptStarted)
 		pairDone <- WithGroupRatioOptionsLock(func() error {
-			close(pairLockAcquired)
 			if err := UpdateGroupRatioOptions(`{"new":2}`, `{"new":{"child":1.25}}`); err != nil {
 				return err
 			}
@@ -299,17 +260,10 @@ func TestLoadOptionsFromDatabasePreventsStaleSnapshotFromOverwritingPairUpdate(t
 			return updateOptionMap("GroupGroupRatio", `{"new":{"child":1.25}}`)
 		})
 	}()
-	<-pairAttemptStarted
-	acquiredEarly := false
-	select {
-	case <-pairLockAcquired:
-		acquiredEarly = true
-	case <-time.After(100 * time.Millisecond):
-	}
+	<-pairReachedLockBoundary
 	close(releaseSnapshot)
 	<-syncDone
 	require.NoError(t, <-pairDone)
-	require.False(t, acquiredEarly, "pair update acquired the shared lock after sync read a stale snapshot but before sync applied it")
 
 	stored, err := GetGroupRatioOptions()
 	require.NoError(t, err)

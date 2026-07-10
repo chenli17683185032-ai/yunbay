@@ -26,14 +26,25 @@ type Option struct {
 
 var groupRatioOptionsMutex sync.Mutex
 
+// These hooks stay nil in production and let package tests observe the exact
+// lock boundary without relying on scheduler timing.
+var groupRatioOptionsLockAttemptHook func()
+var groupRatioOptionsLockAcquiredHook func()
+
 // ErrDeprecatedGroupRatioAlias indicates callers must use the canonical pair endpoint.
 var ErrDeprecatedGroupRatioAlias = errors.New("deprecated group ratio option alias; use /api/option/group-ratios")
 
 // WithGroupRatioOptionsLock serializes database and runtime transitions for
 // GroupRatio and GroupGroupRatio across API writes and background sync.
 func WithGroupRatioOptionsLock(operation func() error) error {
+	if hook := groupRatioOptionsLockAttemptHook; hook != nil {
+		hook()
+	}
 	groupRatioOptionsMutex.Lock()
 	defer groupRatioOptionsMutex.Unlock()
+	if hook := groupRatioOptionsLockAcquiredHook; hook != nil {
+		hook()
+	}
 	return operation()
 }
 

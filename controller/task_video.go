@@ -162,15 +162,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor channel.TaskAdaptor, cha
 						// 获取模型/令牌组倍率信息；历史空任务组按默认令牌组兼容，不能回退到网站用户组。
 						group := constant.NormalizeTokenGroup(task.Group)
 						if group != "" {
-							groupRatio := ratio_setting.GetGroupRatio(group)
-							userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
-							var finalGroupRatio float64
-							if hasUserGroupRatio {
-								finalGroupRatio = userGroupRatio
-							} else {
-								finalGroupRatio = groupRatio
-							}
+							finalGroupRatio := ratio_setting.GetGroupRatioInfo(group, group).GroupRatio
 
 							// 计算实际应扣费额度: totalTokens * modelRatio * groupRatio
 							actualQuota := int(float64(taskResult.TotalTokens) * modelRatio * finalGroupRatio)

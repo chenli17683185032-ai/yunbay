@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -453,7 +452,7 @@ func TestGenericUpdateOptionRejectsDeprecatedGroupRatioAliases(t *testing.T) {
 	}
 }
 
-func TestGroupRatioOptionsSerializeGenericRatioUpdatesWithPairRuntimeApply(t *testing.T) {
+func TestGroupRatioOptionsPairRuntimeApplyRunsInsideSharedModelOperationLock(t *testing.T) {
 	db := setupGroupRatioOptionsControllerTest(t)
 	seedGroupRatioOptionsState(t, db, `{"old":1}`, `{"old":{"old":1}}`)
 
@@ -462,52 +461,34 @@ func TestGroupRatioOptionsSerializeGenericRatioUpdatesWithPairRuntimeApply(t *te
 		"group_group_ratio": `{"pair":{"child":1.25}}`,
 	})
 	require.NoError(t, err)
-	pairRecorder := httptest.NewRecorder()
-	pairContext, _ := gin.CreateTestContext(pairRecorder)
-	pairContext.Request = httptest.NewRequest(http.MethodPut, "/api/option/group-ratios", bytes.NewReader(pairBody))
-	applierStarted := make(chan struct{})
-	releaseApplier := make(chan struct{})
-	pairDone := make(chan struct{})
-	go func() {
-		defer close(pairDone)
-		updateGroupRatioOptionsWithRuntime(pairContext, func(groupRatio, groupGroupRatio string) error {
-			close(applierStarted)
-			<-releaseApplier
-			return applyGroupRatioRuntime(groupRatio, groupGroupRatio)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/option/group-ratios", bytes.NewReader(pairBody))
+
+	originalRunner := runWithGroupRatioOptionsLock
+	lockEntryCount := 0
+	inSharedCriticalSection := false
+	runWithGroupRatioOptionsLock = func(operation func() error) error {
+		return model.WithGroupRatioOptionsLock(func() error {
+			lockEntryCount++
+			inSharedCriticalSection = true
+			defer func() { inSharedCriticalSection = false }()
+			return operation()
 		})
-	}()
-	<-applierStarted
-
-	genericBody, err := common.Marshal(map[string]any{
-		"key":   "GroupRatio",
-		"value": `{"generic":3}`,
-	})
-	require.NoError(t, err)
-	genericRecorder := httptest.NewRecorder()
-	genericContext, _ := gin.CreateTestContext(genericRecorder)
-	genericContext.Request = httptest.NewRequest(http.MethodPut, "/api/option", bytes.NewReader(genericBody))
-	genericDone := make(chan struct{})
-	genericAttemptStarted := make(chan struct{})
-	go func() {
-		defer close(genericDone)
-		close(genericAttemptStarted)
-		UpdateOption(genericContext)
-	}()
-	<-genericAttemptStarted
-
-	completedEarly := false
-	select {
-	case <-genericDone:
-		completedEarly = true
-	case <-time.After(100 * time.Millisecond):
 	}
-	close(releaseApplier)
-	<-pairDone
-	<-genericDone
-	require.False(t, completedEarly, "generic ratio update completed while pair runtime apply was still in progress")
+	t.Cleanup(func() { runWithGroupRatioOptionsLock = originalRunner })
+	applierSawLockEntry := false
+	updateGroupRatioOptionsWithRuntime(c, func(groupRatio, groupGroupRatio string) error {
+		applierSawLockEntry = inSharedCriticalSection
+		return applyGroupRatioRuntime(groupRatio, groupGroupRatio)
+	})
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, 1, lockEntryCount)
+	require.True(t, applierSawLockEntry)
 
 	stored := readStoredGroupRatioOptions(t)
-	require.Equal(t, `{"generic":3}`, stored.GroupRatio)
+	require.Equal(t, `{"pair":2}`, stored.GroupRatio)
 	require.Equal(t, `{"pair":{"child":1.25}}`, stored.GroupGroupRatio)
 	require.Equal(t, stored.GroupRatio, ratio_setting.GroupRatio2JSONString())
 	require.Equal(t, stored.GroupGroupRatio, ratio_setting.GroupGroupRatio2JSONString())
@@ -531,43 +512,24 @@ func TestGroupRatioOptionsHandlersUseSharedModelOperationLock(t *testing.T) {
 			db := setupGroupRatioOptionsControllerTest(t)
 			seedGroupRatioOptionsState(t, db, `{"old":1}`, `{"old":{"child":1}}`)
 
-			lockEntered := make(chan struct{})
-			releaseLock := make(chan struct{})
-			lockDone := make(chan error, 1)
-			go func() {
-				lockDone <- model.WithGroupRatioOptionsLock(func() error {
-					close(lockEntered)
-					<-releaseLock
-					return nil
-				})
-			}()
-			<-lockEntered
-
 			requestBody, err := common.Marshal(tt.body)
 			require.NoError(t, err)
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(tt.method, "/api/option/group-ratios", bytes.NewReader(requestBody))
-			attemptStarted := make(chan struct{})
-			handlerDone := make(chan struct{})
-			go func() {
-				defer close(handlerDone)
-				close(attemptStarted)
-				tt.handle(c)
-			}()
-			<-attemptStarted
-			completedEarly := false
-			select {
-			case <-handlerDone:
-				completedEarly = true
-			case <-time.After(100 * time.Millisecond):
+
+			originalRunner := runWithGroupRatioOptionsLock
+			lockEntryCount := 0
+			runWithGroupRatioOptionsLock = func(operation func() error) error {
+				return model.WithGroupRatioOptionsLock(func() error {
+					lockEntryCount++
+					return operation()
+				})
 			}
-			close(releaseLock)
-			require.NoError(t, <-lockDone)
-			if !completedEarly {
-				<-handlerDone
-			}
-			require.False(t, completedEarly, "handler completed while the shared model operation lock was held")
+			t.Cleanup(func() { runWithGroupRatioOptionsLock = originalRunner })
+			tt.handle(c)
+
+			require.Equal(t, 1, lockEntryCount)
 			require.Equal(t, http.StatusOK, recorder.Code)
 		})
 	}

@@ -23,6 +23,8 @@ type groupRatioOptionsResponse struct {
 
 type groupRatioRuntimeApplier func(groupRatio, groupGroupRatio string) error
 
+var runWithGroupRatioOptionsLock = model.WithGroupRatioOptionsLock
+
 func respondGroupRatioOptionsError(c *gin.Context, status int, err error) {
 	c.JSON(status, gin.H{
 		"success": false,
@@ -140,7 +142,7 @@ func reconcileGroupRatioOptionsReadback(expectedGroupRatio, expectedGroupGroupRa
 
 func GetGroupRatioOptions(c *gin.Context) {
 	var snapshot groupRatioOptionsResponse
-	err := model.WithGroupRatioOptionsLock(func() error {
+	err := runWithGroupRatioOptionsLock(func() error {
 		var err error
 		snapshot, err = groupRatioOptionsSnapshot()
 		return err
@@ -175,7 +177,7 @@ func updateGroupRatioOptionsWithRuntime(c *gin.Context, applier groupRatioRuntim
 	}
 
 	var readback groupRatioOptionsResponse
-	err = model.WithGroupRatioOptionsLock(func() error {
+	err = runWithGroupRatioOptionsLock(func() error {
 		if err := model.UpdateGroupRatioOptions(normalizedGroupRatio, normalizedGroupGroupRatio); err != nil {
 			return err
 		}
