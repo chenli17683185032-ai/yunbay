@@ -15,6 +15,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var commonGroupCol string
@@ -116,9 +117,17 @@ func CheckSetup() {
 }
 
 func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
+	return chooseDBWithLogger(envName, isLog, nil)
+}
+
+func chooseDBWithLogger(envName string, isLog bool, dbLogger gormlogger.Interface) (*gorm.DB, error) {
 	defer func() {
 		initCol()
 	}()
+	gormConfig := &gorm.Config{
+		PrepareStmt: true,
+		Logger:      dbLogger,
+	}
 	dsn := os.Getenv(envName)
 	if dsn != "" {
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
@@ -132,9 +141,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			return gorm.Open(postgres.New(postgres.Config{
 				DSN:                  dsn,
 				PreferSimpleProtocol: true, // disables implicit prepared statement usage
-			}), &gorm.Config{
-				PrepareStmt: true, // precompile SQL
-			})
+			}), gormConfig)
 		}
 		if strings.HasPrefix(dsn, "local") {
 			common.SysLog("SQL_DSN not set, using SQLite as database")
@@ -143,9 +150,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			} else {
 				common.LogSqlType = common.DatabaseTypeSQLite
 			}
-			return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
-				PrepareStmt: true, // precompile SQL
-			})
+			return gorm.Open(sqlite.Open(common.SQLitePath), gormConfig)
 		}
 		// Use MySQL
 		common.SysLog("using MySQL as database")
@@ -162,20 +167,20 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		} else {
 			common.LogSqlType = common.DatabaseTypeMySQL
 		}
-		return gorm.Open(mysql.Open(dsn), &gorm.Config{
-			PrepareStmt: true, // precompile SQL
-		})
+		return gorm.Open(mysql.Open(dsn), gormConfig)
 	}
 	// Use SQLite
 	common.SysLog("SQL_DSN not set, using SQLite as database")
 	common.UsingSQLite = true
-	return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
-		PrepareStmt: true, // precompile SQL
-	})
+	return gorm.Open(sqlite.Open(common.SQLitePath), gormConfig)
 }
 
 func initializePrimaryDBConnection() (err error) {
-	db, err := chooseDB("SQL_DSN", false)
+	return initializePrimaryDBConnectionWithLogger(nil)
+}
+
+func initializePrimaryDBConnectionWithLogger(dbLogger gormlogger.Interface) (err error) {
+	db, err := chooseDBWithLogger("SQL_DSN", false, dbLogger)
 	if err == nil {
 		if common.DebugEnabled {
 			db = db.Debug()
@@ -205,7 +210,13 @@ func initializePrimaryDBConnection() (err error) {
 // without executing application schema migrations. Maintenance commands that
 // promise a read-only preview must use this initializer instead of InitDB.
 func InitDBWithoutMigrations() error {
-	if err := initializePrimaryDBConnection(); err != nil {
+	return InitDBWithoutMigrationsWithLogger(nil)
+}
+
+// InitDBWithoutMigrationsWithLogger is the maintenance-command variant that
+// installs its logger before gorm.Open can emit connection diagnostics.
+func InitDBWithoutMigrationsWithLogger(dbLogger gormlogger.Interface) error {
+	if err := initializePrimaryDBConnectionWithLogger(dbLogger); err != nil {
 		return err
 	}
 	LOG_DB = DB

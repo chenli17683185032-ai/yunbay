@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +14,32 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestQuotaMigrationBinaryConnectionFailureKeepsStdoutEmpty(t *testing.T) {
+	binaryPath := filepath.Join(t.TempDir(), "value-package-quota-migrate")
+	build := exec.Command("go", "build", "-buildvcs=false", "-o", binaryPath, ".")
+	buildOutput, err := build.CombinedOutput()
+	require.NoError(t, err, string(buildOutput))
+
+	command := exec.Command(binaryPath)
+	command.Env = append(os.Environ(),
+		"SQL_DSN=quota:quota@tcp(127.0.0.1:1)/quota?timeout=100ms&readTimeout=100ms&writeTimeout=100ms",
+		"LOG_SQL_DSN=",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
+
+	err = command.Run()
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, err, &exitErr)
+	require.Equal(t, 1, exitErr.ExitCode())
+	require.Empty(t, stdout.String())
+	require.Contains(t, stderr.String(), "[FATAL]")
+	require.Contains(t, stderr.String(), "127.0.0.1:1")
+}
 
 func TestRunQuotaMigrationCLIWritesOnlyJSONToStdoutAndClosesCleanly(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "quota-cli.db")

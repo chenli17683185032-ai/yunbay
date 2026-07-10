@@ -42,8 +42,14 @@ func runQuotaMigrationCLI(stdout io.Writer, stderr io.Writer, applyFlag *bool, m
 		common.LogWriterMu.Unlock()
 	}()
 
+	maintenanceLogger := gormlogger.New(log.New(stderr, "\r\n", log.LstdFlags), gormlogger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  gormlogger.Warn,
+		IgnoreRecordNotFoundError: false,
+		Colorful:                  false,
+	})
 	common.InitEnv()
-	if err = model.InitDBWithoutMigrations(); err != nil {
+	if err = model.InitDBWithoutMigrationsWithLogger(maintenanceLogger); err != nil {
 		return fmt.Errorf("database initialization failed: %w", err)
 	}
 	defer func() {
@@ -51,15 +57,6 @@ func runQuotaMigrationCLI(stdout io.Writer, stderr io.Writer, applyFlag *bool, m
 			err = fmt.Errorf("database close failed: %w", closeErr)
 		}
 	}()
-	maintenanceLogger := gormlogger.New(log.New(stderr, "\r\n", log.LstdFlags), gormlogger.Config{
-		SlowThreshold:             200 * time.Millisecond,
-		LogLevel:                  gormlogger.Warn,
-		IgnoreRecordNotFoundError: false,
-		Colorful:                  false,
-	})
-	model.DB = model.DB.Session(&gorm.Session{Logger: maintenanceLogger})
-	model.LOG_DB = model.DB
-
 	now := model.GetDBTimestamp()
 	report, err := runLegacyValuePackageQuotaMigration(model.DB, now, *applyFlag, *manifestFlag)
 	if err != nil {
