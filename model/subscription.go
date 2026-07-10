@@ -1426,25 +1426,26 @@ func CheckValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *Subscripti
 }
 
 type ValuePackageUsageSummary struct {
-	TotalUsed        int64   `json:"total_used"`
-	TotalLimit       int64   `json:"total_limit"`
-	TotalRemaining   int64   `json:"total_remaining"`
-	TotalPercent     float64 `json:"total_percent"`
-	Used5h           int64   `json:"used_5h"`
-	Limit5h          int64   `json:"limit_5h"`
-	Percent5h        float64 `json:"percent_5h"`
-	ResetAt5h        int64   `json:"reset_at_5h"`
-	ResetSeconds5h   int64   `json:"reset_seconds_5h"`
-	Limited5h        bool    `json:"limited_5h"`
-	Used7d           int64   `json:"used_7d"`
-	Limit7d          int64   `json:"limit_7d"`
-	Percent7d        float64 `json:"percent_7d"`
-	ResetAt7d        int64   `json:"reset_at_7d"`
-	ResetSeconds7d   int64   `json:"reset_seconds_7d"`
-	Limited7d        bool    `json:"limited_7d"`
-	Exhausted        bool    `json:"exhausted"`
-	ExhaustedReason  string  `json:"exhausted_reason"`
-	ExhaustedMessage string  `json:"exhausted_message"`
+	TotalUsed        int64                     `json:"total_used"`
+	TotalLimit       int64                     `json:"total_limit"`
+	TotalRemaining   int64                     `json:"total_remaining"`
+	TotalPercent     float64                   `json:"total_percent"`
+	Used5h           int64                     `json:"used_5h"`
+	Limit5h          int64                     `json:"limit_5h"`
+	Percent5h        float64                   `json:"percent_5h"`
+	ResetAt5h        int64                     `json:"reset_at_5h"`
+	ResetSeconds5h   int64                     `json:"reset_seconds_5h"`
+	Limited5h        bool                      `json:"limited_5h"`
+	Used7d           int64                     `json:"used_7d"`
+	Limit7d          int64                     `json:"limit_7d"`
+	Percent7d        float64                   `json:"percent_7d"`
+	ResetAt7d        int64                     `json:"reset_at_7d"`
+	ResetSeconds7d   int64                     `json:"reset_seconds_7d"`
+	Limited7d        bool                      `json:"limited_7d"`
+	Exhausted        bool                      `json:"exhausted"`
+	ExhaustedReason  string                    `json:"exhausted_reason"`
+	ExhaustedMessage string                    `json:"exhausted_message"`
+	PeriodLimits     []ValuePackagePeriodLimit `json:"period_limits"`
 }
 
 type ValuePackageWindowUsageDetails struct {
@@ -1641,6 +1642,7 @@ func buildValuePackageUsageSummaryFromDetails(sub *UserSubscription, plan *Subsc
 		Percent7d:      percent7d,
 		Limited7d:      limited7d,
 	}
+	summary.PeriodLimits = buildValuePackagePeriodLimits(sub, plan, usageDetails)
 	if plan.Limit5hAmount > 0 {
 		summary.ResetAt5h = usageDetails.ResetAt5h
 		summary.ResetSeconds5h = usageDetails.ResetSeconds5h
