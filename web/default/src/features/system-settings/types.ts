@@ -39,6 +39,23 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type GroupRatioOptionsSnapshot = {
+  group_ratio: string
+  group_group_ratio: string
+  package_groups: string[]
+}
+
+export type GroupRatioOptionsResponse = {
+  success: boolean
+  message: string
+  data?: GroupRatioOptionsSnapshot
+}
+
+export type UpdateGroupRatioOptionsRequest = {
+  group_ratio: string
+  group_group_ratio: string
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string

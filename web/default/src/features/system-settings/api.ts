@@ -16,14 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { api } from '@/lib/api'
+import { api, type ApiRequestConfig } from '@/lib/api'
+import {
+  GROUP_RATIO_REQUEST_CONFIG,
+  requireGroupRatioOptionsData,
+} from './models/group-ratio-save'
 import type {
   ConfirmPaymentComplianceResponse,
   DeleteLogsResponse,
   FetchUpstreamRatiosRequest,
+  GroupRatioOptionsResponse,
   ModelPriceSyncRequest,
   ModelPriceSyncResponse,
   SystemOptionsResponse,
+  UpdateGroupRatioOptionsRequest,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpstreamChannelsResponse,
@@ -35,8 +41,36 @@ export async function getSystemOptions() {
   return res.data
 }
 
-export async function updateSystemOption(request: UpdateOptionRequest) {
-  const res = await api.put<UpdateOptionResponse>('/api/option/', request)
+export async function updateSystemOption(
+  request: UpdateOptionRequest,
+  config?: ApiRequestConfig
+) {
+  const res = await api.put<UpdateOptionResponse>(
+    '/api/option/',
+    request,
+    config
+  )
+  return res.data
+}
+
+export async function getGroupRatioOptions() {
+  const res = await api.get<GroupRatioOptionsResponse>(
+    '/api/option/group-ratios',
+    GROUP_RATIO_REQUEST_CONFIG
+  )
+  requireGroupRatioOptionsData(res.data)
+  return res.data
+}
+
+export async function updateGroupRatioOptions(
+  request: UpdateGroupRatioOptionsRequest
+) {
+  const res = await api.put<GroupRatioOptionsResponse>(
+    '/api/option/group-ratios',
+    request,
+    GROUP_RATIO_REQUEST_CONFIG
+  )
+  requireGroupRatioOptionsData(res.data)
   return res.data
 }
 

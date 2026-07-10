@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useMemo, useEffect, useCallback, memo } from 'react'
 import { Pencil, Plus, Trash2, GripVertical, ChevronDown } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -38,6 +39,10 @@ import { Label } from '@/components/ui/label'
 import { StaticDataTable } from '@/components/data-table'
 import { Dialog } from '@/components/dialog'
 import { safeJsonParse } from '../utils/json-parser'
+import {
+  buildGroupRatioOverrideRows,
+  serializeGroupRatioOverrideRows,
+} from './group-ratio-save'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
@@ -45,6 +50,7 @@ type GroupRatioVisualEditorProps = {
   userUsableGroups: string
   groupGroupRatio: string
   autoGroups: string
+  packageGroups: string[]
   onChange: (field: string, value: string) => void
 }
 
@@ -156,6 +162,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   userUsableGroups,
   groupGroupRatio,
   autoGroups,
+  packageGroups,
   onChange,
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
@@ -199,22 +206,10 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   }, [autoGroups])
 
   // Parse group-group ratios
-  const groupGroupRatioList = useMemo(() => {
-    const map = safeJsonParse<Record<string, Record<string, number>>>(
-      groupGroupRatio,
-      {
-        fallback: {},
-        context: 'group-group ratios',
-      }
-    )
-    return Object.entries(map).map(([userGroup, overrides]) => ({
-      userGroup,
-      overrides: Object.entries(overrides).map(([targetGroup, ratio]) => ({
-        targetGroup,
-        ratio,
-      })),
-    }))
-  }, [groupGroupRatio])
+  const groupGroupRatioList = useMemo(
+    () => buildGroupRatioOverrideRows(groupGroupRatio, packageGroups),
+    [groupGroupRatio, packageGroups]
+  )
 
   // Simple group handlers (for groupRatio and topupGroupRatio)
   const handleSimpleAdd = (type: 'groupRatio' | 'topupGroupRatio') => {
@@ -306,32 +301,37 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   const handleUserGroupSave = () => {
     if (!userGroupInput.trim()) return
 
-    const map = safeJsonParse<Record<string, Record<string, number>>>(
-      groupGroupRatio,
-      {
-        fallback: {},
-        silent: true,
-      }
-    )
+    const userGroup = userGroupInput.trim()
+    const rows = buildGroupRatioOverrideRows(groupGroupRatio, packageGroups)
+    const existingRow = rows.find((row) => row.userGroup === userGroup)
 
-    if (!map[userGroupInput.trim()]) {
-      map[userGroupInput.trim()] = {}
+    if (existingRow?.isVirtual) {
+      setUserGroupDialogOpen(false)
+      handleOverrideAdd(userGroup)
+      return
     }
 
-    onChange('GroupGroupRatio', JSON.stringify(map, null, 2))
+    if (!existingRow) {
+      rows.push({
+        userGroup,
+        overrides: [],
+        isPackageGroup: packageGroups.includes(userGroup),
+        isVirtual: false,
+      })
+    }
+
+    onChange('GroupGroupRatio', serializeGroupRatioOverrideRows(rows))
     setUserGroupDialogOpen(false)
   }
 
   const handleUserGroupDelete = (userGroup: string) => {
-    const map = safeJsonParse<Record<string, Record<string, number>>>(
-      groupGroupRatio,
-      {
-        fallback: {},
-        silent: true,
-      }
+    const rows = buildGroupRatioOverrideRows(groupGroupRatio, packageGroups)
+    onChange(
+      'GroupGroupRatio',
+      serializeGroupRatioOverrideRows(
+        rows.filter((row) => row.userGroup !== userGroup)
+      )
     )
-    delete map[userGroup]
-    onChange('GroupGroupRatio', JSON.stringify(map, null, 2))
   }
 
   const handleOverrideAdd = (userGroup: string) => {
@@ -353,45 +353,55 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   ) => {
     if (!groupOverrideUserGroup) return
 
-    const map = safeJsonParse<Record<string, Record<string, number>>>(
-      groupGroupRatio,
-      {
-        fallback: {},
-        silent: true,
+    const rows = buildGroupRatioOverrideRows(groupGroupRatio, packageGroups)
+    let matched = false
+    const nextRows = rows.map((row) => {
+      if (row.userGroup !== groupOverrideUserGroup) return row
+      matched = true
+      const previousTarget = oldTargetGroup ?? targetGroup
+      return {
+        ...row,
+        overrides: [
+          ...row.overrides.filter(
+            (override) =>
+              override.targetGroup !== previousTarget &&
+              override.targetGroup !== targetGroup
+          ),
+          { targetGroup, ratio },
+        ],
+        isVirtual: false,
       }
-    )
+    })
 
-    if (!map[groupOverrideUserGroup]) {
-      map[groupOverrideUserGroup] = {}
+    if (!matched) {
+      nextRows.push({
+        userGroup: groupOverrideUserGroup,
+        overrides: [{ targetGroup, ratio }],
+        isPackageGroup: packageGroups.includes(groupOverrideUserGroup),
+        isVirtual: false,
+      })
     }
 
-    if (oldTargetGroup && oldTargetGroup !== targetGroup) {
-      delete map[groupOverrideUserGroup][oldTargetGroup]
-    }
-
-    map[groupOverrideUserGroup][targetGroup] = ratio
-
-    onChange('GroupGroupRatio', JSON.stringify(map, null, 2))
+    onChange('GroupGroupRatio', serializeGroupRatioOverrideRows(nextRows))
     setGroupOverrideDialogOpen(false)
   }
 
   const handleOverrideDelete = (userGroup: string, targetGroup: string) => {
-    const map = safeJsonParse<Record<string, Record<string, number>>>(
-      groupGroupRatio,
-      {
-        fallback: {},
-        silent: true,
-      }
-    )
+    const rows = buildGroupRatioOverrideRows(groupGroupRatio, packageGroups)
+    const nextRows = rows
+      .map((row) =>
+        row.userGroup === userGroup
+          ? {
+              ...row,
+              overrides: row.overrides.filter(
+                (override) => override.targetGroup !== targetGroup
+              ),
+            }
+          : row
+      )
+      .filter((row) => row.userGroup !== userGroup || row.overrides.length > 0)
 
-    if (map[userGroup]) {
-      delete map[userGroup][targetGroup]
-      if (Object.keys(map[userGroup]).length === 0) {
-        delete map[userGroup]
-      }
-    }
-
-    onChange('GroupGroupRatio', JSON.stringify(map, null, 2))
+    onChange('GroupGroupRatio', serializeGroupRatioOverrideRows(nextRows))
   }
 
   return (
@@ -492,22 +502,37 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
                   <Collapsible key={userGroupData.userGroup}>
                     <div className='rounded-lg border'>
                       <div className='flex items-center justify-between p-4'>
-                        <div className='flex items-center gap-2'>
-                          <CollapsibleTrigger
-                            render={<Button variant='ghost' size='sm' />}
-                          >
-                            <ChevronDown className='h-4 w-4' />
-                          </CollapsibleTrigger>
-                          <span className='font-semibold'>
+                        <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
+                          {userGroupData.isVirtual ? (
+                            <span className='h-8 w-8 shrink-0' aria-hidden />
+                          ) : (
+                            <CollapsibleTrigger
+                              render={<Button variant='ghost' size='sm' />}
+                            >
+                              <ChevronDown className='h-4 w-4' />
+                            </CollapsibleTrigger>
+                          )}
+                          <span className='font-semibold break-all'>
                             {userGroupData.userGroup}
                           </span>
-                          <span className='text-muted-foreground text-sm'>
-                            {t('{{count}} override', {
-                              count: userGroupData.overrides.length,
-                            })}
-                          </span>
+                          {userGroupData.isPackageGroup ? (
+                            <Badge variant='secondary'>
+                              {t('Package billing group')}
+                            </Badge>
+                          ) : null}
+                          {userGroupData.isVirtual ? (
+                            <span className='text-muted-foreground text-sm'>
+                              {t('Default 1x until an override is added')}
+                            </span>
+                          ) : (
+                            <span className='text-muted-foreground text-sm'>
+                              {t('{{count}} override', {
+                                count: userGroupData.overrides.length,
+                              })}
+                            </span>
+                          )}
                         </div>
-                        <div className='flex gap-2'>
+                        <div className='flex shrink-0 gap-2'>
                           <Button
                             variant='ghost'
                             size='sm'
@@ -517,15 +542,17 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
                           >
                             <Plus className='h-4 w-4' />
                           </Button>
-                          <Button
-                            variant='ghost'
-                            size='sm'
-                            onClick={() =>
-                              handleUserGroupDelete(userGroupData.userGroup)
-                            }
-                          >
-                            <Trash2 className='h-4 w-4' />
-                          </Button>
+                          {userGroupData.isVirtual ? null : (
+                            <Button
+                              variant='ghost'
+                              size='sm'
+                              onClick={() =>
+                                handleUserGroupDelete(userGroupData.userGroup)
+                              }
+                            >
+                              <Trash2 className='h-4 w-4' />
+                            </Button>
+                          )}
                         </div>
                       </div>
                       <CollapsibleContent>

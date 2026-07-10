@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useState, type BaseSyntheticEvent } from 'react'
 import { type UseFormReturn } from 'react-hook-form'
 import { Code2, Eye, HelpCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -73,12 +73,14 @@ type GroupRatioFormProps = {
   form: UseFormReturn<GroupFormValues>
   onSave: (values: GroupFormValues) => Promise<void>
   isSaving: boolean
+  packageGroups: string[]
 }
 
 export const GroupRatioForm = memo(function GroupRatioForm({
   form,
   onSave,
   isSaving,
+  packageGroups,
 }: GroupRatioFormProps) {
   const { t } = useTranslation()
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
@@ -97,6 +99,15 @@ export const GroupRatioForm = memo(function GroupRatioForm({
   const toggleEditMode = useCallback(() => {
     setEditMode((prev) => (prev === 'visual' ? 'json' : 'visual'))
   }, [])
+
+  const handleSave = useCallback(
+    (event?: BaseSyntheticEvent) => {
+      void form
+        .handleSubmit(onSave)(event)
+        .catch(() => undefined)
+    },
+    [form, onSave]
+  )
 
   return (
     <div className='space-y-6'>
@@ -127,7 +138,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <Button
             type='button'
             size='sm'
-            onClick={form.handleSubmit(onSave)}
+            onClick={handleSave}
             disabled={isSaving}
           >
             {isSaving ? t('Saving...') : t('Save group ratios')}
@@ -141,6 +152,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               userUsableGroups={form.watch('UserUsableGroups')}
               groupGroupRatio={form.watch('GroupGroupRatio')}
               autoGroups={form.watch('AutoGroups')}
+              packageGroups={packageGroups}
               onChange={(field, value) =>
                 handleFieldChange(field as keyof GroupFormValues, value)
               }
@@ -177,7 +189,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
             />
           </div>
         ) : (
-          <SettingsForm onSubmit={form.handleSubmit(onSave)}>
+          <SettingsForm onSubmit={handleSave}>
             <FormField
               control={form.control}
               name='GroupRatio'

@@ -20,16 +20,35 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as z from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ConfirmDialog } from '@/components/confirm-dialog'
-import { resetModelRatios } from '../api'
+import {
+  getGroupRatioOptions,
+  resetModelRatios,
+  updateGroupRatioOptions,
+  updateSystemOption,
+} from '../api'
 import { SettingsPageTitleStatusPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { GroupRatioForm } from './group-ratio-form'
+import {
+  getPackageGroupDisplayState,
+  GROUP_RATIO_REQUEST_CONFIG,
+  saveGroupRatioChanges,
+  type GroupRatioFormValues,
+} from './group-ratio-save'
 import { ModelRatioForm } from './model-ratio-form'
 import { ToolPriceSettings } from './tool-price-settings'
 import { UpstreamRatioSync } from './upstream-ratio-sync'
@@ -149,6 +168,12 @@ export function RatioSettingsCard({
   const updateOption = useUpdateOption()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const groupRatioOptionsQuery = useQuery({
+    queryKey: ['group-ratio-options'],
+    queryFn: getGroupRatioOptions,
+    enabled: visibleTabs.includes('groups'),
+    staleTime: 5 * 60 * 1000,
+  })
 
   const resetMutation = useMutation({
     mutationFn: resetModelRatios,
@@ -339,38 +364,52 @@ export function RatioSettingsCard({
     [t, updateOption]
   )
 
+  const groupSaveMutation = useMutation({
+    mutationFn: (values: GroupFormValues) =>
+      saveGroupRatioChanges(values, groupNormalizedDefaults.current, {
+        updateGroupRatioOptions,
+        updateSystemOption: (request) =>
+          updateSystemOption(request, GROUP_RATIO_REQUEST_CONFIG),
+        commitBaseline: (nextBaseline: GroupRatioFormValues) => {
+          groupNormalizedDefaults.current = nextBaseline
+          groupForm.reset({
+            ...nextBaseline,
+            GroupRatio: formatJsonForTextarea(nextBaseline.GroupRatio),
+            TopupGroupRatio: formatJsonForTextarea(
+              nextBaseline.TopupGroupRatio
+            ),
+            UserUsableGroups: formatJsonForTextarea(
+              nextBaseline.UserUsableGroups
+            ),
+            GroupGroupRatio: formatJsonForTextarea(
+              nextBaseline.GroupGroupRatio
+            ),
+            AutoGroups: formatJsonForTextarea(nextBaseline.AutoGroups),
+            GroupSpecialUsableGroup: formatJsonForTextarea(
+              nextBaseline.GroupSpecialUsableGroup
+            ),
+          })
+        },
+      }),
+    onSuccess: (result) => {
+      if (!result.changed) {
+        toast.info(t('No changes to save'))
+        return
+      }
+      toast.success(t('Group ratios saved successfully'))
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+    },
+    onError: () => {
+      toast.error(t('Failed to save group ratios'))
+    },
+  })
+
+  const { mutateAsync: saveGroupRatiosAsync } = groupSaveMutation
   const saveGroupRatios = useCallback(
     async (values: GroupFormValues) => {
-      const normalized = {
-        GroupRatio: normalizeJsonString(values.GroupRatio),
-        TopupGroupRatio: normalizeJsonString(values.TopupGroupRatio),
-        UserUsableGroups: normalizeJsonString(values.UserUsableGroups),
-        GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
-        AutoGroups: normalizeJsonString(values.AutoGroups),
-        DefaultUseAutoGroup: values.DefaultUseAutoGroup,
-        GroupSpecialUsableGroup: normalizeJsonString(
-          values.GroupSpecialUsableGroup
-        ),
-      }
-
-      // Map form field names to API keys (most are 1:1, except GroupSpecialUsableGroup)
-      const apiKeyMap: Record<string, string> = {
-        GroupSpecialUsableGroup:
-          'group_ratio_setting.group_special_usable_group',
-      }
-
-      const updates = (
-        Object.keys(normalized) as Array<keyof typeof normalized>
-      ).filter(
-        (key) => normalized[key] !== groupNormalizedDefaults.current[key]
-      )
-
-      for (const key of updates) {
-        const apiKey = apiKeyMap[key] || key
-        await updateOption.mutateAsync({ key: apiKey, value: normalized[key] })
-      }
+      await saveGroupRatiosAsync(values)
     },
-    [updateOption]
+    [saveGroupRatiosAsync]
   )
 
   const handleResetRatios = useCallback(() => {
@@ -411,11 +450,46 @@ export function RatioSettingsCard({
       )
     }
     if (tab === 'groups') {
+      const packageGroupState = getPackageGroupDisplayState({
+        isPending: groupRatioOptionsQuery.isPending,
+        isError: groupRatioOptionsQuery.isError,
+        packageGroups: groupRatioOptionsQuery.data?.data.package_groups,
+      })
+
+      if (packageGroupState.status === 'loading') {
+        return (
+          <div className='space-y-3'>
+            <Skeleton className='h-9 w-56' />
+            <Skeleton className='h-48 w-full' />
+          </div>
+        )
+      }
+
+      if (packageGroupState.status === 'error') {
+        return (
+          <Alert variant='destructive'>
+            <AlertTitle>{t('Unable to load groups')}</AlertTitle>
+            <AlertDescription>{t('Failed to load')}</AlertDescription>
+            <AlertAction>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => void groupRatioOptionsQuery.refetch()}
+              >
+                {t('Retry')}
+              </Button>
+            </AlertAction>
+          </Alert>
+        )
+      }
+
       return (
         <GroupRatioForm
           form={groupForm}
           onSave={saveGroupRatios}
-          isSaving={updateOption.isPending}
+          isSaving={groupSaveMutation.isPending}
+          packageGroups={packageGroupState.packageGroups}
         />
       )
     }
