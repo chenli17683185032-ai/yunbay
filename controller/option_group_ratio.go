@@ -3,7 +3,6 @@ package controller
 import (
 	"fmt"
 	"net/http"
-	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -24,8 +23,6 @@ type groupRatioOptionsResponse struct {
 
 type groupRatioRuntimeApplier func(groupRatio, groupGroupRatio string) error
 
-var groupRatioOptionsMutex sync.Mutex
-
 func respondGroupRatioOptionsError(c *gin.Context, status int, err error) {
 	c.JSON(status, gin.H{
 		"success": false,
@@ -43,6 +40,25 @@ func normalizedGroupRatioRuntimeReadback() (string, string, error) {
 		return "", "", err
 	}
 	return groupRatio, groupGroupRatio, nil
+}
+
+func normalizedGroupRatioDatabaseReadback() (model.GroupRatioOptions, error) {
+	stored, err := model.GetGroupRatioOptions()
+	if err != nil {
+		return model.GroupRatioOptions{}, err
+	}
+	_, groupRatio, err := ratio_setting.ParseAndNormalizeGroupRatioJSON(stored.GroupRatio)
+	if err != nil {
+		return model.GroupRatioOptions{}, err
+	}
+	_, groupGroupRatio, err := ratio_setting.ParseAndNormalizeGroupGroupRatioJSON(stored.GroupGroupRatio)
+	if err != nil {
+		return model.GroupRatioOptions{}, err
+	}
+	return model.GroupRatioOptions{
+		GroupRatio:      groupRatio,
+		GroupGroupRatio: groupGroupRatio,
+	}, nil
 }
 
 func groupRatioOptionsSnapshot() (groupRatioOptionsResponse, error) {
@@ -79,7 +95,7 @@ func applyGroupRatioRuntime(groupRatio, groupGroupRatio string) error {
 }
 
 func restoreGroupRatioRuntimeFromDatabase() error {
-	stored, err := model.GetGroupRatioOptions()
+	stored, err := normalizedGroupRatioDatabaseReadback()
 	if err != nil {
 		return err
 	}
@@ -90,11 +106,47 @@ func restoreGroupRatioRuntimeFromDatabase() error {
 	return nil
 }
 
-func GetGroupRatioOptions(c *gin.Context) {
-	groupRatioOptionsMutex.Lock()
-	defer groupRatioOptionsMutex.Unlock()
+func restoreGroupRatioRuntimeAfterFailure(operationErr error) error {
+	if restoreErr := restoreGroupRatioRuntimeFromDatabase(); restoreErr != nil {
+		return fmt.Errorf("group ratio operation: %w; restore from database: %v", operationErr, restoreErr)
+	}
+	return operationErr
+}
 
-	snapshot, err := groupRatioOptionsSnapshot()
+func reconcileGroupRatioOptionsReadback(expectedGroupRatio, expectedGroupGroupRatio string) (groupRatioOptionsResponse, error) {
+	stored, err := normalizedGroupRatioDatabaseReadback()
+	if err != nil {
+		return groupRatioOptionsResponse{}, err
+	}
+	runtimeGroupRatio, runtimeGroupGroupRatio, err := normalizedGroupRatioRuntimeReadback()
+	if err != nil {
+		return groupRatioOptionsResponse{}, err
+	}
+	if stored.GroupRatio != expectedGroupRatio || stored.GroupGroupRatio != expectedGroupGroupRatio {
+		return groupRatioOptionsResponse{}, fmt.Errorf("committed group ratio options differ from normalized submission")
+	}
+	if runtimeGroupRatio != stored.GroupRatio || runtimeGroupGroupRatio != stored.GroupGroupRatio {
+		return groupRatioOptionsResponse{}, fmt.Errorf("runtime group ratio options differ from committed database snapshot")
+	}
+	packageGroups, err := model.ListEnabledValuePackageBillingGroups()
+	if err != nil {
+		return groupRatioOptionsResponse{}, err
+	}
+	setGroupRatioOptionMap(runtimeGroupRatio, runtimeGroupGroupRatio)
+	return groupRatioOptionsResponse{
+		GroupRatio:      runtimeGroupRatio,
+		GroupGroupRatio: runtimeGroupGroupRatio,
+		PackageGroups:   packageGroups,
+	}, nil
+}
+
+func GetGroupRatioOptions(c *gin.Context) {
+	var snapshot groupRatioOptionsResponse
+	err := model.WithGroupRatioOptionsLock(func() error {
+		var err error
+		snapshot, err = groupRatioOptionsSnapshot()
+		return err
+	})
 	if err != nil {
 		respondGroupRatioOptionsError(c, http.StatusInternalServerError, err)
 		return
@@ -107,9 +159,6 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 }
 
 func updateGroupRatioOptionsWithRuntime(c *gin.Context, applier groupRatioRuntimeApplier) {
-	groupRatioOptionsMutex.Lock()
-	defer groupRatioOptionsMutex.Unlock()
-
 	var request groupRatioOptionsUpdateRequest
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
 		respondGroupRatioOptionsError(c, http.StatusBadRequest, err)
@@ -127,27 +176,24 @@ func updateGroupRatioOptionsWithRuntime(c *gin.Context, applier groupRatioRuntim
 		return
 	}
 
-	packageGroups, err := model.ListEnabledValuePackageBillingGroups()
+	var readback groupRatioOptionsResponse
+	err = model.WithGroupRatioOptionsLock(func() error {
+		if err := model.UpdateGroupRatioOptions(normalizedGroupRatio, normalizedGroupGroupRatio); err != nil {
+			return err
+		}
+		if err := applier(normalizedGroupRatio, normalizedGroupGroupRatio); err != nil {
+			return restoreGroupRatioRuntimeAfterFailure(err)
+		}
+		var err error
+		readback, err = reconcileGroupRatioOptionsReadback(normalizedGroupRatio, normalizedGroupGroupRatio)
+		if err != nil {
+			return restoreGroupRatioRuntimeAfterFailure(err)
+		}
+		return nil
+	})
 	if err != nil {
 		respondGroupRatioOptionsError(c, http.StatusInternalServerError, err)
 		return
 	}
-	if err := model.UpdateGroupRatioOptions(normalizedGroupRatio, normalizedGroupGroupRatio); err != nil {
-		respondGroupRatioOptionsError(c, http.StatusInternalServerError, err)
-		return
-	}
-
-	if err := applier(normalizedGroupRatio, normalizedGroupGroupRatio); err != nil {
-		if restoreErr := restoreGroupRatioRuntimeFromDatabase(); restoreErr != nil {
-			err = fmt.Errorf("apply group ratio runtime: %w; restore from database: %v", err, restoreErr)
-		}
-		respondGroupRatioOptionsError(c, http.StatusInternalServerError, err)
-		return
-	}
-	setGroupRatioOptionMap(normalizedGroupRatio, normalizedGroupGroupRatio)
-	common.ApiSuccess(c, groupRatioOptionsResponse{
-		GroupRatio:      normalizedGroupRatio,
-		GroupGroupRatio: normalizedGroupGroupRatio,
-		PackageGroups:   packageGroups,
-	})
+	common.ApiSuccess(c, readback)
 }

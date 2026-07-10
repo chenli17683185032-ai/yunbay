@@ -348,13 +348,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	}
-	if option.Key == "GroupRatio" || option.Key == "GroupGroupRatio" {
-		groupRatioOptionsMutex.Lock()
-		err = model.UpdateOption(option.Key, option.Value.(string))
-		groupRatioOptionsMutex.Unlock()
-	} else {
-		err = model.UpdateOption(option.Key, option.Value.(string))
-	}
+	err = model.UpdateOption(option.Key, option.Value.(string))
 	if err != nil {
 		common.ApiError(c, err)
 		return

@@ -60,6 +60,17 @@ func TestParseAndNormalizeGroupRatioJSONReturnsStableJSON(t *testing.T) {
 	require.Equal(t, `{"a":1.5,"z":0}`, normalizedJSON)
 }
 
+func TestParseAndNormalizeGroupRatioJSONRejectsNullEntryAndAllowsZero(t *testing.T) {
+	_, _, err := ParseAndNormalizeGroupRatioJSON(`{"paid":null}`)
+	require.Error(t, err)
+	require.Error(t, CheckGroupRatio(`{"paid":null}`))
+
+	normalized, normalizedJSON, err := ParseAndNormalizeGroupRatioJSON(`{"free":0}`)
+	require.NoError(t, err)
+	require.Equal(t, map[string]float64{"free": 0}, normalized)
+	require.Equal(t, `{"free":0}`, normalizedJSON)
+}
+
 func TestNormalizeGroupGroupRatioTrimsNestedKeys(t *testing.T) {
 	normalized, err := NormalizeGroupGroupRatio(map[string]map[string]float64{
 		" day-card ": {

@@ -3,6 +3,7 @@ package model
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,6 +19,16 @@ import (
 type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
+}
+
+var groupRatioOptionsMutex sync.Mutex
+
+// WithGroupRatioOptionsLock serializes database and runtime transitions for
+// GroupRatio and GroupGroupRatio across API writes and background sync.
+func WithGroupRatioOptionsLock(operation func() error) error {
+	groupRatioOptionsMutex.Lock()
+	defer groupRatioOptionsMutex.Unlock()
+	return operation()
 }
 
 func AllOption() ([]*Option, error) {
@@ -185,13 +196,24 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
-	options, _ := AllOption()
+	err := WithGroupRatioOptionsLock(loadOptionsFromDatabaseUnlocked)
+	if err != nil {
+		common.SysLog("failed to load options from database: " + err.Error())
+	}
+}
+
+func loadOptionsFromDatabaseUnlocked() error {
+	options, err := AllOption()
+	if err != nil {
+		return err
+	}
 	for _, option := range options {
-		err := updateOptionMap(option.Key, option.Value)
+		err = updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
+	return nil
 }
 
 func SyncOptions(frequency int) {
@@ -203,6 +225,15 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	if isGroupRatioOptionKey(key) {
+		return WithGroupRatioOptionsLock(func() error {
+			return updateOptionUnlocked(key, value)
+		})
+	}
+	return updateOptionUnlocked(key, value)
+}
+
+func updateOptionUnlocked(key string, value string) error {
 	// Save to database first
 	option := Option{
 		Key: key,
@@ -220,6 +251,10 @@ func UpdateOption(key string, value string) error {
 	}
 	// Update OptionMap
 	return updateOptionMap(key, value)
+}
+
+func isGroupRatioOptionKey(key string) bool {
+	return key == "GroupRatio" || key == "GroupGroupRatio"
 }
 
 type GroupRatioOptions struct {
@@ -250,11 +285,11 @@ func UpdateGroupRatioOptions(groupRatio, groupGroupRatio string) error {
 
 func GetGroupRatioOptions() (GroupRatioOptions, error) {
 	var groupRatio Option
-	if err := DB.Where("key = ?", "GroupRatio").First(&groupRatio).Error; err != nil {
+	if err := DB.Where(&Option{Key: "GroupRatio"}).First(&groupRatio).Error; err != nil {
 		return GroupRatioOptions{}, err
 	}
 	var groupGroupRatio Option
-	if err := DB.Where("key = ?", "GroupGroupRatio").First(&groupGroupRatio).Error; err != nil {
+	if err := DB.Where(&Option{Key: "GroupGroupRatio"}).First(&groupGroupRatio).Error; err != nil {
 		return GroupRatioOptions{}, err
 	}
 	return GroupRatioOptions{
@@ -272,6 +307,17 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
+	for key := range values {
+		if isGroupRatioOptionKey(key) {
+			return WithGroupRatioOptionsLock(func() error {
+				return updateOptionsBulkUnlocked(values)
+			})
+		}
+	}
+	return updateOptionsBulkUnlocked(values)
+}
+
+func updateOptionsBulkUnlocked(values map[string]string) error {
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		for k, v := range values {
 			option := Option{Key: k}

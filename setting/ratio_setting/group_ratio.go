@@ -149,12 +149,19 @@ func NormalizeGroupRatio(groupRatios map[string]float64) (map[string]float64, er
 }
 
 func ParseAndNormalizeGroupRatioJSON(jsonStr string) (map[string]float64, string, error) {
-	parsed := make(map[string]float64)
-	if err := common.UnmarshalJsonStr(jsonStr, &parsed); err != nil {
+	parsedPointers := make(map[string]*float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &parsedPointers); err != nil {
 		return nil, "", err
 	}
-	if parsed == nil {
+	if parsedPointers == nil {
 		return nil, "", errors.New("group ratio must be a JSON object")
+	}
+	parsed := make(map[string]float64, len(parsedPointers))
+	for name, ratio := range parsedPointers {
+		if ratio == nil {
+			return nil, "", fmt.Errorf("group ratio must not be null: %s", strings.TrimSpace(name))
+		}
+		parsed[name] = *ratio
 	}
 	normalized, err := NormalizeGroupRatio(parsed)
 	if err != nil {
