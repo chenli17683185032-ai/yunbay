@@ -14,6 +14,8 @@ import (
 
 const (
 	LegacyValuePackageQuotaMigrationVersion                = "value_package_quota_b2_v1"
+	legacyValuePackageQuotaMigrationSkipExpired            = "expired"
+	legacyValuePackageQuotaMigrationSkipNotActive          = "not_active"
 	legacyValuePackageQuotaMigrationSkipMissingPlan        = "missing_plan"
 	legacyValuePackageQuotaMigrationSkipNotValuePackage    = "not_value_package"
 	legacyValuePackageQuotaMigrationSkipInvalidPackageType = "invalid_package_type"
@@ -77,12 +79,20 @@ func previewLegacyValuePackageQuotaMigration(db *gorm.DB, now int64) (*LegacyVal
 		Skipped:      make(map[string]int),
 	}
 	var candidates []UserSubscription
-	if err := db.Where("status = ? AND end_time > ? AND amount_total = ?", UserSubscriptionStatusActive, now, 0).
+	if err := db.Where("amount_total = ?", 0).
 		Order("id asc").
 		Find(&candidates).Error; err != nil {
 		return nil, err
 	}
 	for _, sub := range candidates {
+		if sub.Status == UserSubscriptionStatusExpired || sub.EndTime <= now {
+			report.Skipped[legacyValuePackageQuotaMigrationSkipExpired]++
+			continue
+		}
+		if sub.Status != UserSubscriptionStatusActive {
+			report.Skipped[legacyValuePackageQuotaMigrationSkipNotActive]++
+			continue
+		}
 		var plan SubscriptionPlan
 		if err := db.First(&plan, sub.PlanId).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

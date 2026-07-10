@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -96,6 +97,7 @@ func createValuePackagePlan(t *testing.T, packageType string, level int, duratio
 		PackageLevel:      level,
 		ModelGroup:        packageType + "-card",
 		ConcurrencyLimit:  1,
+		TotalAmount:       10000,
 		Limit5hAmount:     1000,
 		Limit7dAmount:     5000,
 		LdxpProductUrl:    "https://ldxp.example.test/" + packageType,
@@ -141,6 +143,45 @@ func TestValuePackagePurchaseIntentSameLevelExtends(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ValuePackagePurchaseActionExtend, intent.Action)
 	require.False(t, intent.RequiresConfirmation)
+}
+
+func TestValuePackagePurchaseIntentSameLevelDifferentPlanCoversWithNewSnapshot(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3016, UserGroupTiyan)
+	currentPlan := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	currentPlan.TotalAmount = 4500
+	require.NoError(t, DB.Save(&currentPlan).Error)
+	targetPlan := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 12.9)
+	targetPlan.TotalAmount = 6000
+	targetPlan.ModelGroup = "week-card-premium"
+	require.NoError(t, DB.Save(&targetPlan).Error)
+	now := common.GetTimestamp()
+	currentSub := createActiveValuePackageSub(t, user.Id, currentPlan, now-100, now+3*valuePackageDaySeconds)
+	currentSub.AmountUsed = 700
+	require.NoError(t, DB.Save(&currentSub).Error)
+
+	intent, err := CheckValuePackagePurchaseIntent(user.Id, targetPlan.Id, false)
+	require.NoError(t, err)
+	require.Equal(t, ValuePackagePurchaseActionUpgrade, intent.Action)
+	require.True(t, intent.RequiresConfirmation)
+
+	var completed *UserSubscription
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		completed, createErr = CreateValuePackageSubscriptionFromPlanTx(tx, user.Id, &targetPlan, "test-same-level-cover")
+		return createErr
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+	require.NotEqual(t, currentSub.Id, completed.Id)
+	require.Equal(t, targetPlan.Id, completed.PlanId)
+	require.Equal(t, targetPlan.TotalAmount, completed.AmountTotal)
+	require.Zero(t, completed.AmountUsed)
+	var covered UserSubscription
+	require.NoError(t, DB.First(&covered, currentSub.Id).Error)
+	require.Equal(t, UserSubscriptionStatusCovered, covered.Status)
+	require.Equal(t, completed.Id, covered.CoveredBySubscriptionId)
 }
 
 func TestCreateUserSubscriptionFromPlanTxRejectsValuePackagePlan(t *testing.T) {
@@ -299,6 +340,56 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 	require.Equal(t, month.Id, state.Plan.Id)
 }
 
+func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3060, UserGroupTiyan)
+	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	week.TotalAmount = 4500
+	require.NoError(t, DB.Save(&week).Error)
+	now := common.GetTimestamp()
+	existing := createActiveValuePackageSub(t, user.Id, week, now-100, now+3*valuePackageDaySeconds)
+	existing.AmountUsed = 700
+	require.NoError(t, DB.Save(&existing).Error)
+	originalEnd := existing.EndTime
+	originalTotal := existing.AmountTotal
+	order := SubscriptionOrder{
+		UserId:          user.Id,
+		PlanId:          week.Id,
+		Money:           week.PriceAmount,
+		TradeNo:         "vp-extension-callback-replay",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      now,
+	}
+	require.NoError(t, DB.Create(&order).Error)
+
+	first, err := CompleteValuePackageOrder(order.TradeNo, "payload-1", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, existing.Id, first.Id)
+	require.Equal(t, originalEnd+7*valuePackageDaySeconds, first.EndTime)
+	require.Equal(t, originalTotal+week.TotalAmount, first.AmountTotal)
+	require.Equal(t, existing.AmountUsed, first.AmountUsed)
+
+	replay, err := CompleteValuePackageOrder(order.TradeNo, "payload-2", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, replay)
+	require.Equal(t, first.Id, replay.Id)
+	require.Equal(t, first.EndTime, replay.EndTime)
+	require.Equal(t, first.AmountTotal, replay.AmountTotal)
+	require.Equal(t, first.AmountUsed, replay.AmountUsed)
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+	require.Equal(t, first.EndTime, reloaded.EndTime)
+	require.Equal(t, first.AmountTotal, reloaded.AmountTotal)
+	require.Equal(t, first.AmountUsed, reloaded.AmountUsed)
+	var reloadedOrder SubscriptionOrder
+	require.NoError(t, DB.First(&reloadedOrder, order.Id).Error)
+	require.Equal(t, common.TopUpStatusSuccess, reloadedOrder.Status)
+	require.Equal(t, existing.Id, reloadedOrder.UserSubscriptionId)
+}
+
 func TestCreateValuePackageSubscriptionFromPlanTxExtendsTimeAndTotalWithoutChangingUsed(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3007, UserGroupTiyan)
@@ -348,6 +439,112 @@ func TestCreateValuePackageSubscriptionFromPlanTxSnapshotsTotalForNewPurchase(t 
 	require.NotNil(t, completed)
 	require.Equal(t, day.TotalAmount, completed.AmountTotal)
 	require.Zero(t, completed.AmountUsed)
+}
+
+func TestCreateValuePackageSubscriptionFromPlanTxRejectsInvalidLifecycleLimits(t *testing.T) {
+	tests := []struct {
+		name        string
+		planType    string
+		total       int64
+		limit7d     int64
+		wantErrPart string
+	}{
+		{name: "non-positive total", planType: ValuePackageTypeDay, total: 0, wantErrPart: "total_amount"},
+		{name: "month stage exceeds total", planType: ValuePackageTypeMonth, total: 100, limit7d: 101, wantErrPart: "limit_7d_amount"},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupValuePackageTestDB(t)
+			user := createValuePackageUser(t, 3020+i, UserGroupTiyan)
+			plan := createValuePackagePlan(t, tt.planType, ValuePackageLevelDay+i, 1, 3.9)
+			plan.TotalAmount = tt.total
+			plan.Limit7dAmount = tt.limit7d
+			require.NoError(t, DB.Save(&plan).Error)
+
+			var completed *UserSubscription
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				var createErr error
+				completed, createErr = CreateValuePackageSubscriptionFromPlanTx(tx, user.Id, &plan, "test-invalid-limits")
+				return createErr
+			})
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErrPart)
+			require.Nil(t, completed)
+			var count int64
+			require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ?", user.Id).Count(&count).Error)
+			require.Zero(t, count)
+		})
+	}
+}
+
+func TestCompleteValuePackageOrderRejectsInvalidLifecycleLimits(t *testing.T) {
+	tests := []struct {
+		name        string
+		planType    string
+		level       int
+		duration    int
+		total       int64
+		limit7d     int64
+		wantErrPart string
+	}{
+		{name: "non-positive total", planType: ValuePackageTypeWeek, level: ValuePackageLevelWeek, duration: 7, total: 0, wantErrPart: "total_amount"},
+		{name: "month stage exceeds total", planType: ValuePackageTypeMonth, level: ValuePackageLevelMonth, duration: 30, total: 100, limit7d: 101, wantErrPart: "limit_7d_amount"},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupValuePackageTestDB(t)
+			user := createValuePackageUser(t, 3030+i, UserGroupTiyan)
+			plan := createValuePackagePlan(t, tt.planType, tt.level, tt.duration, 9.9)
+			plan.TotalAmount = tt.total
+			plan.Limit7dAmount = tt.limit7d
+			require.NoError(t, DB.Save(&plan).Error)
+			order := SubscriptionOrder{
+				UserId:          user.Id,
+				PlanId:          plan.Id,
+				Money:           plan.PriceAmount,
+				TradeNo:         fmt.Sprintf("vp-invalid-limits-%d", i),
+				PaymentMethod:   PaymentMethodLDXP,
+				PaymentProvider: PaymentProviderLDXP,
+				Status:          common.TopUpStatusPending,
+				CreateTime:      common.GetTimestamp(),
+			}
+			require.NoError(t, DB.Create(&order).Error)
+
+			completed, err := CompleteValuePackageOrder(order.TradeNo, "payload", PaymentProviderLDXP, PaymentMethodLDXP, true)
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.wantErrPart)
+			require.Nil(t, completed)
+			var reloadedOrder SubscriptionOrder
+			require.NoError(t, DB.First(&reloadedOrder, order.Id).Error)
+			require.Equal(t, common.TopUpStatusPending, reloadedOrder.Status)
+			require.Zero(t, reloadedOrder.UserSubscriptionId)
+			var count int64
+			require.NoError(t, DB.Model(&UserSubscription{}).Where("user_id = ?", user.Id).Count(&count).Error)
+			require.Zero(t, count)
+		})
+	}
+}
+
+func TestValuePackageLifecycleValidationDoesNotAffectRegularSubscription(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3040, UserGroupTiyan)
+	regular := createRegularSubscriptionPlanForValuePackageTest(t, "regular zero-total", 0)
+
+	var completed *UserSubscription
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		completed, createErr = CreateUserSubscriptionFromPlanTx(tx, user.Id, &regular, "test-regular")
+		return createErr
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+	require.Equal(t, regular.Id, completed.PlanId)
+	require.Zero(t, completed.AmountTotal)
 }
 
 func TestCreateValuePackageSubscriptionFromPlanTxLocksUserBeforePurchaseIntent(t *testing.T) {
@@ -570,6 +767,69 @@ func TestValuePackageExtendUsesMaxExistingEndAndNow(t *testing.T) {
 			require.NoError(t, DB.First(&reloaded, existing.Id).Error)
 			require.Equal(t, tt.wantEnd, reloaded.EndTime)
 			require.Equal(t, existing.AmountTotal+day.TotalAmount, reloaded.AmountTotal)
+			require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+		})
+	}
+}
+
+func TestExtendValuePackageSubscriptionRejectsInt64OverflowWithoutWriting(t *testing.T) {
+	tests := []struct {
+		name          string
+		existingEnd   int64
+		existingTotal int64
+		planTotal     int64
+		duration      int64
+	}{
+		{
+			name:          "end time overflow",
+			existingEnd:   math.MaxInt64 - 5,
+			existingTotal: 100,
+			planTotal:     10,
+			duration:      10,
+		},
+		{
+			name:          "lifecycle quota overflow",
+			existingEnd:   2_000_000_100,
+			existingTotal: math.MaxInt64 - 5,
+			planTotal:     10,
+			duration:      10,
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupValuePackageTestDB(t)
+			user := createValuePackageUser(t, 3050+i, UserGroupTiyan)
+			plan := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+			plan.TotalAmount = tt.planTotal
+			require.NoError(t, DB.Save(&plan).Error)
+			now := int64(2_000_000_000)
+			existing := UserSubscription{
+				UserId:      user.Id,
+				PlanId:      plan.Id,
+				AmountTotal: tt.existingTotal,
+				AmountUsed:  50,
+				StartTime:   now - 100,
+				EndTime:     tt.existingEnd,
+				Status:      UserSubscriptionStatusActive,
+				Source:      "test-overflow",
+			}
+			require.NoError(t, DB.Create(&existing).Error)
+
+			var extended *UserSubscription
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				var extendErr error
+				extended, extendErr = extendValuePackageSubscriptionTx(tx, existing.Id, &plan, now, now+tt.duration)
+				return extendErr
+			})
+
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "overflow")
+			require.Nil(t, extended)
+			var reloaded UserSubscription
+			require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+			require.Equal(t, existing.EndTime, reloaded.EndTime)
+			require.Equal(t, existing.AmountTotal, reloaded.AmountTotal)
 			require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
 		})
 	}

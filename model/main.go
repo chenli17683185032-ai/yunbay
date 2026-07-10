@@ -174,7 +174,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 	})
 }
 
-func InitDB() (err error) {
+func initializePrimaryDBConnection() (err error) {
 	db, err := chooseDB("SQL_DSN", false)
 	if err == nil {
 		if common.DebugEnabled {
@@ -194,20 +194,32 @@ func InitDB() (err error) {
 		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
 		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
-
-		if !common.IsMasterNode {
-			return nil
-		}
-		if common.UsingMySQL {
-			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
-		}
-		common.SysLog("database migration started")
-		err = migrateDB()
-		return err
+		return nil
 	} else {
 		common.FatalLog(err)
 	}
 	return err
+}
+
+// InitDBWithoutMigrations opens and configures the primary database connection
+// without executing application schema migrations. Maintenance commands that
+// promise a read-only preview must use this initializer instead of InitDB.
+func InitDBWithoutMigrations() error {
+	return initializePrimaryDBConnection()
+}
+
+func InitDB() (err error) {
+	if err = initializePrimaryDBConnection(); err != nil {
+		return err
+	}
+	if !common.IsMasterNode {
+		return nil
+	}
+	if common.UsingMySQL {
+		//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
+	}
+	common.SysLog("database migration started")
+	return migrateDB()
 }
 
 func InitLogDB() (err error) {

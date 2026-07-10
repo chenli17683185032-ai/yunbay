@@ -138,6 +138,18 @@ test('builds legacy day, week, and month periods in lifecycle order', () => {
   assert.equal(monthPeriods.at(-1)?.label_value, 30)
 })
 
+test('omits the legacy month seven-day stage when its limit is zero', () => {
+  const result = getValuePackagePeriodLimits(
+    { ...legacyUsage, limit_7d: 0 },
+    'month'
+  )
+
+  assert.deepEqual(
+    result.map((period) => period.kind),
+    ['five_hour', 'lifecycle']
+  )
+})
+
 test('keeps a structured zero-limit lifecycle period instead of dropping it', () => {
   const periodLimits = [
     {

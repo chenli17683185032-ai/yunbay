@@ -139,3 +139,20 @@ test('value package management API and types match backend contracts', async () 
   assert.match(typesSource, /reset_count: number/)
   assert.match(typesSource, /last_reset_at: number/)
 })
+
+test('order management usage summary aliases the shared value package contract', async () => {
+  const typesSource = await readFile(typesSourcePath, 'utf8')
+
+  assert.match(
+    typesSource,
+    /import type \{[\s\S]*?\bValuePackageUsageSummary\b[\s\S]*?\} from '@\/features\/value-packages\/types'/
+  )
+  assert.match(
+    typesSource,
+    /export type OrderManagementValuePackageUsageSummary\s*=\s*ValuePackageUsageSummary/
+  )
+  assert.doesNotMatch(
+    typesSource,
+    /export interface OrderManagementValuePackageUsageSummary/
+  )
+})

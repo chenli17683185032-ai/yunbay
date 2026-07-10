@@ -9,6 +9,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"gorm.io/gorm"
 )
 
 var (
@@ -18,7 +19,7 @@ var (
 
 func main() {
 	common.InitEnv()
-	if err := model.InitDB(); err != nil {
+	if err := model.InitDBWithoutMigrations(); err != nil {
 		log.Fatal("database initialization failed")
 	}
 	defer func() {
@@ -28,19 +29,7 @@ func main() {
 	}()
 
 	now := model.GetDBTimestamp()
-	var (
-		report *model.LegacyValuePackageQuotaMigrationReport
-		err    error
-	)
-	if *applyMigration {
-		authorizedManifest := strings.TrimSpace(*manifestHash)
-		if authorizedManifest == "" {
-			log.Fatal("--manifest is required with --apply")
-		}
-		report, err = model.ApplyLegacyValuePackageQuotaMigration(model.DB, now, authorizedManifest)
-	} else {
-		report, err = model.PreviewLegacyValuePackageQuotaMigration(model.DB, now)
-	}
+	report, err := runLegacyValuePackageQuotaMigration(model.DB, now, *applyMigration, *manifestHash)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,4 +40,18 @@ func main() {
 	if _, err := fmt.Fprintln(os.Stdout, string(payload)); err != nil {
 		log.Fatal("report output failed")
 	}
+}
+
+func runLegacyValuePackageQuotaMigration(db *gorm.DB, now int64, apply bool, manifestHash string) (*model.LegacyValuePackageQuotaMigrationReport, error) {
+	if !apply {
+		return model.PreviewLegacyValuePackageQuotaMigration(db, now)
+	}
+	authorizedManifest := strings.TrimSpace(manifestHash)
+	if authorizedManifest == "" {
+		return nil, fmt.Errorf("--manifest is required with --apply")
+	}
+	if err := db.AutoMigrate(&model.ValuePackageQuotaMigrationReceipt{}); err != nil {
+		return nil, fmt.Errorf("prepare migration receipt schema: %w", err)
+	}
+	return model.ApplyLegacyValuePackageQuotaMigration(db, now, authorizedManifest)
 }

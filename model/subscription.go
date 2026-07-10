@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -904,6 +905,12 @@ func extendValuePackageSubscriptionTx(tx *gorm.DB, subscriptionID int, plan *Sub
 	base := existing.EndTime
 	if base < nowUnix {
 		base = nowUnix
+	}
+	if base > math.MaxInt64-duration {
+		return nil, errors.New("value package subscription end time overflow")
+	}
+	if existing.AmountTotal > math.MaxInt64-plan.TotalAmount {
+		return nil, errors.New("value package subscription total amount overflow")
 	}
 	existing.EndTime = base + duration
 	existing.AmountTotal += plan.TotalAmount
@@ -2401,9 +2408,22 @@ func ensureValuePackagePreferenceAfterPurchaseTx(tx *gorm.DB, userId int, comple
 	return err
 }
 
+func validateValuePackagePlanLifecycleLimits(plan *SubscriptionPlan) error {
+	if plan == nil || plan.TotalAmount <= 0 {
+		return errors.New("value package total_amount must be greater than zero")
+	}
+	if plan.PackageType == ValuePackageTypeMonth && plan.Limit7dAmount > plan.TotalAmount {
+		return errors.New("value package limit_7d_amount must not exceed total_amount")
+	}
+	return nil
+}
+
 func checkValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *SubscriptionPlan, confirmedCover bool) (*ValuePackagePurchaseIntent, error) {
 	if tx == nil {
 		tx = DB
+	}
+	if err := validateValuePackagePlanLifecycleLimits(plan); err != nil {
+		return nil, err
 	}
 	now := getDBTimestampTx(tx)
 	currentSub, currentPlan, err := getHighestActiveValuePackageTx(tx, userId, now)
@@ -2416,7 +2436,7 @@ func checkValuePackagePurchaseIntentTx(tx *gorm.DB, userId int, plan *Subscripti
 	}
 	intent.CurrentSubscription = currentSub
 	intent.CurrentPlan = currentPlan
-	if plan.PackageLevel == currentPlan.PackageLevel {
+	if plan.Id == currentPlan.Id {
 		intent.Action = ValuePackagePurchaseActionExtend
 		return intent, nil
 	}

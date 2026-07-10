@@ -67,6 +67,8 @@ func TestLegacyValuePackageQuotaMigrationPreviewFiltersAndDoesNotWrite(t *testin
 
 	seedLegacyValuePackageQuotaMigrationSub(t, day.Id, UserSubscriptionStatusExpired, now+1000, 0, 1)
 	seedLegacyValuePackageQuotaMigrationSub(t, day.Id, UserSubscriptionStatusActive, now, 0, 1)
+	seedLegacyValuePackageQuotaMigrationSub(t, day.Id, UserSubscriptionStatusCancelled, now+1000, 0, 1)
+	seedLegacyValuePackageQuotaMigrationSub(t, day.Id, UserSubscriptionStatusCovered, now+1000, 0, 1)
 	seedLegacyValuePackageQuotaMigrationSub(t, day.Id, UserSubscriptionStatusActive, now+1000, 99, 1)
 	seedLegacyValuePackageQuotaMigrationSub(t, 999999, UserSubscriptionStatusActive, now+1000, 0, 1)
 	ordinary := seedLegacyValuePackageQuotaMigrationPlan(t, ValuePackageTypeDay, 500, SubscriptionPlanKindSubscription)
@@ -92,9 +94,11 @@ func TestLegacyValuePackageQuotaMigrationPreviewFiltersAndDoesNotWrite(t *testin
 		require.Equal(t, valid[i].EndTime, row.EndTime)
 	}
 	require.Equal(t, map[string]int{
+		"expired":              2,
 		"invalid_package_type": 1,
 		"invalid_plan_total":   2,
 		"missing_plan":         1,
+		"not_active":           2,
 		"not_value_package":    1,
 	}, report.Skipped)
 	require.Zero(t, report.Updated)

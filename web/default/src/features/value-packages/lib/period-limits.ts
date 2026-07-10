@@ -59,7 +59,7 @@ export function getValuePackagePeriodLimits(
     },
   ]
 
-  if (packageType === 'month') {
+  if (packageType === 'month' && usage.limit_7d > 0) {
     periods.push({
       kind: 'seven_day_stage',
       label_unit: 'day',
