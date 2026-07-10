@@ -179,6 +179,9 @@ func NormalizeGroupGroupRatio(groupGroupRatios map[string]map[string]float64) (m
 			return nil, fmt.Errorf("group group ratio parent conflicts after trimming: %s", parent)
 		}
 		seenParents[parent] = struct{}{}
+		if childRatios == nil {
+			return nil, fmt.Errorf("group group ratio children must be a JSON object: %s", parent)
+		}
 
 		normalizedChildren := make(map[string]float64, len(childRatios))
 		for rawChild, ratio := range childRatios {

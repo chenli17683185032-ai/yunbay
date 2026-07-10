@@ -84,6 +84,7 @@ func TestNormalizeGroupGroupRatioRejectsInvalidEntries(t *testing.T) {
 	}{
 		{name: "blank parent", input: map[string]map[string]float64{" ": {"gpt-plus": 1}}},
 		{name: "blank child", input: map[string]map[string]float64{"day-card": {" ": 1}}},
+		{name: "null child map", input: map[string]map[string]float64{"day-card": nil}},
 		{name: "zero", input: map[string]map[string]float64{"day-card": {"gpt-plus": 0}}},
 		{name: "negative", input: map[string]map[string]float64{"day-card": {"gpt-plus": -1}}},
 		{name: "nan", input: map[string]map[string]float64{"day-card": {"gpt-plus": math.NaN()}}},
@@ -114,6 +115,12 @@ func TestParseAndNormalizeGroupGroupRatioJSONDropsEmptyParents(t *testing.T) {
 		"month-card": {"gpt-pro": 1.3},
 	}, normalized)
 	require.Equal(t, `{"month-card":{"gpt-pro":1.3}}`, normalizedJSON)
+}
+
+func TestParseAndCheckGroupGroupRatioRejectNestedNull(t *testing.T) {
+	_, _, err := ParseAndNormalizeGroupGroupRatioJSON(`{"day-card":null}`)
+	require.Error(t, err)
+	require.Error(t, CheckGroupGroupRatio(`{"day-card":null}`))
 }
 
 func TestNormalizeGroupGroupRatioReturnsDeepCopy(t *testing.T) {
@@ -166,6 +173,9 @@ func TestUpdateGroupGroupRatioByJSONStringPreservesRuntimeOnInvalidInput(t *test
 	require.Equal(t, `{"day-card":{"gpt-plus":0.7}}`, GroupGroupRatio2JSONString())
 
 	require.Error(t, UpdateGroupGroupRatioByJSONString(`null`))
+	require.Equal(t, `{"day-card":{"gpt-plus":0.7}}`, GroupGroupRatio2JSONString())
+
+	require.Error(t, UpdateGroupGroupRatioByJSONString(`{"day-card":null}`))
 	require.Equal(t, `{"day-card":{"gpt-plus":0.7}}`, GroupGroupRatio2JSONString())
 }
 
