@@ -227,7 +227,8 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "GroupRatio":
-		err = ratio_setting.CheckGroupRatio(option.Value.(string))
+		_, normalized, parseErr := ratio_setting.ParseAndNormalizeGroupRatioJSON(option.Value.(string))
+		err = parseErr
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -235,6 +236,18 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+		option.Value = normalized
+	case "GroupGroupRatio":
+		_, normalized, parseErr := ratio_setting.ParseAndNormalizeGroupGroupRatioJSON(option.Value.(string))
+		err = parseErr
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+		option.Value = normalized
 	case "ImageRatio":
 		err = ratio_setting.UpdateImageRatioByJSONString(option.Value.(string))
 		if err != nil {
@@ -335,7 +348,13 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	}
-	err = model.UpdateOption(option.Key, option.Value.(string))
+	if option.Key == "GroupRatio" || option.Key == "GroupGroupRatio" {
+		groupRatioOptionsMutex.Lock()
+		err = model.UpdateOption(option.Key, option.Value.(string))
+		groupRatioOptionsMutex.Unlock()
+	} else {
+		err = model.UpdateOption(option.Key, option.Value.(string))
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return

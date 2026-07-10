@@ -208,14 +208,59 @@ func UpdateOption(key string, value string) error {
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
 	return updateOptionMap(key, value)
+}
+
+type GroupRatioOptions struct {
+	GroupRatio      string
+	GroupGroupRatio string
+}
+
+func saveOptionValue(tx *gorm.DB, key, value string) error {
+	option := Option{Key: key}
+	if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
+	option.Value = value
+	return tx.Save(&option).Error
+}
+
+// UpdateGroupRatioOptions persists the two related ratio settings in a fixed
+// order. Runtime state is deliberately applied by the controller only after
+// this transaction commits.
+func UpdateGroupRatioOptions(groupRatio, groupGroupRatio string) error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := saveOptionValue(tx, "GroupRatio", groupRatio); err != nil {
+			return err
+		}
+		return saveOptionValue(tx, "GroupGroupRatio", groupGroupRatio)
+	})
+}
+
+func GetGroupRatioOptions() (GroupRatioOptions, error) {
+	var groupRatio Option
+	if err := DB.Where("key = ?", "GroupRatio").First(&groupRatio).Error; err != nil {
+		return GroupRatioOptions{}, err
+	}
+	var groupGroupRatio Option
+	if err := DB.Where("key = ?", "GroupGroupRatio").First(&groupGroupRatio).Error; err != nil {
+		return GroupRatioOptions{}, err
+	}
+	return GroupRatioOptions{
+		GroupRatio:      groupRatio.Value,
+		GroupGroupRatio: groupGroupRatio.Value,
+	}, nil
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
