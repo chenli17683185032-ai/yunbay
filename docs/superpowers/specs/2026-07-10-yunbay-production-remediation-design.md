@@ -1,7 +1,7 @@
 # 云贝生产问题端到端修复设计 Spec
 
 Date: 2026-07-10
-Status: Written spec awaiting user review
+Status: Approved
 Branch: `codex/yunbay-production-remediation`
 Scope: 超值套餐余量与历史数据、分组计价、生产稳定性与部署卫生、new-api/sub2api GPT-5.6 支持
 
@@ -115,7 +115,7 @@ LDXP Worker 24 小时约 42,718 行错误，主要是正常空队列被后端返
 
 new-api 静态模型定义只完整覆盖到 GPT-5.5。生产 option 曾通过价格同步部分加入 `gpt-5.6`/`gpt-5.6-sol`，但 alias 与 sol 配置不完全一致，也没有 terra/luna。
 
-sub2api 生产动态价格文件已有四个 GPT-5.6 名称，但运行源码没有对应 alias、transform 和白名单；未知 `gpt-5*` 会落入 GPT-5.4 fallback，存在静默模型降级风险。
+sub2api 生产动态价格文件已有 `gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`，但缺少 `gpt-5.6` alias，且 terra/luna 当前错误复用了 sol 的 input 5、cached input 0.5、output 30 价格。运行源码仍没有对应 alias、transform 和白名单；未知 `gpt-5*` 会落入 GPT-5.4 fallback，存在静默模型降级风险。
 
 ## 5. 设计决策总览
 
@@ -293,7 +293,8 @@ apply：要求提供刚生成的 manifest 哈希和明确确认参数
 - 对每行使用当前锁内 `amount_used` 计算 `new_total`，避免 dry-run 后的新消费导致余额偏少；
 - 重复 apply 时已迁移行不再匹配，结果为 0，不重复赠送；
 - 任一目标行更新失败则事务回滚；
-- manifest 不包含用户名、邮箱、token 或密钥，只记录订阅 ID、计划 ID、套餐类型、旧/新额度、迁移时间和结果；
+- dry-run/apply 报告不包含用户名、邮箱、token 或密钥，可以显示订阅 ID、计划 ID、套餐类型、读取时的已用额度、旧/新额度、迁移时间和结果；
+- manifest 哈希只覆盖稳定授权集合：订阅 ID、计划 ID、套餐类型、本次赠送额度（当前计划 `total_amount`）和到期时间，不包含读取时的 `amount_used`、预估 `new_total` 或迁移时间；dry-run 到 apply 之间的正常消费不会让 manifest 失效，apply 必须在事务锁内重新读取最新 `amount_used` 并计算 `new_total = locked.amount_used + plan.total_amount`；
 - 生产 apply 前另存数据库原始目标行，回滚按每行原值恢复 `amount_total`，不使用“统一减去 plan total”的猜测算法。
 
 ### 7.4 迁移与发布顺序
