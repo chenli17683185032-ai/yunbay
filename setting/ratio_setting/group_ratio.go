@@ -2,6 +2,9 @@ package ratio_setting
 
 import (
 	"errors"
+	"fmt"
+	"math"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -72,7 +75,12 @@ func GroupRatio2JSONString() string {
 }
 
 func UpdateGroupRatioByJSONString(jsonStr string) error {
-	return types.LoadFromJsonString(groupRatioMap, jsonStr)
+	normalized, _, err := ParseAndNormalizeGroupRatioJSON(jsonStr)
+	if err != nil {
+		return err
+	}
+	groupRatioMap.ReplaceAll(normalized)
+	return nil
 }
 
 func GetGroupRatio(name string) float64 {
@@ -90,7 +98,7 @@ func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
 		return -1, false
 	}
 	ratio, ok := gp[usingGroup]
-	if !ok {
+	if !ok || !isFiniteRatio(ratio) || ratio <= 0 {
 		return -1, false
 	}
 	return ratio, true
@@ -101,19 +109,117 @@ func GroupGroupRatio2JSONString() string {
 }
 
 func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
-	return types.LoadFromJsonString(groupGroupRatioMap, jsonStr)
-}
-
-func CheckGroupRatio(jsonStr string) error {
-	checkGroupRatio := make(map[string]float64)
-	err := common.UnmarshalJsonStr(jsonStr, &checkGroupRatio)
+	normalized, _, err := ParseAndNormalizeGroupGroupRatioJSON(jsonStr)
 	if err != nil {
 		return err
 	}
-	for name, ratio := range checkGroupRatio {
+	groupGroupRatioMap.ReplaceAll(normalized)
+	return nil
+}
+
+func CheckGroupRatio(jsonStr string) error {
+	_, _, err := ParseAndNormalizeGroupRatioJSON(jsonStr)
+	return err
+}
+
+func CheckGroupGroupRatio(jsonStr string) error {
+	_, _, err := ParseAndNormalizeGroupGroupRatioJSON(jsonStr)
+	return err
+}
+
+func NormalizeGroupRatio(groupRatios map[string]float64) (map[string]float64, error) {
+	normalized := make(map[string]float64, len(groupRatios))
+	for rawName, ratio := range groupRatios {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, errors.New("group ratio name must not be empty")
+		}
+		if _, exists := normalized[name]; exists {
+			return nil, fmt.Errorf("group ratio name conflicts after trimming: %s", name)
+		}
+		if !isFiniteRatio(ratio) {
+			return nil, fmt.Errorf("group ratio must be finite: %s", name)
+		}
 		if ratio < 0 {
-			return errors.New("group ratio must be not less than 0: " + name)
+			return nil, errors.New("group ratio must be not less than 0: " + name)
+		}
+		normalized[name] = ratio
+	}
+	return normalized, nil
+}
+
+func ParseAndNormalizeGroupRatioJSON(jsonStr string) (map[string]float64, string, error) {
+	parsed := make(map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &parsed); err != nil {
+		return nil, "", err
+	}
+	if parsed == nil {
+		return nil, "", errors.New("group ratio must be a JSON object")
+	}
+	normalized, err := NormalizeGroupRatio(parsed)
+	if err != nil {
+		return nil, "", err
+	}
+	normalizedBytes, err := common.Marshal(normalized)
+	if err != nil {
+		return nil, "", err
+	}
+	return normalized, string(normalizedBytes), nil
+}
+
+func NormalizeGroupGroupRatio(groupGroupRatios map[string]map[string]float64) (map[string]map[string]float64, error) {
+	normalized := make(map[string]map[string]float64, len(groupGroupRatios))
+	seenParents := make(map[string]struct{}, len(groupGroupRatios))
+	for rawParent, childRatios := range groupGroupRatios {
+		parent := strings.TrimSpace(rawParent)
+		if parent == "" {
+			return nil, errors.New("group group ratio parent must not be empty")
+		}
+		if _, exists := seenParents[parent]; exists {
+			return nil, fmt.Errorf("group group ratio parent conflicts after trimming: %s", parent)
+		}
+		seenParents[parent] = struct{}{}
+
+		normalizedChildren := make(map[string]float64, len(childRatios))
+		for rawChild, ratio := range childRatios {
+			child := strings.TrimSpace(rawChild)
+			if child == "" {
+				return nil, fmt.Errorf("group group ratio child must not be empty: %s", parent)
+			}
+			if _, exists := normalizedChildren[child]; exists {
+				return nil, fmt.Errorf("group group ratio child conflicts after trimming: %s/%s", parent, child)
+			}
+			if !isFiniteRatio(ratio) || ratio <= 0 {
+				return nil, fmt.Errorf("group group ratio must be finite and greater than 0: %s/%s", parent, child)
+			}
+			normalizedChildren[child] = ratio
+		}
+		if len(normalizedChildren) > 0 {
+			normalized[parent] = normalizedChildren
 		}
 	}
-	return nil
+	return normalized, nil
+}
+
+func ParseAndNormalizeGroupGroupRatioJSON(jsonStr string) (map[string]map[string]float64, string, error) {
+	parsed := make(map[string]map[string]float64)
+	if err := common.UnmarshalJsonStr(jsonStr, &parsed); err != nil {
+		return nil, "", err
+	}
+	if parsed == nil {
+		return nil, "", errors.New("group group ratio must be a JSON object")
+	}
+	normalized, err := NormalizeGroupGroupRatio(parsed)
+	if err != nil {
+		return nil, "", err
+	}
+	normalizedBytes, err := common.Marshal(normalized)
+	if err != nil {
+		return nil, "", err
+	}
+	return normalized, string(normalizedBytes), nil
+}
+
+func isFiniteRatio(ratio float64) bool {
+	return !math.IsNaN(ratio) && !math.IsInf(ratio, 0)
 }

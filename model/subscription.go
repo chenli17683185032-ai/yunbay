@@ -1581,6 +1581,29 @@ func GetValuePackagePlansForUser(userId int) ([]SubscriptionPlan, error) {
 	return plans, nil
 }
 
+func ListEnabledValuePackageBillingGroups() ([]string, error) {
+	var candidates []string
+	if err := DB.Model(&SubscriptionPlan{}).
+		Where("enabled = ? AND plan_kind = ?", true, SubscriptionPlanKindValuePackage).
+		Pluck("model_group", &candidates).Error; err != nil {
+		return nil, err
+	}
+
+	unique := make(map[string]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		group := strings.TrimSpace(candidate)
+		if group != "" {
+			unique[group] = struct{}{}
+		}
+	}
+	groups := make([]string, 0, len(unique))
+	for group := range unique {
+		groups = append(groups, group)
+	}
+	sort.Strings(groups)
+	return groups, nil
+}
+
 func GetValuePackageState(userId int) (*ValuePackageState, error) {
 	return getValuePackageStateTx(DB, userId)
 }
