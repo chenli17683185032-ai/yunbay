@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -450,6 +451,14 @@ func TestGenericUpdateOptionRejectsDeprecatedGroupRatioAliases(t *testing.T) {
 			require.Equal(t, `{"old":{"child":1}}`, ratio_setting.GroupGroupRatio2JSONString())
 		})
 	}
+}
+
+func TestGroupRatioOptionsDefaultRunnerUsesModelOperationLock(t *testing.T) {
+	require.Equal(
+		t,
+		reflect.ValueOf(model.WithGroupRatioOptionsLock).Pointer(),
+		reflect.ValueOf(runWithGroupRatioOptionsLock).Pointer(),
+	)
 }
 
 func TestGroupRatioOptionsPairRuntimeApplyRunsInsideSharedModelOperationLock(t *testing.T) {

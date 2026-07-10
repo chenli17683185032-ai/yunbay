@@ -164,6 +164,28 @@ func TestWithGroupRatioOptionsLockRunsOperationWithMutexHeld(t *testing.T) {
 	require.True(t, operationRanWithLockHeld)
 }
 
+func TestLoadGroupRatioOptionsFromDatabaseUsesSharedOperationLock(t *testing.T) {
+	setupOptionTestDB(t)
+
+	originalHook := groupRatioOptionsLockAcquiredHook
+	lockEntryCount := 0
+	lockHeldAtEntry := false
+	groupRatioOptionsLockAcquiredHook = func() {
+		lockEntryCount++
+		if groupRatioOptionsMutex.TryLock() {
+			groupRatioOptionsMutex.Unlock()
+			return
+		}
+		lockHeldAtEntry = true
+	}
+	t.Cleanup(func() { groupRatioOptionsLockAcquiredHook = originalHook })
+
+	loadOptionsFromDatabase()
+
+	require.Equal(t, 1, lockEntryCount)
+	require.True(t, lockHeldAtEntry)
+}
+
 func TestGroupRatioOptionWritesUseSharedOperationLock(t *testing.T) {
 	tests := []struct {
 		name      string
