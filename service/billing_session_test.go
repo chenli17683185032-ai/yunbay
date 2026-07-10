@@ -327,11 +327,14 @@ func TestRealtimePostWssConsumeQuotaSettlesAndLogsFrozenSubscriptionBillingRatio
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"billing-ratio-realtime":1}`))
 	oldLogConsumeEnabled := common.LogConsumeEnabled
 	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	oldDataExportEnabled := common.DataExportEnabled
 	common.LogConsumeEnabled = true
 	common.BatchUpdateEnabled = false
+	common.DataExportEnabled = false
 	t.Cleanup(func() {
 		common.LogConsumeEnabled = oldLogConsumeEnabled
 		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+		common.DataExportEnabled = oldDataExportEnabled
 	})
 
 	user := model.User{Username: "vp-realtime-post-ratio-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 100000}
