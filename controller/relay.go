@@ -609,6 +609,8 @@ func finalizeSuccessfulRelayTask(c *gin.Context, relayInfo *relaycommon.RelayInf
 		OriginModelName:           relayInfo.OriginModelName,
 		PerCallBilling:            common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || relayInfo.PriceData.UsePrice,
 		SubscriptionRatioApplied:  relayInfo.PriceData.SubscriptionRatioApplied,
+		SubscriptionRatioSource:   relayInfo.PriceData.SubscriptionRatioSource,
+		ValuePackageBillingGroup:  relayInfo.ValuePackageBillingGroup,
 		HasOriginalGroupRatio:     relayInfo.PriceData.HasOriginalGroupRatioInfo,
 		OriginalGroupRatio:        relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio,
 		HasOriginalUserGroupRatio: relayInfo.PriceData.HasOriginalGroupRatioInfo,

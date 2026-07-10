@@ -137,21 +137,7 @@ func appendBillingInfoFromPriceData(relayInfo *relaycommon.RelayInfo, priceData 
 	if priceData.SubscriptionRatioApplied {
 		other["subscription_ratio_applied"] = true
 	}
-	if relayInfo.ValuePackageSubscriptionId != 0 {
-		other["value_package_subscription_id"] = relayInfo.ValuePackageSubscriptionId
-	}
-	if relayInfo.ValuePackagePlanId != 0 {
-		other["value_package_plan_id"] = relayInfo.ValuePackagePlanId
-	}
-	if relayInfo.ValuePackageModelGroup != "" {
-		other["value_package_model_group"] = relayInfo.ValuePackageModelGroup
-	}
-	if relayInfo.ValuePackagePackageType != "" {
-		other["value_package_package_type"] = relayInfo.ValuePackagePackageType
-	}
-	if priceData.SubscriptionRatioApplied {
-		other["value_package_effective_ratio"] = priceData.GroupRatioInfo.GroupRatio
-	}
+	appendValuePackageBillingInfo(relayInfo, priceData, other)
 	if priceData.HasOriginalGroupRatioInfo {
 		other["original_group_ratio"] = priceData.OriginalGroupRatioInfo.GroupRatio
 		other["original_user_group_ratio"] = priceData.OriginalGroupRatioInfo.GroupSpecialRatio
@@ -196,6 +182,34 @@ func appendBillingInfoFromPriceData(relayInfo *relaycommon.RelayInfo, priceData 
 		}
 		// Wallet quota is not deducted when billed from subscription.
 		other["wallet_quota_deducted"] = 0
+	}
+}
+
+func appendValuePackageBillingInfo(relayInfo *relaycommon.RelayInfo, priceData types.PriceData, other map[string]interface{}) {
+	if relayInfo == nil || other == nil || relayInfo.ValuePackageSubscriptionId <= 0 {
+		return
+	}
+	billingGroup := strings.TrimSpace(relayInfo.ValuePackageBillingGroup)
+	if billingGroup == "" {
+		return
+	}
+
+	other["value_package_subscription_id"] = relayInfo.ValuePackageSubscriptionId
+	if relayInfo.ValuePackagePlanId != 0 {
+		other["value_package_plan_id"] = relayInfo.ValuePackagePlanId
+	}
+	other["value_package_billing_group"] = billingGroup
+	if relayInfo.ValuePackageModelGroup != "" {
+		other["value_package_model_group"] = relayInfo.ValuePackageModelGroup
+	}
+	if relayInfo.ValuePackagePackageType != "" {
+		other["value_package_package_type"] = relayInfo.ValuePackagePackageType
+	}
+
+	ratioSource := strings.TrimSpace(priceData.SubscriptionRatioSource)
+	if ratioSource == SubscriptionRatioSourceConfigured || ratioSource == SubscriptionRatioSourceDefault {
+		other["value_package_effective_ratio"] = priceData.GroupRatioInfo.GroupRatio
+		other["value_package_ratio_source"] = ratioSource
 	}
 }
 

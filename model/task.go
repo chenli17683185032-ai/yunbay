@@ -120,6 +120,8 @@ type TaskBillingContext struct {
 	PerCallBilling  bool               `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
 
 	SubscriptionRatioApplied  bool    `json:"subscription_ratio_applied,omitempty"`
+	SubscriptionRatioSource   string  `json:"subscription_ratio_source,omitempty"`
+	ValuePackageBillingGroup  string  `json:"value_package_billing_group,omitempty"`
 	HasOriginalGroupRatio     bool    `json:"has_original_group_ratio,omitempty"`
 	OriginalGroupRatio        float64 `json:"original_group_ratio,omitempty"`
 	HasOriginalUserGroupRatio bool    `json:"has_original_user_group_ratio,omitempty"`

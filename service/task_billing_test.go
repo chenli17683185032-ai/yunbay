@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -802,15 +805,6 @@ func TestRecalculateTaskQuotaByTokensUsesBillingContextGroupRatioSnapshot(t *tes
 	truncate(t)
 	ctx := context.Background()
 
-	oldModelRatio := ratio_setting.ModelRatio2JSONString()
-	oldGroupRatio := ratio_setting.GroupRatio2JSONString()
-	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"test-model":1}`))
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":0.3}`))
-	t.Cleanup(func() {
-		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(oldModelRatio))
-		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldGroupRatio))
-	})
-
 	const userID, tokenID, channelID, subID = 40, 40, 40, 40
 	const subTotal, subUsed int64 = 100000, 300
 	const preConsumed = 300
@@ -823,40 +817,204 @@ func TestRecalculateTaskQuotaByTokensUsesBillingContextGroupRatioSnapshot(t *tes
 
 	task := makeTask(userID, channelID, preConsumed, tokenID, BillingSourceSubscription, subID)
 	task.Group = "default"
-	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelRatio:      1,
-		GroupRatio:      1,
-		OriginModelName: "test-model",
-	}
+	require.NoError(t, task.PrivateData.Scan([]byte(`{
+		"billing_source":"subscription",
+		"subscription_id":40,
+		"token_id":40,
+		"billing_context":{
+			"model_ratio":1,
+			"has_group_ratio":true,
+			"group_ratio":0.45,
+			"origin_model_name":"test-model",
+			"subscription_ratio_applied":true,
+			"subscription_ratio_source":"configured",
+			"value_package_billing_group":"month-card",
+			"has_original_group_ratio":true,
+			"original_group_ratio":0.3
+		}
+	}`)))
+	withTaskBillingRatios(
+		t,
+		`{"test-model":1}`,
+		`{"default":4}`,
+		`{"default":{"default":4},"month-card":{"default":3}}`,
+	)
 
 	RecalculateTaskQuotaByTokens(ctx, task, 1000)
 
-	assert.Equal(t, 1000, task.Quota)
-	assert.Equal(t, subUsed+700, getSubscriptionUsed(t, subID))
-	assert.Equal(t, tokenRemain-700, getTokenRemainQuota(t, tokenID))
+	assert.Equal(t, 450, task.Quota)
+	assert.Equal(t, subUsed+150, getSubscriptionUsed(t, subID))
+	assert.Equal(t, tokenRemain-150, getTokenRemainQuota(t, tokenID))
 	log := getLastLog(t)
 	require.NotNil(t, log)
-	assert.Contains(t, log.Content, "groupRatio=1.00")
+	assert.Contains(t, log.Content, "groupRatio=0.45")
+	other, err := common.StrToMap(log.Other)
+	require.NoError(t, err)
+	assert.Equal(t, "month-card", other["value_package_billing_group"])
+	assert.Equal(t, 0.45, other["value_package_effective_ratio"])
+	assert.Equal(t, SubscriptionRatioSourceConfigured, other["value_package_ratio_source"])
 }
 
-func TestTaskBillingOtherIncludesSubscriptionRatioAuditFromBillingContext(t *testing.T) {
-	task := makeTask(41, 0, 1000, 0, BillingSourceSubscription, 41)
-	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelPrice:                0.02,
-		GroupRatio:                1,
-		OriginModelName:           "test-model",
-		SubscriptionRatioApplied:  true,
-		HasOriginalGroupRatio:     true,
-		OriginalGroupRatio:        0.3,
-		HasOriginalUserGroupRatio: true,
-		OriginalUserGroupRatio:    -1,
+func TestTaskBillingOtherValuePackageAndRegularSubscriptionRatioAudit(t *testing.T) {
+	for _, tt := range []struct {
+		name                 string
+		billingContextJSON   string
+		wantValuePackage     bool
+		wantEffectiveRatio   float64
+		wantSubscriptionFrom string
+	}{
+		{
+			name: "configured value package",
+			billingContextJSON: `{
+				"model_price":0.02,"group_ratio":0.45,"origin_model_name":"test-model",
+				"subscription_ratio_applied":true,"subscription_ratio_source":"configured",
+				"value_package_billing_group":"month-card",
+				"has_original_group_ratio":true,"original_group_ratio":0.3,
+				"has_original_user_group_ratio":true,"original_user_group_ratio":-1
+			}`,
+			wantValuePackage:     true,
+			wantEffectiveRatio:   0.45,
+			wantSubscriptionFrom: SubscriptionRatioSourceConfigured,
+		},
+		{
+			name: "default value package",
+			billingContextJSON: `{
+				"model_price":0.02,"group_ratio":1,"origin_model_name":"test-model",
+				"subscription_ratio_applied":true,"subscription_ratio_source":"default_1x",
+				"value_package_billing_group":"month-card",
+				"has_original_group_ratio":true,"original_group_ratio":0.3
+			}`,
+			wantValuePackage:     true,
+			wantEffectiveRatio:   1,
+			wantSubscriptionFrom: SubscriptionRatioSourceDefault,
+		},
+		{
+			name: "regular subscription",
+			billingContextJSON: `{
+				"model_price":0.02,"group_ratio":1,"origin_model_name":"test-model",
+				"subscription_ratio_applied":true,"subscription_ratio_source":"regular_subscription_1x",
+				"has_original_group_ratio":true,"original_group_ratio":0.3,
+				"has_original_user_group_ratio":true,"original_user_group_ratio":-1
+			}`,
+			wantValuePackage: false,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			task := makeTask(41, 0, 1000, 0, BillingSourceSubscription, 41)
+			require.NoError(t, task.PrivateData.Scan([]byte(`{"billing_context":`+tt.billingContextJSON+`}`)))
+
+			other := taskBillingOther(task)
+
+			assert.Equal(t, true, other["subscription_ratio_applied"])
+			assert.Equal(t, 0.3, other["original_group_ratio"])
+			if tt.wantValuePackage {
+				assert.Equal(t, "month-card", other["value_package_billing_group"])
+				assert.Equal(t, tt.wantEffectiveRatio, other["value_package_effective_ratio"])
+				assert.Equal(t, tt.wantSubscriptionFrom, other["value_package_ratio_source"])
+			} else {
+				assert.NotContains(t, other, "value_package_billing_group")
+				assert.NotContains(t, other, "value_package_effective_ratio")
+				assert.NotContains(t, other, "value_package_ratio_source")
+			}
+		})
 	}
+}
 
-	other := taskBillingOther(task)
+func TestTaskBillingContextValueScanRoundTripPreservesValuePackageRatioAudit(t *testing.T) {
+	var privateData model.TaskPrivateData
+	require.NoError(t, privateData.Scan([]byte(`{
+		"billing_context":{
+			"has_group_ratio":true,
+			"group_ratio":0.45,
+			"subscription_ratio_source":"configured",
+			"value_package_billing_group":"month-card"
+		}
+	}`)))
 
+	value, err := privateData.Value()
+	require.NoError(t, err)
+	privateJSON, ok := value.([]byte)
+	require.True(t, ok)
+	var decoded map[string]interface{}
+	require.NoError(t, common.Unmarshal(privateJSON, &decoded))
+	billingContext, ok := decoded["billing_context"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, billingContext["has_group_ratio"])
+	assert.Equal(t, 0.45, billingContext["group_ratio"])
+	assert.Equal(t, "configured", billingContext["subscription_ratio_source"])
+	assert.Equal(t, "month-card", billingContext["value_package_billing_group"])
+}
+
+func TestLogTaskConsumptionValuePackageRatioAudit(t *testing.T) {
+	truncate(t)
+	oldLogConsumeEnabled := common.LogConsumeEnabled
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	oldDataExportEnabled := common.DataExportEnabled
+	common.LogConsumeEnabled = true
+	common.BatchUpdateEnabled = false
+	common.DataExportEnabled = false
+	t.Cleanup(func() {
+		common.LogConsumeEnabled = oldLogConsumeEnabled
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+		common.DataExportEnabled = oldDataExportEnabled
+	})
+
+	const userID, channelID = 43, 43
+	seedUser(t, userID, 10000)
+	seedChannel(t, channelID)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("POST", "/v1/videos", nil)
+	ctx.Set("token_name", "task-ratio-audit")
+
+	packageInfo := &relaycommon.RelayInfo{
+		UserId:                     userID,
+		UsingGroup:                 "default",
+		OriginModelName:            "test-model",
+		ChannelMeta:                &relaycommon.ChannelMeta{ChannelId: channelID},
+		TaskRelayInfo:              &relaycommon.TaskRelayInfo{Action: "submit"},
+		ValuePackageSubscriptionId: 123,
+		ValuePackageBillingGroup:   "month-card",
+		PriceData: types.PriceData{
+			Quota:                    450,
+			GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 0.45},
+			SubscriptionRatioApplied: true,
+			SubscriptionRatioSource:  SubscriptionRatioSourceConfigured,
+		},
+	}
+	LogTaskConsumption(ctx, packageInfo)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	other, err := common.StrToMap(log.Other)
+	require.NoError(t, err)
+	assert.Equal(t, "month-card", other["value_package_billing_group"])
+	assert.Equal(t, 0.45, other["value_package_effective_ratio"])
+	assert.Equal(t, SubscriptionRatioSourceConfigured, other["value_package_ratio_source"])
+
+	require.NoError(t, model.DB.Exec("DELETE FROM logs").Error)
+	regularInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		UsingGroup:      "default",
+		OriginModelName: "test-model",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "submit"},
+		PriceData: types.PriceData{
+			Quota:                    1000,
+			GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 1},
+			SubscriptionRatioApplied: true,
+			SubscriptionRatioSource:  SubscriptionRatioSourceRegular,
+		},
+	}
+	LogTaskConsumption(ctx, regularInfo)
+
+	log = getLastLog(t)
+	require.NotNil(t, log)
+	other, err = common.StrToMap(log.Other)
+	require.NoError(t, err)
 	assert.Equal(t, true, other["subscription_ratio_applied"])
-	assert.Equal(t, 0.3, other["original_group_ratio"])
-	assert.Equal(t, -1.0, other["original_user_group_ratio"])
+	assert.NotContains(t, other, "value_package_billing_group")
+	assert.NotContains(t, other, "value_package_effective_ratio")
+	assert.NotContains(t, other, "value_package_ratio_source")
 }
 
 func TestRecalculateTaskQuotaByTokensPreservesExplicitZeroGroupRatioSnapshot(t *testing.T) {

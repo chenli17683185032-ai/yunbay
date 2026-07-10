@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -51,21 +52,27 @@ func (b *successfulTaskSettleBilling) NeedsRefund() bool             { return fa
 func (b *successfulTaskSettleBilling) GetPreConsumedQuota() int      { return 100 }
 func (b *successfulTaskSettleBilling) Reserve(targetQuota int) error { return nil }
 
-func TestRelayTaskSuccessSettleErrorStillInsertsTaskWithAuditMarker(t *testing.T) {
+func TestFinalizeSuccessfulRelayTaskPersistsBillingContextOnSettleError(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}, &model.Log{}))
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
 	billing := &failingTaskSettleBilling{}
 	relayInfo := &relaycommon.RelayInfo{
-		UserId:          42,
-		UsingGroup:      "day-card",
-		OriginModelName: "video-test",
-		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 3},
-		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "submit"},
-		Billing:         billing,
-		BillingSource:   "subscription",
-		SubscriptionId:  7,
-		TokenId:         11,
+		UserId:                   42,
+		UsingGroup:               "day-card",
+		OriginModelName:          "video-test",
+		ChannelMeta:              &relaycommon.ChannelMeta{ChannelId: 3},
+		TaskRelayInfo:            &relaycommon.TaskRelayInfo{Action: "submit"},
+		Billing:                  billing,
+		BillingSource:            "subscription",
+		SubscriptionId:           7,
+		TokenId:                  11,
+		ValuePackageBillingGroup: "month-card",
+		PriceData: types.PriceData{
+			GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 0.45},
+			SubscriptionRatioApplied: true,
+			SubscriptionRatioSource:  "configured",
+		},
 	}
 	result := &relay.TaskSubmitResult{Platform: "test-platform", UpstreamTaskID: "upstream-task", Quota: 100, TaskData: []byte(`{"id":"upstream-task"}`)}
 
@@ -84,6 +91,17 @@ func TestRelayTaskSuccessSettleErrorStillInsertsTaskWithAuditMarker(t *testing.T
 	require.Equal(t, relayInfo.TokenId, task.PrivateData.TokenId)
 	require.True(t, task.PrivateData.BillingSettleFailed)
 	require.Equal(t, "usage reservation write failed", task.PrivateData.BillingSettleError)
+	privateValue, err := task.PrivateData.Value()
+	require.NoError(t, err)
+	privateJSON, ok := privateValue.([]byte)
+	require.True(t, ok)
+	var privateData map[string]interface{}
+	require.NoError(t, common.Unmarshal(privateJSON, &privateData))
+	billingContext, ok := privateData["billing_context"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, 0.45, billingContext["group_ratio"])
+	require.Equal(t, "month-card", billingContext["value_package_billing_group"])
+	require.Equal(t, "configured", billingContext["subscription_ratio_source"])
 	var logCount int64
 	require.NoError(t, model.DB.Model(&model.Log{}).Count(&logCount).Error)
 	require.EqualValues(t, 0, logCount)

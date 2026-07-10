@@ -358,7 +358,56 @@ func TestNewBillingSessionSubscriptionAppliesOneXQuotaForFreeByGroupRatioPerCall
 	assert.Equal(t, 1000, session.GetPreConsumedQuota())
 }
 
-func TestGenerateTextOtherInfoIncludesSubscriptionRatioAudit(t *testing.T) {
+func TestGenerateTextOtherInfoIncludesValuePackageRatioAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name           string
+		effectiveRatio float64
+		ratioSource    string
+	}{
+		{name: "configured", effectiveRatio: 0.45, ratioSource: SubscriptionRatioSourceConfigured},
+		{name: "default", effectiveRatio: 1, ratioSource: SubscriptionRatioSourceDefault},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(w)
+			ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			now := time.Now()
+			relayInfo := &relaycommon.RelayInfo{
+				ChannelMeta:                &relaycommon.ChannelMeta{},
+				BillingSource:              BillingSourceSubscription,
+				ValuePackageSubscriptionId: 123,
+				ValuePackageBillingGroup:   "month-card",
+				StartTime:                  now,
+				FirstResponseTime:          now.Add(10 * time.Millisecond),
+				PriceData: types.PriceData{
+					GroupRatioInfo: types.GroupRatioInfo{
+						GroupRatio: tt.effectiveRatio,
+					},
+					SubscriptionRatioApplied:  true,
+					SubscriptionRatioSource:   tt.ratioSource,
+					HasOriginalGroupRatioInfo: true,
+					OriginalGroupRatioInfo: types.GroupRatioInfo{
+						GroupRatio:        0.3,
+						GroupSpecialRatio: -1,
+						HasSpecialRatio:   false,
+					},
+				},
+			}
+
+			other := GenerateTextOtherInfo(ctx, relayInfo, 2, tt.effectiveRatio, 1, 0, 0, 0, -1)
+			assert.Equal(t, BillingSourceSubscription, other["billing_source"])
+			assert.Equal(t, true, other["subscription_ratio_applied"])
+			assert.Equal(t, "month-card", other["value_package_billing_group"])
+			assert.Equal(t, tt.effectiveRatio, other["value_package_effective_ratio"])
+			assert.Equal(t, tt.ratioSource, other["value_package_ratio_source"])
+			assert.Equal(t, 0.3, other["original_group_ratio"])
+			assert.Equal(t, -1.0, other["original_user_group_ratio"])
+		})
+	}
+}
+
+func TestGenerateTextOtherInfoRegularSubscriptionDoesNotIncludeValuePackageRatioAudit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(w)
@@ -370,12 +419,13 @@ func TestGenerateTextOtherInfoIncludesSubscriptionRatioAudit(t *testing.T) {
 		StartTime:         now,
 		FirstResponseTime: now.Add(10 * time.Millisecond),
 		PriceData: types.PriceData{
+			GroupRatioInfo:            types.GroupRatioInfo{GroupRatio: 1},
 			SubscriptionRatioApplied:  true,
+			SubscriptionRatioSource:   SubscriptionRatioSourceRegular,
 			HasOriginalGroupRatioInfo: true,
 			OriginalGroupRatioInfo: types.GroupRatioInfo{
 				GroupRatio:        0.3,
 				GroupSpecialRatio: -1,
-				HasSpecialRatio:   false,
 			},
 		},
 	}
@@ -384,7 +434,34 @@ func TestGenerateTextOtherInfoIncludesSubscriptionRatioAudit(t *testing.T) {
 	assert.Equal(t, BillingSourceSubscription, other["billing_source"])
 	assert.Equal(t, true, other["subscription_ratio_applied"])
 	assert.Equal(t, 0.3, other["original_group_ratio"])
-	assert.Equal(t, -1.0, other["original_user_group_ratio"])
+	assert.NotContains(t, other, "value_package_billing_group")
+	assert.NotContains(t, other, "value_package_effective_ratio")
+	assert.NotContains(t, other, "value_package_ratio_source")
+}
+
+func TestGenerateWssOtherInfoIncludesValuePackageRatioAudit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("GET", "/v1/realtime", nil)
+	now := time.Now()
+	relayInfo := &relaycommon.RelayInfo{
+		ChannelMeta:                &relaycommon.ChannelMeta{},
+		BillingSource:              BillingSourceSubscription,
+		ValuePackageSubscriptionId: 123,
+		ValuePackageBillingGroup:   "month-card",
+		StartTime:                  now,
+		FirstResponseTime:          now.Add(10 * time.Millisecond),
+		PriceData: types.PriceData{
+			GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 0.45},
+			SubscriptionRatioApplied: true,
+			SubscriptionRatioSource:  SubscriptionRatioSourceConfigured,
+		},
+	}
+
+	other := GenerateWssOtherInfo(ctx, relayInfo, &dto.RealtimeUsage{}, 2, 0.45, 1, 1, 1, 0, -1)
+	assert.Equal(t, "month-card", other["value_package_billing_group"])
+	assert.Equal(t, 0.45, other["value_package_effective_ratio"])
+	assert.Equal(t, SubscriptionRatioSourceConfigured, other["value_package_ratio_source"])
 }
 
 func TestNewBillingSessionSubscriptionAppliesOneXToTieredSnapshot(t *testing.T) {
@@ -752,6 +829,7 @@ func TestGenerateMjOtherInfoIncludesValuePackageBillingAudit(t *testing.T) {
 	relayInfo := &relaycommon.RelayInfo{
 		ValuePackageSubscriptionId: 123,
 		ValuePackagePlanId:         456,
+		ValuePackageBillingGroup:   "month-card",
 		ValuePackageModelGroup:     "month-card",
 		ValuePackagePackageType:    "month",
 	}
@@ -763,6 +841,7 @@ func TestGenerateMjOtherInfoIncludesValuePackageBillingAudit(t *testing.T) {
 			HasSpecialRatio:   false,
 		},
 		SubscriptionRatioApplied:  true,
+		SubscriptionRatioSource:   SubscriptionRatioSourceDefault,
 		HasOriginalGroupRatioInfo: true,
 		OriginalGroupRatioInfo: types.GroupRatioInfo{
 			GroupRatio:        0.3,
@@ -778,7 +857,9 @@ func TestGenerateMjOtherInfoIncludesValuePackageBillingAudit(t *testing.T) {
 	assert.Equal(t, -1.0, other["original_user_group_ratio"])
 	assert.Equal(t, 123, other["value_package_subscription_id"])
 	assert.Equal(t, 456, other["value_package_plan_id"])
+	assert.Equal(t, "month-card", other["value_package_billing_group"])
 	assert.Equal(t, "month-card", other["value_package_model_group"])
 	assert.Equal(t, "month", other["value_package_package_type"])
 	assert.Equal(t, 1.0, other["value_package_effective_ratio"])
+	assert.Equal(t, SubscriptionRatioSourceDefault, other["value_package_ratio_source"])
 }
