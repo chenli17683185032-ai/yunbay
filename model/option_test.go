@@ -151,37 +151,43 @@ func TestUpdateGroupRatioOptionsRollsBackFirstWriteWhenSecondWriteFails(t *testi
 }
 
 func TestWithGroupRatioOptionsLockSerializesOperations(t *testing.T) {
+	firstAttemptStarted := make(chan struct{})
 	firstEntered := make(chan struct{})
 	releaseFirst := make(chan struct{})
-	firstDone := make(chan struct{})
+	firstDone := make(chan error, 1)
 	go func() {
-		defer close(firstDone)
-		require.NoError(t, WithGroupRatioOptionsLock(func() error {
+		close(firstAttemptStarted)
+		firstDone <- WithGroupRatioOptionsLock(func() error {
 			close(firstEntered)
 			<-releaseFirst
 			return nil
-		}))
+		})
 	}()
+	<-firstAttemptStarted
 	<-firstEntered
 
+	secondAttemptStarted := make(chan struct{})
 	secondEntered := make(chan struct{})
-	secondDone := make(chan struct{})
+	secondDone := make(chan error, 1)
 	go func() {
-		defer close(secondDone)
-		require.NoError(t, WithGroupRatioOptionsLock(func() error {
+		close(secondAttemptStarted)
+		secondDone <- WithGroupRatioOptionsLock(func() error {
 			close(secondEntered)
 			return nil
-		}))
+		})
 	}()
+	<-secondAttemptStarted
 
+	enteredEarly := false
 	select {
 	case <-secondEntered:
-		t.Fatal("second group ratio operation entered while the first still held the lock")
+		enteredEarly = true
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(releaseFirst)
-	<-firstDone
-	<-secondDone
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+	require.False(t, enteredEarly, "second group ratio operation entered while the first still held the lock")
 }
 
 func TestGroupRatioOptionWritesUseSharedOperationLock(t *testing.T) {
@@ -212,10 +218,9 @@ func TestGroupRatioOptionWritesUseSharedOperationLock(t *testing.T) {
 
 			lockEntered := make(chan struct{})
 			releaseLock := make(chan struct{})
-			lockDone := make(chan struct{})
+			lockDone := make(chan error, 1)
 			go func() {
-				defer close(lockDone)
-				_ = WithGroupRatioOptionsLock(func() error {
+				lockDone <- WithGroupRatioOptionsLock(func() error {
 					close(lockEntered)
 					<-releaseLock
 					return nil
@@ -223,8 +228,13 @@ func TestGroupRatioOptionWritesUseSharedOperationLock(t *testing.T) {
 			}()
 			<-lockEntered
 
+			attemptStarted := make(chan struct{})
 			operationDone := make(chan error, 1)
-			go func() { operationDone <- tt.operation() }()
+			go func() {
+				close(attemptStarted)
+				operationDone <- tt.operation()
+			}()
+			<-attemptStarted
 			completedEarly := false
 			select {
 			case err := <-operationDone:
@@ -233,7 +243,7 @@ func TestGroupRatioOptionWritesUseSharedOperationLock(t *testing.T) {
 			case <-time.After(100 * time.Millisecond):
 			}
 			close(releaseLock)
-			<-lockDone
+			require.NoError(t, <-lockDone)
 			if !completedEarly {
 				require.NoError(t, <-operationDone)
 			}
@@ -274,8 +284,10 @@ func TestLoadOptionsFromDatabasePreventsStaleSnapshotFromOverwritingPairUpdate(t
 	<-snapshotRead
 
 	pairLockAcquired := make(chan struct{})
+	pairAttemptStarted := make(chan struct{})
 	pairDone := make(chan error, 1)
 	go func() {
+		close(pairAttemptStarted)
 		pairDone <- WithGroupRatioOptionsLock(func() error {
 			close(pairLockAcquired)
 			if err := UpdateGroupRatioOptions(`{"new":2}`, `{"new":{"child":1.25}}`); err != nil {
@@ -287,6 +299,7 @@ func TestLoadOptionsFromDatabasePreventsStaleSnapshotFromOverwritingPairUpdate(t
 			return updateOptionMap("GroupGroupRatio", `{"new":{"child":1.25}}`)
 		})
 	}()
+	<-pairAttemptStarted
 	acquiredEarly := false
 	select {
 	case <-pairLockAcquired:
@@ -313,44 +326,242 @@ func TestGetGroupRatioOptionsUsesStructuredKeyPredicates(t *testing.T) {
 	require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"old":1}`}).Error)
 	require.NoError(t, db.Create(&Option{Key: "GroupGroupRatio", Value: `{"old":{"child":1}}`}).Error)
 
-	structuredPredicates := make([]bool, 0, 2)
+	queryCount := 0
+	structuredINPredicate := false
 	callbackName := "test:inspect_group_ratio_option_predicates"
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
-		if _, ok := tx.Statement.Dest.(*Option); !ok || tx.Statement.Schema == nil || tx.Statement.Schema.Name != "Option" {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "Option" {
 			return
 		}
+		queryCount++
 		whereClause, ok := tx.Statement.Clauses["WHERE"]
-		structuredPredicates = append(structuredPredicates, ok && containsStructuredOptionKeyPredicate(whereClause.Expression))
+		structuredINPredicate = structuredINPredicate || ok && containsStructuredOptionKeyINPredicate(whereClause.Expression)
 	}))
 	t.Cleanup(func() { require.NoError(t, db.Callback().Query().Remove(callbackName)) })
 
 	_, err := GetGroupRatioOptions()
 
 	require.NoError(t, err)
-	require.Equal(t, []bool{true, true}, structuredPredicates)
+	require.Equal(t, 1, queryCount)
+	require.True(t, structuredINPredicate)
 }
 
-func containsStructuredOptionKeyPredicate(expression clause.Expression) bool {
+func TestGetGroupRatioOptionsReturnsErrorWhenEitherKeyIsMissing(t *testing.T) {
+	db := setupOptionTestDB(t)
+	require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"old":1}`}).Error)
+
+	_, err := GetGroupRatioOptions()
+
+	require.Error(t, err)
+}
+
+func TestDeprecatedGroupRatioAliasesAreRejectedBeforeModelWrites(t *testing.T) {
+	tests := []struct {
+		name      string
+		operation func() error
+		keys      []string
+	}{
+		{
+			name: "single alias",
+			operation: func() error {
+				return UpdateOption("group_ratio_setting.group_ratio", `{"changed":2}`)
+			},
+			keys: []string{"group_ratio_setting.group_ratio"},
+		},
+		{
+			name: "bulk alias rejects all keys",
+			operation: func() error {
+				return UpdateOptionsBulk(map[string]string{
+					"AliasSafeKey":                          "must-not-commit",
+					"group_ratio_setting.group_group_ratio": `{"changed":{"child":2}}`,
+				})
+			},
+			keys: []string{"AliasSafeKey", "group_ratio_setting.group_group_ratio"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupOptionTestDB(t)
+			common.OptionMapRWMutex.Lock()
+			if common.OptionMap == nil {
+				common.OptionMap = make(map[string]string)
+			}
+			common.OptionMapRWMutex.Unlock()
+			err := tt.operation()
+			require.Error(t, err)
+			for _, key := range tt.keys {
+				var count int64
+				require.NoError(t, db.Model(&Option{}).Where(&Option{Key: key}).Count(&count).Error)
+				require.Zero(t, count, key)
+			}
+		})
+	}
+}
+
+func TestLoadOptionsFromDatabaseIgnoresDeprecatedGroupRatioAliases(t *testing.T) {
+	db := setupOptionTestDB(t)
+	preserveGroupRatioRuntime(t)
+	const groupAlias = "group_ratio_setting.group_ratio"
+	const nestedAlias = "group_ratio_setting.group_group_ratio"
+	require.NoError(t, db.Create(&Option{Key: groupAlias, Value: `{"alias":9}`}).Error)
+	require.NoError(t, db.Create(&Option{Key: nestedAlias, Value: `{"alias":{"child":9}}`}).Error)
+	require.NoError(t, ratio_setting.UpdateGroupRatioPairByJSONString(`{"stable":1}`, `{"stable":{"child":2}}`))
+	common.OptionMapRWMutex.Lock()
+	delete(common.OptionMap, groupAlias)
+	delete(common.OptionMap, nestedAlias)
+	common.OptionMapRWMutex.Unlock()
+
+	loadOptionsFromDatabase()
+
+	groupRatio, groupGroupRatio := ratio_setting.GroupRatioPair2JSONStrings()
+	require.Equal(t, `{"stable":1}`, groupRatio)
+	require.Equal(t, `{"stable":{"child":2}}`, groupGroupRatio)
+	common.OptionMapRWMutex.RLock()
+	_, hasGroupAlias := common.OptionMap[groupAlias]
+	_, hasNestedAlias := common.OptionMap[nestedAlias]
+	common.OptionMapRWMutex.RUnlock()
+	require.False(t, hasGroupAlias)
+	require.False(t, hasNestedAlias)
+}
+
+func TestUpdateOptionValidatesCanonicalGroupRatioBeforeWriting(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "top null entry", key: "GroupRatio", value: `{"bad":null}`},
+		{name: "nested zero", key: "GroupGroupRatio", value: `{"bad":{"child":0}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupOptionTestDB(t)
+			preserveGroupRatioRuntime(t)
+			require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"stable":1}`}).Error)
+			require.NoError(t, db.Create(&Option{Key: "GroupGroupRatio", Value: `{"stable":{"child":2}}`}).Error)
+			require.NoError(t, ratio_setting.UpdateGroupRatioPairByJSONString(`{"stable":1}`, `{"stable":{"child":2}}`))
+			setOptionMapValueForTest("GroupRatio", `{"stable":1}`)
+			setOptionMapValueForTest("GroupGroupRatio", `{"stable":{"child":2}}`)
+
+			err := UpdateOption(tt.key, tt.value)
+
+			require.Error(t, err)
+			stored, readErr := GetGroupRatioOptions()
+			require.NoError(t, readErr)
+			require.Equal(t, `{"stable":1}`, stored.GroupRatio)
+			require.Equal(t, `{"stable":{"child":2}}`, stored.GroupGroupRatio)
+			groupRatio, groupGroupRatio := ratio_setting.GroupRatioPair2JSONStrings()
+			require.Equal(t, stored.GroupRatio, groupRatio)
+			require.Equal(t, stored.GroupGroupRatio, groupGroupRatio)
+			require.Equal(t, stored.GroupRatio, optionMapValueForTest("GroupRatio"))
+			require.Equal(t, stored.GroupGroupRatio, optionMapValueForTest("GroupGroupRatio"))
+		})
+	}
+}
+
+func TestUpdateOptionStoresNormalizedCanonicalGroupRatio(t *testing.T) {
+	db := setupOptionTestDB(t)
+	preserveGroupRatioRuntime(t)
+	require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"old":1}`}).Error)
+	setOptionMapValueForTest("GroupRatio", `{"old":1}`)
+
+	err := UpdateOption("GroupRatio", `{" zero ":0," paid ":1.5}`)
+
+	require.NoError(t, err)
+	var stored Option
+	require.NoError(t, db.Where(&Option{Key: "GroupRatio"}).First(&stored).Error)
+	require.Equal(t, `{"paid":1.5,"zero":0}`, stored.Value)
+	require.Equal(t, stored.Value, ratio_setting.GroupRatio2JSONString())
+	require.Equal(t, stored.Value, optionMapValueForTest("GroupRatio"))
+}
+
+func TestUpdateOptionsBulkRejectsInvalidCanonicalRatioBeforeAnyWrite(t *testing.T) {
+	db := setupOptionTestDB(t)
+	preserveGroupRatioRuntime(t)
+	require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"stable":1}`}).Error)
+	require.NoError(t, db.Create(&Option{Key: "GroupGroupRatio", Value: `{"stable":{"child":2}}`}).Error)
+	require.NoError(t, ratio_setting.UpdateGroupRatioPairByJSONString(`{"stable":1}`, `{"stable":{"child":2}}`))
+	setOptionMapValueForTest("GroupRatio", `{"stable":1}`)
+	setOptionMapValueForTest("GroupGroupRatio", `{"stable":{"child":2}}`)
+
+	err := UpdateOptionsBulk(map[string]string{
+		"BulkSafeKey": "must-not-commit",
+		"GroupRatio":  `{"bad":null}`,
+	})
+
+	require.Error(t, err)
+	var safeCount int64
+	require.NoError(t, db.Model(&Option{}).Where(&Option{Key: "BulkSafeKey"}).Count(&safeCount).Error)
+	require.Zero(t, safeCount)
+	stored, readErr := GetGroupRatioOptions()
+	require.NoError(t, readErr)
+	require.Equal(t, `{"stable":1}`, stored.GroupRatio)
+	require.Equal(t, `{"stable":{"child":2}}`, stored.GroupGroupRatio)
+	groupRatio, groupGroupRatio := ratio_setting.GroupRatioPair2JSONStrings()
+	require.Equal(t, stored.GroupRatio, groupRatio)
+	require.Equal(t, stored.GroupGroupRatio, groupGroupRatio)
+	require.Equal(t, stored.GroupRatio, optionMapValueForTest("GroupRatio"))
+	require.Equal(t, stored.GroupGroupRatio, optionMapValueForTest("GroupGroupRatio"))
+}
+
+func TestUpdateGroupRatioOptionsValidatesAndNormalizesBeforeTransaction(t *testing.T) {
+	db := setupOptionTestDB(t)
+	require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"stable":1}`}).Error)
+	require.NoError(t, db.Create(&Option{Key: "GroupGroupRatio", Value: `{"stable":{"child":2}}`}).Error)
+
+	err := UpdateGroupRatioOptions(`{" changed ":3}`, `{"bad":{"child":0}}`)
+	require.Error(t, err)
+	stored, readErr := GetGroupRatioOptions()
+	require.NoError(t, readErr)
+	require.Equal(t, `{"stable":1}`, stored.GroupRatio)
+	require.Equal(t, `{"stable":{"child":2}}`, stored.GroupGroupRatio)
+
+	require.NoError(t, UpdateGroupRatioOptions(`{" zero ":0}`, `{" user ":{" child ":1.25}}`))
+	stored, readErr = GetGroupRatioOptions()
+	require.NoError(t, readErr)
+	require.Equal(t, `{"zero":0}`, stored.GroupRatio)
+	require.Equal(t, `{"user":{"child":1.25}}`, stored.GroupGroupRatio)
+}
+
+func TestLoadOptionsFromDatabaseKeepsRuntimePairOnInvalidHistoricalCanonicalValue(t *testing.T) {
+	db := setupOptionTestDB(t)
+	preserveGroupRatioRuntime(t)
+	require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"bad":null}`}).Error)
+	require.NoError(t, db.Create(&Option{Key: "GroupGroupRatio", Value: `{"changed":{"child":3}}`}).Error)
+	require.NoError(t, ratio_setting.UpdateGroupRatioPairByJSONString(`{"stable":1}`, `{"stable":{"child":2}}`))
+	setOptionMapValueForTest("GroupRatio", `{"stable":1}`)
+	setOptionMapValueForTest("GroupGroupRatio", `{"stable":{"child":2}}`)
+
+	loadOptionsFromDatabase()
+
+	groupRatio, groupGroupRatio := ratio_setting.GroupRatioPair2JSONStrings()
+	require.Equal(t, `{"stable":1}`, groupRatio)
+	require.Equal(t, `{"stable":{"child":2}}`, groupGroupRatio)
+	require.Equal(t, groupRatio, optionMapValueForTest("GroupRatio"))
+	require.Equal(t, groupGroupRatio, optionMapValueForTest("GroupGroupRatio"))
+}
+
+func containsStructuredOptionKeyINPredicate(expression clause.Expression) bool {
 	switch predicate := expression.(type) {
 	case clause.Where:
 		for _, child := range predicate.Exprs {
-			if containsStructuredOptionKeyPredicate(child) {
+			if containsStructuredOptionKeyINPredicate(child) {
 				return true
 			}
 		}
 	case clause.AndConditions:
 		for _, child := range predicate.Exprs {
-			if containsStructuredOptionKeyPredicate(child) {
+			if containsStructuredOptionKeyINPredicate(child) {
 				return true
 			}
 		}
 	case clause.OrConditions:
 		for _, child := range predicate.Exprs {
-			if containsStructuredOptionKeyPredicate(child) {
+			if containsStructuredOptionKeyINPredicate(child) {
 				return true
 			}
 		}
-	case clause.Eq:
+	case clause.IN:
 		switch column := predicate.Column.(type) {
 		case clause.Column:
 			return column.Name == "key"

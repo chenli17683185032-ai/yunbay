@@ -419,6 +419,40 @@ func TestGenericUpdateOptionRejectsNullGroupRatioEntryWithoutChangingState(t *te
 	require.Equal(t, `{"old":1}`, optionGroupRatio)
 }
 
+func TestGenericUpdateOptionRejectsDeprecatedGroupRatioAliases(t *testing.T) {
+	aliases := []string{
+		"group_ratio_setting.group_ratio",
+		"group_ratio_setting.group_group_ratio",
+	}
+	for _, alias := range aliases {
+		t.Run(alias, func(t *testing.T) {
+			db := setupGroupRatioOptionsControllerTest(t)
+			seedGroupRatioOptionsState(t, db, `{"old":1}`, `{"old":{"child":1}}`)
+			common.OptionMapRWMutex.Lock()
+			delete(common.OptionMap, alias)
+			common.OptionMapRWMutex.Unlock()
+
+			recorder, response := performGroupRatioOptionsRequest(t, http.MethodPut, map[string]any{
+				"key":   alias,
+				"value": `{"changed":2}`,
+			}, UpdateOption)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.False(t, response.Success)
+			require.Contains(t, response.Message, "/api/option/group-ratios")
+			var count int64
+			require.NoError(t, db.Model(&model.Option{}).Where(&model.Option{Key: alias}).Count(&count).Error)
+			require.Zero(t, count)
+			common.OptionMapRWMutex.RLock()
+			_, exists := common.OptionMap[alias]
+			common.OptionMapRWMutex.RUnlock()
+			require.False(t, exists)
+			require.Equal(t, `{"old":1}`, ratio_setting.GroupRatio2JSONString())
+			require.Equal(t, `{"old":{"child":1}}`, ratio_setting.GroupGroupRatio2JSONString())
+		})
+	}
+}
+
 func TestGroupRatioOptionsSerializeGenericRatioUpdatesWithPairRuntimeApply(t *testing.T) {
 	db := setupGroupRatioOptionsControllerTest(t)
 	seedGroupRatioOptionsState(t, db, `{"old":1}`, `{"old":{"old":1}}`)
@@ -453,19 +487,24 @@ func TestGroupRatioOptionsSerializeGenericRatioUpdatesWithPairRuntimeApply(t *te
 	genericContext, _ := gin.CreateTestContext(genericRecorder)
 	genericContext.Request = httptest.NewRequest(http.MethodPut, "/api/option", bytes.NewReader(genericBody))
 	genericDone := make(chan struct{})
+	genericAttemptStarted := make(chan struct{})
 	go func() {
 		defer close(genericDone)
+		close(genericAttemptStarted)
 		UpdateOption(genericContext)
 	}()
+	<-genericAttemptStarted
 
+	completedEarly := false
 	select {
 	case <-genericDone:
-		t.Fatal("generic ratio update completed while pair runtime apply was still in progress")
+		completedEarly = true
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(releaseApplier)
 	<-pairDone
 	<-genericDone
+	require.False(t, completedEarly, "generic ratio update completed while pair runtime apply was still in progress")
 
 	stored := readStoredGroupRatioOptions(t)
 	require.Equal(t, `{"generic":3}`, stored.GroupRatio)
@@ -494,10 +533,9 @@ func TestGroupRatioOptionsHandlersUseSharedModelOperationLock(t *testing.T) {
 
 			lockEntered := make(chan struct{})
 			releaseLock := make(chan struct{})
-			lockDone := make(chan struct{})
+			lockDone := make(chan error, 1)
 			go func() {
-				defer close(lockDone)
-				_ = model.WithGroupRatioOptionsLock(func() error {
+				lockDone <- model.WithGroupRatioOptionsLock(func() error {
 					close(lockEntered)
 					<-releaseLock
 					return nil
@@ -510,11 +548,14 @@ func TestGroupRatioOptionsHandlersUseSharedModelOperationLock(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(tt.method, "/api/option/group-ratios", bytes.NewReader(requestBody))
+			attemptStarted := make(chan struct{})
 			handlerDone := make(chan struct{})
 			go func() {
 				defer close(handlerDone)
+				close(attemptStarted)
 				tt.handle(c)
 			}()
+			<-attemptStarted
 			completedEarly := false
 			select {
 			case <-handlerDone:
@@ -522,7 +563,7 @@ func TestGroupRatioOptionsHandlersUseSharedModelOperationLock(t *testing.T) {
 			case <-time.After(100 * time.Millisecond):
 			}
 			close(releaseLock)
-			<-lockDone
+			require.NoError(t, <-lockDone)
 			if !completedEarly {
 				<-handlerDone
 			}

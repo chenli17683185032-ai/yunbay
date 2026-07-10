@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -27,12 +28,12 @@ var defaultGroupGroupRatio = map[string]map[string]float64{
 
 var groupGroupRatioMap = types.NewRWMap[string, map[string]float64]()
 
+var groupRatioPairMutex sync.RWMutex
+
 var defaultGroupSpecialUsableGroup = map[string]map[string]string{}
 
 type GroupRatioSetting struct {
-	GroupRatio              *types.RWMap[string, float64]            `json:"group_ratio"`
-	GroupGroupRatio         *types.RWMap[string, map[string]float64] `json:"group_group_ratio"`
-	GroupSpecialUsableGroup *types.RWMap[string, map[string]string]  `json:"group_special_usable_group"`
+	GroupSpecialUsableGroup *types.RWMap[string, map[string]string] `json:"group_special_usable_group"`
 }
 
 var groupRatioSetting GroupRatioSetting
@@ -46,8 +47,6 @@ func init() {
 
 	groupRatioSetting = GroupRatioSetting{
 		GroupSpecialUsableGroup: groupSpecialUsableGroup,
-		GroupRatio:              groupRatioMap,
-		GroupGroupRatio:         groupGroupRatioMap,
 	}
 
 	config.GlobalConfig.Register("group_ratio_setting", &groupRatioSetting)
@@ -62,15 +61,29 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 }
 
 func GetGroupRatioCopy() map[string]float64 {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	return getGroupRatioCopyUnlocked()
+}
+
+func getGroupRatioCopyUnlocked() map[string]float64 {
 	return groupRatioMap.ReadAll()
 }
 
 func ContainsGroupRatio(name string) bool {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
 	_, ok := groupRatioMap.Get(name)
 	return ok
 }
 
 func GroupRatio2JSONString() string {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	return groupRatio2JSONStringUnlocked()
+}
+
+func groupRatio2JSONStringUnlocked() string {
 	return groupRatioMap.MarshalJSONString()
 }
 
@@ -79,11 +92,19 @@ func UpdateGroupRatioByJSONString(jsonStr string) error {
 	if err != nil {
 		return err
 	}
+	groupRatioPairMutex.Lock()
+	defer groupRatioPairMutex.Unlock()
 	groupRatioMap.ReplaceAll(normalized)
 	return nil
 }
 
 func GetGroupRatio(name string) float64 {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	return getGroupRatioUnlocked(name)
+}
+
+func getGroupRatioUnlocked(name string) float64 {
 	ratio, ok := groupRatioMap.Get(name)
 	if !ok {
 		common.SysLog("group ratio not found: " + name)
@@ -93,6 +114,12 @@ func GetGroupRatio(name string) float64 {
 }
 
 func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	return getGroupGroupRatioUnlocked(userGroup, usingGroup)
+}
+
+func getGroupGroupRatioUnlocked(userGroup, usingGroup string) (float64, bool) {
 	gp, ok := groupGroupRatioMap.Get(userGroup)
 	if !ok {
 		return -1, false
@@ -105,6 +132,12 @@ func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
 }
 
 func GroupGroupRatio2JSONString() string {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	return groupGroupRatio2JSONStringUnlocked()
+}
+
+func groupGroupRatio2JSONStringUnlocked() string {
 	return groupGroupRatioMap.MarshalJSONString()
 }
 
@@ -113,8 +146,62 @@ func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
 	if err != nil {
 		return err
 	}
+	groupRatioPairMutex.Lock()
+	defer groupRatioPairMutex.Unlock()
 	groupGroupRatioMap.ReplaceAll(normalized)
 	return nil
+}
+
+func UpdateGroupRatioPairByJSONString(groupRatioJSON, groupGroupRatioJSON string) error {
+	groupRatio, _, err := ParseAndNormalizeGroupRatioJSON(groupRatioJSON)
+	if err != nil {
+		return err
+	}
+	groupGroupRatio, _, err := ParseAndNormalizeGroupGroupRatioJSON(groupGroupRatioJSON)
+	if err != nil {
+		return err
+	}
+	groupRatioPairMutex.Lock()
+	defer groupRatioPairMutex.Unlock()
+	groupRatioMap.ReplaceAll(groupRatio)
+	groupGroupRatioMap.ReplaceAll(groupGroupRatio)
+	return nil
+}
+
+func GroupRatioPair2JSONStrings() (string, string) {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	return groupRatio2JSONStringUnlocked(), groupGroupRatio2JSONStringUnlocked()
+}
+
+func GetGroupRatioInfo(userGroup, usingGroup string) types.GroupRatioInfo {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	groupRatio := getGroupRatioUnlocked(usingGroup)
+	info := types.GroupRatioInfo{
+		GroupRatio:        groupRatio,
+		GroupSpecialRatio: -1,
+	}
+	if specialRatio, ok := getGroupGroupRatioUnlocked(userGroup, usingGroup); ok {
+		info.GroupRatio = specialRatio
+		info.GroupSpecialRatio = specialRatio
+		info.HasSpecialRatio = true
+	}
+	return info
+}
+
+func GetUserGroupRatioSnapshot(userGroup string) map[string]float64 {
+	groupRatioPairMutex.RLock()
+	defer groupRatioPairMutex.RUnlock()
+	snapshot := getGroupRatioCopyUnlocked()
+	if specialRatios, ok := groupGroupRatioMap.Get(userGroup); ok {
+		for group, ratio := range specialRatios {
+			if _, exists := snapshot[group]; exists && isFiniteRatio(ratio) && ratio > 0 {
+				snapshot[group] = ratio
+			}
+		}
+	}
+	return snapshot
 }
 
 func CheckGroupRatio(jsonStr string) error {

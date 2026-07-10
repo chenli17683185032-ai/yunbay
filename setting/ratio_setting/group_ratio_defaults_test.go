@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,4 +30,8 @@ func TestDefaultGroupRatioSettingsAreYunbayModelGroups(t *testing.T) {
 	require.NotContains(t, groupGroupRatio, "vip")
 
 	require.Empty(t, GetGroupRatioSetting().GroupSpecialUsableGroup.ReadAll())
+	exported := config.GlobalConfig.ExportAllConfigs()
+	require.NotContains(t, exported, "group_ratio_setting.group_ratio")
+	require.NotContains(t, exported, "group_ratio_setting.group_group_ratio")
+	require.Contains(t, exported, "group_ratio_setting.group_special_usable_group")
 }

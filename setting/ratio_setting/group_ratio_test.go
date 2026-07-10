@@ -203,3 +203,82 @@ func TestGetGroupGroupRatioRejectsInvalidHistoricalRuntimeValue(t *testing.T) {
 		require.Equal(t, float64(-1), got)
 	}
 }
+
+func TestUpdateGroupRatioPairByJSONStringValidatesBothBeforeMutation(t *testing.T) {
+	originalGroupRatio, originalGroupGroupRatio := GroupRatioPair2JSONStrings()
+	t.Cleanup(func() {
+		require.NoError(t, UpdateGroupRatioPairByJSONString(originalGroupRatio, originalGroupGroupRatio))
+	})
+	require.NoError(t, UpdateGroupRatioPairByJSONString(`{"stable":1}`, `{"user":{"stable":2}}`))
+
+	err := UpdateGroupRatioPairByJSONString(`{"changed":3}`, `{"user":{"changed":0}}`)
+
+	require.Error(t, err)
+	groupRatio, groupGroupRatio := GroupRatioPair2JSONStrings()
+	require.Equal(t, `{"stable":1}`, groupRatio)
+	require.Equal(t, `{"user":{"stable":2}}`, groupGroupRatio)
+}
+
+func TestGroupRatioPairReadersNeverObserveMixedGeneration(t *testing.T) {
+	originalGroupRatio, originalGroupGroupRatio := GroupRatioPair2JSONStrings()
+	t.Cleanup(func() {
+		require.NoError(t, UpdateGroupRatioPairByJSONString(originalGroupRatio, originalGroupGroupRatio))
+	})
+	const (
+		baseA    = `{"target":1}`
+		nestedA  = `{}`
+		baseB    = `{"target":3}`
+		nestedB  = `{"user":{"target":4}}`
+		attempts = 10000
+	)
+	require.NoError(t, UpdateGroupRatioPairByJSONString(baseA, nestedA))
+
+	attemptStarted := make(chan struct{})
+	writerDone := make(chan error, 1)
+	go func() {
+		close(attemptStarted)
+		for i := 0; i < attempts; i++ {
+			if err := UpdateGroupRatioPairByJSONString(baseB, nestedB); err != nil {
+				writerDone <- err
+				return
+			}
+			if err := UpdateGroupRatioPairByJSONString(baseA, nestedA); err != nil {
+				writerDone <- err
+				return
+			}
+		}
+		writerDone <- nil
+	}()
+	<-attemptStarted
+
+	for {
+		select {
+		case err := <-writerDone:
+			require.NoError(t, err)
+			return
+		default:
+			info := GetGroupRatioInfo("user", "target")
+			validA := info.GroupRatio == 1 && info.GroupSpecialRatio == -1 && !info.HasSpecialRatio
+			validB := info.GroupRatio == 4 && info.GroupSpecialRatio == 4 && info.HasSpecialRatio
+			if !validA && !validB {
+				require.NoError(t, <-writerDone)
+				t.Fatalf("observed mixed group ratio generation: %+v", info)
+			}
+		}
+	}
+}
+
+func TestGetUserGroupRatioSnapshotUsesOnePairGeneration(t *testing.T) {
+	originalGroupRatio, originalGroupGroupRatio := GroupRatioPair2JSONStrings()
+	t.Cleanup(func() {
+		require.NoError(t, UpdateGroupRatioPairByJSONString(originalGroupRatio, originalGroupGroupRatio))
+	})
+	require.NoError(t, UpdateGroupRatioPairByJSONString(
+		`{"gpt-plus":0.3,"gpt-pro":0.4}`,
+		`{"vip":{"gpt-plus":1.2}}`,
+	))
+
+	snapshot := GetUserGroupRatioSnapshot("vip")
+
+	require.Equal(t, map[string]float64{"gpt-plus": 1.2, "gpt-pro": 0.4}, snapshot)
+}

@@ -31,11 +31,12 @@ func respondGroupRatioOptionsError(c *gin.Context, status int, err error) {
 }
 
 func normalizedGroupRatioRuntimeReadback() (string, string, error) {
-	_, groupRatio, err := ratio_setting.ParseAndNormalizeGroupRatioJSON(ratio_setting.GroupRatio2JSONString())
+	runtimeGroupRatio, runtimeGroupGroupRatio := ratio_setting.GroupRatioPair2JSONStrings()
+	_, groupRatio, err := ratio_setting.ParseAndNormalizeGroupRatioJSON(runtimeGroupRatio)
 	if err != nil {
 		return "", "", err
 	}
-	_, groupGroupRatio, err := ratio_setting.ParseAndNormalizeGroupGroupRatioJSON(ratio_setting.GroupGroupRatio2JSONString())
+	_, groupGroupRatio, err := ratio_setting.ParseAndNormalizeGroupGroupRatioJSON(runtimeGroupGroupRatio)
 	if err != nil {
 		return "", "", err
 	}
@@ -88,10 +89,7 @@ func setGroupRatioOptionMap(groupRatio, groupGroupRatio string) {
 }
 
 func applyGroupRatioRuntime(groupRatio, groupGroupRatio string) error {
-	if err := ratio_setting.UpdateGroupRatioByJSONString(groupRatio); err != nil {
-		return err
-	}
-	return ratio_setting.UpdateGroupGroupRatioByJSONString(groupGroupRatio)
+	return ratio_setting.UpdateGroupRatioPairByJSONString(groupRatio, groupGroupRatio)
 }
 
 func restoreGroupRatioRuntimeFromDatabase() error {

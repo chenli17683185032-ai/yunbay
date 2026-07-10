@@ -141,6 +141,12 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
+	case "group_ratio_setting.group_ratio", "group_ratio_setting.group_group_ratio":
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "该配置项已废弃，请使用 /api/option/group-ratios",
+		})
+		return
 	case "QuotaForInviter", "QuotaForInvitee":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)

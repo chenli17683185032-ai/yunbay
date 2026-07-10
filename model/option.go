@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Option struct {
@@ -22,6 +25,9 @@ type Option struct {
 }
 
 var groupRatioOptionsMutex sync.Mutex
+
+// ErrDeprecatedGroupRatioAlias indicates callers must use the canonical pair endpoint.
+var ErrDeprecatedGroupRatioAlias = errors.New("deprecated group ratio option alias; use /api/option/group-ratios")
 
 // WithGroupRatioOptionsLock serializes database and runtime transitions for
 // GroupRatio and GroupGroupRatio across API writes and background sync.
@@ -39,6 +45,7 @@ func AllOption() ([]*Option, error) {
 }
 
 func InitOptionMap() {
+	groupRatioJSON, groupGroupRatioJSON := ratio_setting.GroupRatioPair2JSONStrings()
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
 
@@ -152,8 +159,8 @@ func InitOptionMap() {
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
-	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
-	common.OptionMap["GroupGroupRatio"] = ratio_setting.GroupGroupRatio2JSONString()
+	common.OptionMap["GroupRatio"] = groupRatioJSON
+	common.OptionMap["GroupGroupRatio"] = groupGroupRatioJSON
 	common.OptionMap["UserUsableGroups"] = setting.UserUsableGroups2JSONString()
 	common.OptionMap["CompletionRatio"] = ratio_setting.CompletionRatio2JSONString()
 	common.OptionMap["ImageRatio"] = ratio_setting.ImageRatio2JSONString()
@@ -207,9 +214,42 @@ func loadOptionsFromDatabaseUnlocked() error {
 	if err != nil {
 		return err
 	}
+	var groupRatioValue string
+	var groupGroupRatioValue string
+	hasGroupRatio := false
+	hasGroupGroupRatio := false
 	for _, option := range options {
+		if isDeprecatedGroupRatioAlias(option.Key) {
+			continue
+		}
+		switch option.Key {
+		case "GroupRatio":
+			groupRatioValue = option.Value
+			hasGroupRatio = true
+			continue
+		case "GroupGroupRatio":
+			groupGroupRatioValue = option.Value
+			hasGroupGroupRatio = true
+			continue
+		}
 		err = updateOptionMap(option.Key, option.Value)
 		if err != nil {
+			common.SysLog("failed to update option map: " + err.Error())
+		}
+	}
+	if hasGroupRatio && hasGroupGroupRatio {
+		if err := updateGroupRatioOptionMapPair(groupRatioValue, groupGroupRatioValue); err != nil {
+			common.SysLog("failed to update group ratio option pair: " + err.Error())
+		}
+		return nil
+	}
+	if hasGroupRatio {
+		if err := updateOptionMap("GroupRatio", groupRatioValue); err != nil {
+			common.SysLog("failed to update option map: " + err.Error())
+		}
+	}
+	if hasGroupGroupRatio {
+		if err := updateOptionMap("GroupGroupRatio", groupGroupRatioValue); err != nil {
 			common.SysLog("failed to update option map: " + err.Error())
 		}
 	}
@@ -225,6 +265,14 @@ func SyncOptions(frequency int) {
 }
 
 func UpdateOption(key string, value string) error {
+	if isDeprecatedGroupRatioAlias(key) {
+		return ErrDeprecatedGroupRatioAlias
+	}
+	normalizedValue, err := normalizeCanonicalGroupRatioOptionValue(key, value)
+	if err != nil {
+		return err
+	}
+	value = normalizedValue
 	if isGroupRatioOptionKey(key) {
 		return WithGroupRatioOptionsLock(func() error {
 			return updateOptionUnlocked(key, value)
@@ -257,6 +305,38 @@ func isGroupRatioOptionKey(key string) bool {
 	return key == "GroupRatio" || key == "GroupGroupRatio"
 }
 
+func isDeprecatedGroupRatioAlias(key string) bool {
+	return key == "group_ratio_setting.group_ratio" || key == "group_ratio_setting.group_group_ratio"
+}
+
+func normalizeCanonicalGroupRatioOptionValue(key, value string) (string, error) {
+	switch key {
+	case "GroupRatio":
+		_, normalized, err := ratio_setting.ParseAndNormalizeGroupRatioJSON(value)
+		return normalized, err
+	case "GroupGroupRatio":
+		_, normalized, err := ratio_setting.ParseAndNormalizeGroupGroupRatioJSON(value)
+		return normalized, err
+	default:
+		return value, nil
+	}
+}
+
+func normalizeOptionValues(values map[string]string) (map[string]string, error) {
+	normalized := make(map[string]string, len(values))
+	for key, value := range values {
+		if isDeprecatedGroupRatioAlias(key) {
+			return nil, ErrDeprecatedGroupRatioAlias
+		}
+		normalizedValue, err := normalizeCanonicalGroupRatioOptionValue(key, value)
+		if err != nil {
+			return nil, err
+		}
+		normalized[key] = normalizedValue
+	}
+	return normalized, nil
+}
+
 type GroupRatioOptions struct {
 	GroupRatio      string
 	GroupGroupRatio string
@@ -275,27 +355,58 @@ func saveOptionValue(tx *gorm.DB, key, value string) error {
 // order. Runtime state is deliberately applied by the controller only after
 // this transaction commits.
 func UpdateGroupRatioOptions(groupRatio, groupGroupRatio string) error {
+	_, normalizedGroupRatio, err := ratio_setting.ParseAndNormalizeGroupRatioJSON(groupRatio)
+	if err != nil {
+		return err
+	}
+	_, normalizedGroupGroupRatio, err := ratio_setting.ParseAndNormalizeGroupGroupRatioJSON(groupGroupRatio)
+	if err != nil {
+		return err
+	}
 	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := saveOptionValue(tx, "GroupRatio", groupRatio); err != nil {
+		if err := saveOptionValue(tx, "GroupRatio", normalizedGroupRatio); err != nil {
 			return err
 		}
-		return saveOptionValue(tx, "GroupGroupRatio", groupGroupRatio)
+		return saveOptionValue(tx, "GroupGroupRatio", normalizedGroupGroupRatio)
 	})
 }
 
 func GetGroupRatioOptions() (GroupRatioOptions, error) {
-	var groupRatio Option
-	if err := DB.Where(&Option{Key: "GroupRatio"}).First(&groupRatio).Error; err != nil {
+	var options []Option
+	if err := DB.Where(clause.IN{
+		Column: clause.Column{Name: "key"},
+		Values: []interface{}{"GroupRatio", "GroupGroupRatio"},
+	}).Find(&options).Error; err != nil {
 		return GroupRatioOptions{}, err
 	}
-	var groupGroupRatio Option
-	if err := DB.Where(&Option{Key: "GroupGroupRatio"}).First(&groupGroupRatio).Error; err != nil {
-		return GroupRatioOptions{}, err
+	if len(options) != 2 {
+		return GroupRatioOptions{}, fmt.Errorf("expected 2 group ratio options, got %d", len(options))
 	}
-	return GroupRatioOptions{
-		GroupRatio:      groupRatio.Value,
-		GroupGroupRatio: groupGroupRatio.Value,
-	}, nil
+	var result GroupRatioOptions
+	seenGroupRatio := false
+	seenGroupGroupRatio := false
+	for _, option := range options {
+		switch option.Key {
+		case "GroupRatio":
+			if seenGroupRatio {
+				return GroupRatioOptions{}, errors.New("duplicate GroupRatio option")
+			}
+			seenGroupRatio = true
+			result.GroupRatio = option.Value
+		case "GroupGroupRatio":
+			if seenGroupGroupRatio {
+				return GroupRatioOptions{}, errors.New("duplicate GroupGroupRatio option")
+			}
+			seenGroupGroupRatio = true
+			result.GroupGroupRatio = option.Value
+		default:
+			return GroupRatioOptions{}, fmt.Errorf("unexpected group ratio option key: %s", option.Key)
+		}
+	}
+	if !seenGroupRatio || !seenGroupGroupRatio {
+		return GroupRatioOptions{}, errors.New("group ratio option pair is incomplete")
+	}
+	return result, nil
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
@@ -307,14 +418,18 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if len(values) == 0 {
 		return nil
 	}
-	for key := range values {
+	normalizedValues, err := normalizeOptionValues(values)
+	if err != nil {
+		return err
+	}
+	for key := range normalizedValues {
 		if isGroupRatioOptionKey(key) {
 			return WithGroupRatioOptionsLock(func() error {
-				return updateOptionsBulkUnlocked(values)
+				return updateOptionsBulkUnlocked(normalizedValues)
 			})
 		}
 	}
-	return updateOptionsBulkUnlocked(values)
+	return updateOptionsBulkUnlocked(normalizedValues)
 }
 
 func updateOptionsBulkUnlocked(values map[string]string) error {
@@ -334,7 +449,17 @@ func updateOptionsBulkUnlocked(values map[string]string) error {
 	if err != nil {
 		return err
 	}
+	groupRatio, hasGroupRatio := values["GroupRatio"]
+	groupGroupRatio, hasGroupGroupRatio := values["GroupGroupRatio"]
+	if hasGroupRatio && hasGroupGroupRatio {
+		if err := updateGroupRatioOptionMapPair(groupRatio, groupGroupRatio); err != nil {
+			return err
+		}
+	}
 	for k, v := range values {
+		if hasGroupRatio && hasGroupGroupRatio && isGroupRatioOptionKey(k) {
+			continue
+		}
 		if err := updateOptionMap(k, v); err != nil {
 			return err
 		}
@@ -343,8 +468,36 @@ func updateOptionsBulkUnlocked(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if isDeprecatedGroupRatioAlias(key) {
+		return nil
+	}
+	if isGroupRatioOptionKey(key) {
+		normalizedValue, err := normalizeCanonicalGroupRatioOptionValue(key, value)
+		if err != nil {
+			return err
+		}
+		switch key {
+		case "GroupRatio":
+			err = ratio_setting.UpdateGroupRatioByJSONString(normalizedValue)
+		case "GroupGroupRatio":
+			err = ratio_setting.UpdateGroupGroupRatioByJSONString(normalizedValue)
+		}
+		if err != nil {
+			return err
+		}
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if common.OptionMap == nil {
+			common.OptionMap = make(map[string]string)
+		}
+		common.OptionMap[key] = normalizedValue
+		return nil
+	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理
@@ -611,10 +764,6 @@ func updateOptionMap(key string, value string) (err error) {
 		common.DataExportDefaultTime = value
 	case "ModelRatio":
 		err = ratio_setting.UpdateModelRatioByJSONString(value)
-	case "GroupRatio":
-		err = ratio_setting.UpdateGroupRatioByJSONString(value)
-	case "GroupGroupRatio":
-		err = ratio_setting.UpdateGroupGroupRatioByJSONString(value)
 	case "UserUsableGroups":
 		err = setting.UpdateUserUsableGroupsByJSONString(value)
 	case "CompletionRatio":
@@ -659,6 +808,28 @@ func updateOptionMap(key string, value string) (err error) {
 		// No additional in-memory variable to update.
 	}
 	return err
+}
+
+func updateGroupRatioOptionMapPair(groupRatio, groupGroupRatio string) error {
+	_, normalizedGroupRatio, err := ratio_setting.ParseAndNormalizeGroupRatioJSON(groupRatio)
+	if err != nil {
+		return err
+	}
+	_, normalizedGroupGroupRatio, err := ratio_setting.ParseAndNormalizeGroupGroupRatioJSON(groupGroupRatio)
+	if err != nil {
+		return err
+	}
+	if err := ratio_setting.UpdateGroupRatioPairByJSONString(normalizedGroupRatio, normalizedGroupGroupRatio); err != nil {
+		return err
+	}
+	common.OptionMapRWMutex.Lock()
+	defer common.OptionMapRWMutex.Unlock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	common.OptionMap["GroupRatio"] = normalizedGroupRatio
+	common.OptionMap["GroupGroupRatio"] = normalizedGroupGroupRatio
+	return nil
 }
 
 // handleConfigUpdate 处理分层配置更新，返回是否已处理

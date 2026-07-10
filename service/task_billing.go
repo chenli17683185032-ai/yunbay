@@ -309,13 +309,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 			return
 		}
 
-		groupRatio := ratio_setting.GetGroupRatio(group)
-		userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-		if hasUserGroupRatio {
-			finalGroupRatio = userGroupRatio
-		} else {
-			finalGroupRatio = groupRatio
-		}
+		finalGroupRatio = ratio_setting.GetGroupRatioInfo(group, group).GroupRatio
 	}
 
 	otherRatios := map[string]float64(nil)
