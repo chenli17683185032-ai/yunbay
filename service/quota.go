@@ -100,20 +100,23 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	textOutTokens := usage.OutputTokenDetails.TextTokens
 	audioInputTokens := usage.InputTokenDetails.AudioTokens
 	audioOutTokens := usage.OutputTokenDetails.AudioTokens
-	groupRatio := ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 	modelRatio, _, _ := ratio_setting.GetModelRatio(modelName)
 
-	autoGroup, exists := common.GetContextKey(ctx, constant.ContextKeyAutoGroup)
-	if exists {
-		groupRatio = ratio_setting.GetGroupRatio(autoGroup.(string))
-		logger.LogDebug(ctx, "final group ratio: %f", groupRatio)
-		relayInfo.UsingGroup = autoGroup.(string)
-	}
-
-	actualGroupRatio := groupRatio
-	userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.BillingRatioUserGroup(), relayInfo.UsingGroup)
-	if ok {
-		actualGroupRatio = userGroupRatio
+	var actualGroupRatio float64
+	if relayInfo.PriceData.SubscriptionRatioApplied {
+		actualGroupRatio, _ = resolveSubscriptionBillingRatio(relayInfo)
+	} else {
+		actualGroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
+		autoGroup, exists := common.GetContextKey(ctx, constant.ContextKeyAutoGroup)
+		if exists {
+			actualGroupRatio = ratio_setting.GetGroupRatio(autoGroup.(string))
+			logger.LogDebug(ctx, "final group ratio: %f", actualGroupRatio)
+			relayInfo.UsingGroup = autoGroup.(string)
+		}
+		userGroupRatio, ok := ratio_setting.GetGroupGroupRatio(relayInfo.BillingRatioUserGroup(), relayInfo.UsingGroup)
+		if ok {
+			actualGroupRatio = userGroupRatio
+		}
 	}
 
 	quotaInfo := QuotaInfo{

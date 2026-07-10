@@ -23,16 +23,26 @@ import (
 // BillingSession 封装单次请求的预扣费/结算/退款生命周期。
 // 实现 relaycommon.BillingSettler 接口。
 type BillingSession struct {
-	relayInfo        *relaycommon.RelayInfo
-	funding          FundingSource
-	preConsumedQuota int  // 实际预扣额度（信任用户可能为 0）
-	tokenConsumed    int  // 令牌额度实际扣减量
-	extraReserved    int  // 发送前补充预扣的额度（订阅退款时需要单独回滚）
-	trusted          bool // 是否命中信任额度旁路
-	fundingSettled   bool // funding.Settle 已成功，资金来源已提交
-	settled          bool // Settle 全部完成（资金 + 令牌）
-	refunded         bool // Refund 已调用
-	mu               sync.Mutex
+	relayInfo               *relaycommon.RelayInfo
+	funding                 FundingSource
+	preConsumedQuota        int  // 实际预扣额度（信任用户可能为 0）
+	tokenConsumed           int  // 令牌额度实际扣减量
+	extraReserved           int  // 发送前补充预扣的额度（订阅退款时需要单独回滚）
+	trusted                 bool // 是否命中信任额度旁路
+	fundingSettled          bool // funding.Settle 已成功，资金来源已提交
+	settled                 bool // Settle 全部完成（资金 + 令牌）
+	refunded                bool // Refund 已调用
+	subscriptionRatio       float64
+	subscriptionRatioSource string
+	mu                      sync.Mutex
+}
+
+func (s *BillingSession) subscriptionBillingRatioSnapshot() (float64, string, bool) {
+	if s == nil || s.funding == nil || s.funding.Source() != BillingSourceSubscription {
+		return 0, "", false
+	}
+	ratio, source := normalizeFrozenSubscriptionBillingRatio(s.relayInfo, s.subscriptionRatio, s.subscriptionRatioSource)
+	return ratio, source, true
 }
 
 // Settle 根据实际消耗额度进行结算。
@@ -460,7 +470,8 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	if relayInfo.ValuePackageSubscriptionId > 0 {
-		subConsumeInt := subscriptionPreConsumeQuota(relayInfo, preConsumedQuota)
+		ratio, source := resolveSubscriptionBillingRatio(relayInfo)
+		subConsumeInt := subscriptionPreConsumeQuota(relayInfo, preConsumedQuota, ratio, source)
 		if subConsumeInt <= 0 {
 			subConsumeInt = 1
 		}
@@ -474,11 +485,13 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 				amount:                     subConsume,
 				valuePackageSubscriptionId: relayInfo.ValuePackageSubscriptionId,
 			},
+			subscriptionRatio:       ratio,
+			subscriptionRatioSource: source,
 		}
 		if apiErr := session.preConsume(c, subConsumeInt); apiErr != nil {
 			return nil, apiErr
 		}
-		applySubscriptionBillingRatio(relayInfo, subConsumeInt)
+		applySubscriptionBillingRatio(relayInfo, subConsumeInt, ratio, source)
 		session.preConsumedQuota = subConsumeInt
 		session.syncRelayInfo()
 		return session, nil
@@ -526,7 +539,8 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 	}
 
 	trySubscription := func() (*BillingSession, *types.NewAPIError) {
-		subConsumeInt := subscriptionPreConsumeQuota(relayInfo, preConsumedQuota)
+		ratio, source := resolveSubscriptionBillingRatio(relayInfo)
+		subConsumeInt := subscriptionPreConsumeQuota(relayInfo, preConsumedQuota, ratio, source)
 		if subConsumeInt <= 0 {
 			subConsumeInt = 1
 		}
@@ -539,6 +553,8 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 				modelName: relayInfo.OriginModelName,
 				amount:    subConsume,
 			},
+			subscriptionRatio:       ratio,
+			subscriptionRatioSource: source,
 		}
 		// 必须传 subConsumeInt，保证 SubscriptionFunding.amount、
 		// preConsume 参数和 FinalPreConsumedQuota 三者一致，避免订阅多扣费。
@@ -546,7 +562,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			restoreOriginalBillingRatio(relayInfo)
 			return nil, apiErr
 		}
-		applySubscriptionBillingRatio(relayInfo, subConsumeInt)
+		applySubscriptionBillingRatio(relayInfo, subConsumeInt, ratio, source)
 		session.preConsumedQuota = subConsumeInt
 		session.syncRelayInfo()
 		return session, nil

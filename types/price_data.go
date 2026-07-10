@@ -31,6 +31,7 @@ type PriceData struct {
 	HasOriginalGroupRatioInfo bool
 	OriginalGroupRatioInfo    GroupRatioInfo
 	SubscriptionRatioApplied  bool
+	SubscriptionRatioSource   string
 }
 
 func (p *PriceData) AddOtherRatio(key string, ratio float64) {

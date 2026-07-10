@@ -111,7 +111,7 @@ func TestValuePackageBillingIgnoresWalletOnlyPreference(t *testing.T) {
 	require.EqualValues(t, 0, used7d)
 }
 
-func TestValuePackageBillingAppliesOneXGroupRatio(t *testing.T) {
+func TestValuePackageBillingDefaultsToOneXWithoutConfiguredPair(t *testing.T) {
 	setupValuePackageBillingSessionTestDB(t)
 	user := model.User{Username: "vp-billing-ratio-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 1000}
 	require.NoError(t, model.DB.Create(&user).Error)
@@ -149,6 +149,7 @@ func TestValuePackageBillingAppliesOneXGroupRatio(t *testing.T) {
 	require.Equal(t, 1000, session.GetPreConsumedQuota())
 	require.Equal(t, 1000, relayInfo.PriceData.QuotaToPreConsume)
 	require.Equal(t, 1.0, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.Equal(t, SubscriptionRatioSourceDefault, relayInfo.PriceData.SubscriptionRatioSource)
 	require.True(t, relayInfo.PriceData.SubscriptionRatioApplied)
 	require.True(t, relayInfo.PriceData.HasOriginalGroupRatioInfo)
 	require.Equal(t, 0.3, relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio)
@@ -156,6 +157,51 @@ func TestValuePackageBillingAppliesOneXGroupRatio(t *testing.T) {
 	var reloadedSub model.UserSubscription
 	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
 	require.EqualValues(t, 1000, reloadedSub.AmountUsed)
+}
+
+func TestValuePackageBillingAppliesConfiguredSpecialRatio(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "vp-billing-configured-ratio-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 1000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	plan := model.SubscriptionPlan{Title: "configured month card", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "month-card", ConcurrencyLimit: 1, TotalAmount: 10000}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, StartTime: now - 10, EndTime: now + int64(time.Hour/time.Second), Status: model.UserSubscriptionStatusActive, Source: "test"}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                     user.Id,
+		RequestId:                  "vp-billing-configured-ratio-request",
+		OriginModelName:            "gpt-plus",
+		IsPlayground:               true,
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+		PriceData: types.PriceData{
+			QuotaBeforeGroup:  1000,
+			QuotaToPreConsume: 600,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio: 0.6, GroupSpecialRatio: 0.6, HasSpecialRatio: true,
+			},
+		},
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, relayInfo.PriceData.QuotaToPreConsume)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	require.Equal(t, BillingSourceSubscription, relayInfo.BillingSource)
+	require.Equal(t, 600, session.GetPreConsumedQuota())
+	require.Equal(t, 600, relayInfo.PriceData.QuotaToPreConsume)
+	require.Equal(t, 0.6, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.Equal(t, SubscriptionRatioSourceConfigured, relayInfo.PriceData.SubscriptionRatioSource)
+	require.True(t, relayInfo.PriceData.SubscriptionRatioApplied)
+
+	var reloadedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 600, reloadedSub.AmountUsed)
 }
 
 func TestValuePackageBillingSettleZeroActualQuotaClearsUsageReservation(t *testing.T) {
