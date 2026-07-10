@@ -103,8 +103,9 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 	modelRatio, _, _ := ratio_setting.GetModelRatio(modelName)
 
 	var actualGroupRatio float64
-	if relayInfo.PriceData.SubscriptionRatioApplied {
-		actualGroupRatio, _ = resolveSubscriptionBillingRatio(relayInfo)
+	authoritativeRatio, _, hasSubscriptionSession := resolveAuthoritativeSubscriptionBillingRatio(relayInfo)
+	if hasSubscriptionSession || relayInfo.PriceData.SubscriptionRatioApplied {
+		actualGroupRatio = authoritativeRatio
 	} else {
 		actualGroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 		autoGroup, exists := common.GetContextKey(ctx, constant.ContextKeyAutoGroup)

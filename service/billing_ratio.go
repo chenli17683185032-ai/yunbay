@@ -3,6 +3,7 @@ package service
 import (
 	"math"
 	"sort"
+	"strings"
 
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -63,11 +64,31 @@ func resolveSubscriptionBillingRatio(info *relaycommon.RelayInfo) (float64, stri
 	if info.ValuePackageSubscriptionId <= 0 {
 		return 1, SubscriptionRatioSourceRegular
 	}
+	packageGroup := strings.TrimSpace(info.ValuePackageBillingGroup)
+	if packageGroup == "" {
+		return 1, SubscriptionRatioSourceDefault
+	}
+	billingUserGroup := strings.TrimSpace(info.BillingUserGroup)
+	if billingUserGroup != "" && billingUserGroup != packageGroup {
+		return 1, SubscriptionRatioSourceDefault
+	}
 	candidate := info.PriceData.GroupRatioInfo
 	if candidate.HasSpecialRatio && validSubscriptionBillingRatio(candidate.GroupSpecialRatio) {
 		return candidate.GroupSpecialRatio, SubscriptionRatioSourceConfigured
 	}
 	return 1, SubscriptionRatioSourceDefault
+}
+
+func resolveAuthoritativeSubscriptionBillingRatio(info *relaycommon.RelayInfo) (float64, string, bool) {
+	if info != nil {
+		if session, ok := info.Billing.(*BillingSession); ok {
+			if ratio, source, frozen := session.subscriptionBillingRatioSnapshot(); frozen {
+				return ratio, source, true
+			}
+		}
+	}
+	ratio, source := resolveSubscriptionBillingRatio(info)
+	return ratio, source, false
 }
 
 func otherRatioProduct(priceData types.PriceData) decimal.Decimal {
@@ -133,7 +154,9 @@ func applySubscriptionBillingRatio(relayInfo *relaycommon.RelayInfo, preConsumed
 	}
 	priceData := &relayInfo.PriceData
 	wasApplied := priceData.SubscriptionRatioApplied
-	if wasApplied {
+	if frozenRatio, frozenSource, frozen := resolveAuthoritativeSubscriptionBillingRatio(relayInfo); frozen {
+		ratio, source = frozenRatio, frozenSource
+	} else if wasApplied {
 		ratio, source = resolveSubscriptionBillingRatio(relayInfo)
 	} else {
 		ratio, source = normalizeFrozenSubscriptionBillingRatio(relayInfo, ratio, source)
@@ -157,10 +180,8 @@ func applySubscriptionBillingRatio(relayInfo *relaycommon.RelayInfo, preConsumed
 		priceData.Quota = preConsumedQuota
 	}
 	if snap := relayInfo.TieredBillingSnapshot; snap != nil && snap.BillingMode == "tiered_expr" {
-		if !wasApplied {
-			snap.GroupRatio = ratio
-			snap.EstimatedQuotaAfterGroup = billingexpr.QuotaRound(snap.EstimatedQuotaBeforeGroup * ratio)
-		}
+		snap.GroupRatio = ratio
+		snap.EstimatedQuotaAfterGroup = billingexpr.QuotaRound(snap.EstimatedQuotaBeforeGroup * ratio)
 		priceData.QuotaToPreConsume = snap.EstimatedQuotaAfterGroup
 		if shouldSyncPerCallQuota {
 			priceData.Quota = snap.EstimatedQuotaAfterGroup
@@ -172,14 +193,7 @@ func EnsureSubscriptionBillingRatio(relayInfo *relaycommon.RelayInfo) {
 	if relayInfo == nil || relayInfo.BillingSource != BillingSourceSubscription {
 		return
 	}
-	ratio, source := resolveSubscriptionBillingRatio(relayInfo)
-	if !relayInfo.PriceData.SubscriptionRatioApplied {
-		if session, ok := relayInfo.Billing.(*BillingSession); ok {
-			if frozenRatio, frozenSource, frozen := session.subscriptionBillingRatioSnapshot(); frozen {
-				ratio, source = frozenRatio, frozenSource
-			}
-		}
-	}
+	ratio, source, _ := resolveAuthoritativeSubscriptionBillingRatio(relayInfo)
 	preConsumedQuota := relayInfo.FinalPreConsumedQuota
 	if relayInfo.Billing != nil {
 		preConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()

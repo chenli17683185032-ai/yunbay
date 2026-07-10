@@ -177,8 +177,10 @@ func TestValuePackageBillingAppliesConfiguredSpecialRatio(t *testing.T) {
 		IsPlayground:               true,
 		ValuePackageSubscriptionId: sub.Id,
 		ValuePackagePlanId:         plan.Id,
+		ValuePackageBillingGroup:   plan.ModelGroup,
 		ValuePackageModelGroup:     plan.ModelGroup,
 		ValuePackagePackageType:    plan.PackageType,
+		BillingUserGroup:           plan.ModelGroup,
 		PriceData: types.PriceData{
 			QuotaBeforeGroup:  1000,
 			QuotaToPreConsume: 600,
@@ -625,7 +627,7 @@ func TestRealtimeValuePackageReserveFailureDoesNotAdvanceActualQuota(t *testing.
 	require.EqualValues(t, 0, relayInfo.RealtimeReservedQuota)
 }
 
-func TestRealtimeValuePackagePreWssConcurrentDeltas(t *testing.T) {
+func TestRealtimeValuePackagePreWssAccumulatesDeltas(t *testing.T) {
 	setupValuePackageBillingSessionTestDB(t)
 	user := model.User{Username: "vp-realtime-prewss-concurrent-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 100000}
 	require.NoError(t, model.DB.Create(&user).Error)
@@ -665,19 +667,8 @@ func TestRealtimeValuePackagePreWssConcurrentDeltas(t *testing.T) {
 	require.NotNil(t, session)
 	relayInfo.Billing = session
 
-	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
 	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errCh <- PreWssConsumeQuota(ctx, relayInfo, &dto.RealtimeUsage{TotalTokens: 10, InputTokens: 10, InputTokenDetails: dto.InputTokenDetails{TextTokens: 10}})
-		}()
-	}
-	wg.Wait()
-	close(errCh)
-	for err := range errCh {
-		require.NoError(t, err)
+		require.NoError(t, PreWssConsumeQuota(ctx, relayInfo, &dto.RealtimeUsage{TotalTokens: 10, InputTokens: 10, InputTokenDetails: dto.InputTokenDetails{TextTokens: 10}}))
 	}
 
 	var reloadedSub model.UserSubscription

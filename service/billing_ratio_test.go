@@ -139,11 +139,27 @@ func TestResolveSubscriptionBillingRatio(t *testing.T) {
 		},
 		{
 			name: "value package uses explicit special ratio",
-			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, ValuePackageBillingGroup: "month-card", BillingUserGroup: "month-card", PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
 				GroupRatio: 0.6, GroupSpecialRatio: 0.6, HasSpecialRatio: true,
 			}}},
 			wantRatio:  0.6,
 			wantSource: SubscriptionRatioSourceConfigured,
+		},
+		{
+			name: "value package with empty package billing group rejects special ratio",
+			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio: 0.6, GroupSpecialRatio: 0.6, HasSpecialRatio: true,
+			}}},
+			wantRatio:  1,
+			wantSource: SubscriptionRatioSourceDefault,
+		},
+		{
+			name: "value package with mismatched billing groups rejects special ratio",
+			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, ValuePackageBillingGroup: "month-card", BillingUserGroup: "vip", PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio: 0.6, GroupSpecialRatio: 0.6, HasSpecialRatio: true,
+			}}},
+			wantRatio:  1,
+			wantSource: SubscriptionRatioSourceDefault,
 		},
 		{
 			name:       "value package missing pair defaults to one",
@@ -153,7 +169,7 @@ func TestResolveSubscriptionBillingRatio(t *testing.T) {
 		},
 		{
 			name: "value package does not infer a pair from ordinary group ratio",
-			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, ValuePackageBillingGroup: "month-card", PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
 				GroupRatio: 0.6, GroupSpecialRatio: 0.6, HasSpecialRatio: false,
 			}}},
 			wantRatio:  1,
@@ -161,7 +177,7 @@ func TestResolveSubscriptionBillingRatio(t *testing.T) {
 		},
 		{
 			name: "value package does not fall back to group ratio when special ratio is invalid",
-			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, ValuePackageBillingGroup: "month-card", PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
 				GroupRatio: 0.6, GroupSpecialRatio: 0, HasSpecialRatio: true,
 			}}},
 			wantRatio:  1,
@@ -185,7 +201,7 @@ func TestResolveSubscriptionBillingRatio(t *testing.T) {
 			wantSource string
 		}{
 			name: "value package invalid special ratio " + invalid.name,
-			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			info: &relaycommon.RelayInfo{ValuePackageSubscriptionId: 1, ValuePackageBillingGroup: "month-card", PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
 				GroupRatio: invalid.ratio, GroupSpecialRatio: invalid.ratio, HasSpecialRatio: true,
 			}}},
 			wantRatio:  1,
@@ -532,6 +548,112 @@ func TestEnsureSubscriptionBillingRatioKeepsFrozenValuePackageRatioAfterReprice(
 	require.Equal(t, 600, relayInfo.PriceData.QuotaToPreConsume)
 	require.Equal(t, SubscriptionRatioSourceConfigured, relayInfo.PriceData.SubscriptionRatioSource)
 	require.Equal(t, 1.8, relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio)
+}
+
+func TestEnsureSubscriptionBillingRatioPrefersSessionOverAppliedPriceData(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		BillingSource:              BillingSourceSubscription,
+		ValuePackageSubscriptionId: 42,
+		ValuePackageBillingGroup:   "month-card",
+		BillingUserGroup:           "month-card",
+		PriceData: types.PriceData{
+			QuotaBeforeGroup:          1000,
+			QuotaToPreConsume:         1800,
+			SubscriptionRatioApplied:  true,
+			SubscriptionRatioSource:   SubscriptionRatioSourceConfigured,
+			HasOriginalGroupRatioInfo: true,
+			OriginalGroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 0.3},
+			GroupRatioInfo:            types.GroupRatioInfo{GroupRatio: 1.8},
+		},
+	}
+	session := &BillingSession{
+		relayInfo:               relayInfo,
+		funding:                 &SubscriptionFunding{valuePackageSubscriptionId: 42},
+		preConsumedQuota:        600,
+		subscriptionRatio:       0.6,
+		subscriptionRatioSource: SubscriptionRatioSourceConfigured,
+	}
+	relayInfo.Billing = session
+
+	EnsureSubscriptionBillingRatio(relayInfo)
+
+	require.Equal(t, 0.6, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.Equal(t, 600, relayInfo.PriceData.QuotaToPreConsume)
+	require.Equal(t, SubscriptionRatioSourceConfigured, relayInfo.PriceData.SubscriptionRatioSource)
+	require.Equal(t, 0.3, relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio)
+}
+
+func TestEnsureSubscriptionBillingRatioRepairsTieredSnapshotFromSession(t *testing.T) {
+	relayInfo := &relaycommon.RelayInfo{
+		BillingSource:              BillingSourceSubscription,
+		ValuePackageSubscriptionId: 42,
+		ValuePackageBillingGroup:   "month-card",
+		BillingUserGroup:           "month-card",
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "tiered_expr",
+			GroupRatio:                math.NaN(),
+			EstimatedQuotaBeforeGroup: 1000,
+			EstimatedQuotaAfterGroup:  9999,
+		},
+		PriceData: types.PriceData{
+			QuotaBeforeGroup:         1000,
+			QuotaToPreConsume:        1800,
+			SubscriptionRatioApplied: true,
+			SubscriptionRatioSource:  SubscriptionRatioSourceConfigured,
+			GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 1.8},
+		},
+	}
+	session := &BillingSession{
+		relayInfo:               relayInfo,
+		funding:                 &SubscriptionFunding{valuePackageSubscriptionId: 42},
+		preConsumedQuota:        600,
+		subscriptionRatio:       0.6,
+		subscriptionRatioSource: SubscriptionRatioSourceConfigured,
+	}
+	relayInfo.Billing = session
+
+	EnsureSubscriptionBillingRatio(relayInfo)
+
+	require.Equal(t, 0.6, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.Equal(t, 0.6, relayInfo.TieredBillingSnapshot.GroupRatio)
+	require.Equal(t, 600, relayInfo.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
+	require.Equal(t, 600, relayInfo.PriceData.QuotaToPreConsume)
+}
+
+func TestRealtimePreWssConsumeQuotaPrefersSessionOverAppliedPriceData(t *testing.T) {
+	preserveRealtimeRatioSettings(t)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"billing-ratio-realtime":1}`))
+
+	ctx := newBillingRatioContext()
+	relayInfo := &relaycommon.RelayInfo{
+		BillingSource:              BillingSourceSubscription,
+		OriginModelName:            "billing-ratio-realtime",
+		UsingGroup:                 "default",
+		ValuePackageSubscriptionId: 42,
+		ValuePackageBillingGroup:   "month-card",
+		BillingUserGroup:           "month-card",
+		IsPlayground:               true,
+		PriceData: types.PriceData{
+			SubscriptionRatioApplied: true,
+			SubscriptionRatioSource:  SubscriptionRatioSourceConfigured,
+			GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 1.8},
+		},
+	}
+	session := &BillingSession{
+		relayInfo:               relayInfo,
+		funding:                 &SubscriptionFunding{valuePackageSubscriptionId: 42},
+		preConsumedQuota:        1000,
+		subscriptionRatio:       0.6,
+		subscriptionRatioSource: SubscriptionRatioSourceConfigured,
+	}
+	relayInfo.Billing = session
+
+	require.NoError(t, PreWssConsumeQuota(ctx, relayInfo, &dto.RealtimeUsage{
+		InputTokens: 20, InputTokenDetails: dto.InputTokenDetails{TextTokens: 20},
+	}))
+
+	require.Equal(t, 12, relayInfo.RealtimeActualQuota)
+	require.Equal(t, 1000, relayInfo.RealtimeReservedQuota)
 }
 
 func TestRealtimePreWssConsumeQuotaKeepsFrozenSubscriptionRatioAcrossConfigChange(t *testing.T) {
