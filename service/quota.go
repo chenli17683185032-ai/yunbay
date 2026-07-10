@@ -179,6 +179,8 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelName string,
 	usage *dto.RealtimeUsage, extraContent string) {
 
+	EnsureSubscriptionBillingRatio(relayInfo)
+
 	var tieredResult *billingexpr.TieredResult
 	tieredOk, tieredQuota, tieredRes := TryTieredSettle(relayInfo, billingexpr.TokenParams{
 		P:   float64(usage.InputTokens),

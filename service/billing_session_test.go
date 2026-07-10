@@ -46,7 +46,7 @@ func setupValuePackageBillingSessionTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.UserValuePackagePreference{}, &model.ValuePackageUsageRecord{}, &model.ValuePackageQuotaReset{}, &model.ValuePackageResetCountLedger{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}, &model.UserValuePackagePreference{}, &model.ValuePackageUsageRecord{}, &model.ValuePackageQuotaReset{}, &model.ValuePackageResetCountLedger{}, &model.Log{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -319,6 +319,91 @@ func TestRealtimeValuePackageReserveDoesNotDoubleCountOnFinalSettle(t *testing.T
 	require.NoError(t, err)
 	require.EqualValues(t, 20, used5h)
 	require.EqualValues(t, 20, used7d)
+}
+
+func TestRealtimePostWssConsumeQuotaSettlesAndLogsFrozenSubscriptionBillingRatio(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	preserveRealtimeRatioSettings(t)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"billing-ratio-realtime":1}`))
+	oldLogConsumeEnabled := common.LogConsumeEnabled
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	common.LogConsumeEnabled = true
+	common.BatchUpdateEnabled = false
+	t.Cleanup(func() {
+		common.LogConsumeEnabled = oldLogConsumeEnabled
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+	})
+
+	user := model.User{Username: "vp-realtime-post-ratio-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 100000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	channel := model.Channel{Name: "vp-realtime-post-ratio-channel", Key: "test", Status: common.ChannelStatusEnabled, Group: "default"}
+	require.NoError(t, model.DB.Create(&channel).Error)
+	plan := model.SubscriptionPlan{Title: "Realtime Frozen Ratio", PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "month-card", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, TotalAmount: 100000, Limit5hAmount: 100000, Limit7dAmount: 100000, ConcurrencyLimit: 1}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, Status: model.UserSubscriptionStatusActive, StartTime: now - 10, EndTime: now + 86400}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest("GET", "/v1/realtime", nil)
+	relayInfo := &relaycommon.RelayInfo{
+		RequestId:                  "vp-realtime-post-ratio-request",
+		UserId:                     user.Id,
+		ChannelMeta:                &relaycommon.ChannelMeta{ChannelId: channel.Id},
+		UserQuota:                  user.Quota,
+		UsingGroup:                 "default",
+		BillingUserGroup:           plan.ModelGroup,
+		ValuePackageBillingGroup:   plan.ModelGroup,
+		OriginModelName:            "billing-ratio-realtime",
+		StartTime:                  time.Now(),
+		IsPlayground:               true,
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+		PriceData: types.PriceData{
+			ModelRatio:        1,
+			QuotaBeforeGroup:  10,
+			QuotaToPreConsume: 6,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio: 0.6, GroupSpecialRatio: 0.6, HasSpecialRatio: true,
+			},
+		},
+	}
+	session, apiErr := NewBillingSession(ctx, relayInfo, relayInfo.PriceData.QuotaToPreConsume)
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	relayInfo.Billing = session
+	require.Equal(t, 0.6, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+
+	// Simulate stale applied state after a reprice while the live session retains 0.6.
+	relayInfo.PriceData.GroupRatioInfo.GroupRatio = 1.8
+	relayInfo.PriceData.SubscriptionRatioApplied = true
+	relayInfo.PriceData.SubscriptionRatioSource = SubscriptionRatioSourceConfigured
+	usage := &dto.RealtimeUsage{
+		TotalTokens: 20,
+		InputTokens: 20,
+		InputTokenDetails: dto.InputTokenDetails{
+			TextTokens: 20,
+		},
+	}
+
+	require.NoError(t, PreWssConsumeQuota(ctx, relayInfo, usage))
+	PostWssConsumeQuota(ctx, relayInfo, relayInfo.OriginModelName, usage, "")
+
+	var reloadedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 12, reloadedSub.AmountUsed)
+	require.Equal(t, 0.6, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	require.Equal(t, 12, log.Quota)
+	require.Contains(t, log.Content, "分组倍率 0.60")
+	var other map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	require.Equal(t, 0.6, other["group_ratio"])
+	require.Equal(t, 0.6, other["value_package_effective_ratio"])
 }
 
 func TestRealtimeValuePackageReserveRollingWindowOverflowIsAtomic(t *testing.T) {
