@@ -1,13 +1,61 @@
 package main
 
 import (
+	"bytes"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestRunQuotaMigrationCLIWritesOnlyJSONToStdoutAndClosesCleanly(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "quota-cli.db")
+	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.SubscriptionPlan{}, &model.UserSubscription{}))
+	require.NoError(t, db.Create(&model.UserSubscription{
+		UserId:      1,
+		PlanId:      999999,
+		AmountTotal: 0,
+		AmountUsed:  10,
+		StartTime:   1_999_999_000,
+		EndTime:     4_000_000_000,
+		Status:      model.UserSubscriptionStatusActive,
+		Source:      "cli-test",
+	}).Error)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+
+	oldSQLitePath := common.SQLitePath
+	t.Cleanup(func() { common.SQLitePath = oldSQLitePath })
+	t.Setenv("SQL_DSN", "local")
+	t.Setenv("SQLITE_PATH", dbPath)
+	t.Setenv("LOG_SQL_DSN", "")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	apply := false
+	manifest := ""
+
+	require.NotPanics(t, func() {
+		require.NoError(t, runQuotaMigrationCLI(&stdout, &stderr, &apply, &manifest))
+	})
+
+	stdoutText := stdout.String()
+	require.NotEmpty(t, strings.TrimSpace(stdoutText))
+	require.NotContains(t, stdoutText, "[SYS]")
+	require.NotContains(t, stdoutText, "record not found")
+	var report model.LegacyValuePackageQuotaMigrationReport
+	require.NoError(t, common.Unmarshal([]byte(strings.TrimSpace(stdoutText)), &report))
+	require.Equal(t, 1, report.Skipped["missing_plan"])
+	require.Contains(t, stderr.String(), "using SQLite")
+	require.Contains(t, stderr.String(), "record not found")
+}
 
 func setupQuotaMigrationCommandDB(t *testing.T) *gorm.DB {
 	t.Helper()

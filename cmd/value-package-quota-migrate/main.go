@@ -3,13 +3,17 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 var (
@@ -18,28 +22,57 @@ var (
 )
 
 func main() {
-	common.InitEnv()
-	if err := model.InitDBWithoutMigrations(); err != nil {
-		log.Fatal("database initialization failed")
+	if err := runQuotaMigrationCLI(os.Stdout, os.Stderr, applyMigration, manifestHash); err != nil {
+		log.Print(err)
+		os.Exit(1)
 	}
+}
+
+func runQuotaMigrationCLI(stdout io.Writer, stderr io.Writer, applyFlag *bool, manifestFlag *string) (err error) {
+	common.LogWriterMu.Lock()
+	previousWriter := gin.DefaultWriter
+	previousErrorWriter := gin.DefaultErrorWriter
+	gin.DefaultWriter = stderr
+	gin.DefaultErrorWriter = stderr
+	common.LogWriterMu.Unlock()
 	defer func() {
-		if err := model.CloseDB(); err != nil {
-			log.Print("database close failed")
-		}
+		common.LogWriterMu.Lock()
+		gin.DefaultWriter = previousWriter
+		gin.DefaultErrorWriter = previousErrorWriter
+		common.LogWriterMu.Unlock()
 	}()
 
+	common.InitEnv()
+	if err = model.InitDBWithoutMigrations(); err != nil {
+		return fmt.Errorf("database initialization failed: %w", err)
+	}
+	defer func() {
+		if closeErr := model.CloseDB(); closeErr != nil && err == nil {
+			err = fmt.Errorf("database close failed: %w", closeErr)
+		}
+	}()
+	maintenanceLogger := gormlogger.New(log.New(stderr, "\r\n", log.LstdFlags), gormlogger.Config{
+		SlowThreshold:             200 * time.Millisecond,
+		LogLevel:                  gormlogger.Warn,
+		IgnoreRecordNotFoundError: false,
+		Colorful:                  false,
+	})
+	model.DB = model.DB.Session(&gorm.Session{Logger: maintenanceLogger})
+	model.LOG_DB = model.DB
+
 	now := model.GetDBTimestamp()
-	report, err := runLegacyValuePackageQuotaMigration(model.DB, now, *applyMigration, *manifestHash)
+	report, err := runLegacyValuePackageQuotaMigration(model.DB, now, *applyFlag, *manifestFlag)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	payload, err := common.Marshal(report)
 	if err != nil {
-		log.Fatal("report encoding failed")
+		return fmt.Errorf("report encoding failed: %w", err)
 	}
-	if _, err := fmt.Fprintln(os.Stdout, string(payload)); err != nil {
-		log.Fatal("report output failed")
+	if _, err := fmt.Fprintln(stdout, string(payload)); err != nil {
+		return fmt.Errorf("report output failed: %w", err)
 	}
+	return nil
 }
 
 func runLegacyValuePackageQuotaMigration(db *gorm.DB, now int64, apply bool, manifestHash string) (*model.LegacyValuePackageQuotaMigrationReport, error) {

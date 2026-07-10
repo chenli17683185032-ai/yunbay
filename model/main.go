@@ -205,7 +205,11 @@ func initializePrimaryDBConnection() (err error) {
 // without executing application schema migrations. Maintenance commands that
 // promise a read-only preview must use this initializer instead of InitDB.
 func InitDBWithoutMigrations() error {
-	return initializePrimaryDBConnection()
+	if err := initializePrimaryDBConnection(); err != nil {
+		return err
+	}
+	LOG_DB = DB
+	return nil
 }
 
 func InitDB() (err error) {
@@ -767,6 +771,9 @@ func migrateSubscriptionPlanPriceAmount() {
 }
 
 func closeDB(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
 	sqlDB, err := db.DB()
 	if err != nil {
 		return err
@@ -776,7 +783,7 @@ func closeDB(db *gorm.DB) error {
 }
 
 func CloseDB() error {
-	if LOG_DB != DB {
+	if LOG_DB != nil && LOG_DB != DB {
 		err := closeDB(LOG_DB)
 		if err != nil {
 			return err
