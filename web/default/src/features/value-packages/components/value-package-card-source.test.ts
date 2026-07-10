@@ -21,50 +21,51 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const sourcePath = new URL('./value-package-card.tsx', import.meta.url)
+const periodListSourcePath = new URL(
+  './value-package-period-list.tsx',
+  import.meta.url
+)
 const staleDefaultBenefitCopy = [
   '5-hour limit and 7-day limit ',
   'protection',
 ].join('')
 
-test('value package card source keeps required user controls and limit copy', async () => {
+test('value package card uses the shared usage period renderer', async () => {
   const source = await readFile(sourcePath, 'utf8')
+  const periodListSource = await readFile(periodListSourcePath, 'utf8')
 
   assert.match(source, /▶/)
   assert.match(source, /Close package usage|关闭使用/)
   assert.match(source, /5-hour limit|5 小时限额/)
   assert.match(source, /VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY/)
-  assert.match(source, /Progress/)
-  assert.match(source, /Package total limit/)
   assert.match(source, /Package total limit and 5-hour protection/)
   assert.equal(source.includes(staleDefaultBenefitCopy), false)
-  assert.match(source, /getValuePackageTotalLimitLabelKey/)
   assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
   assert.match(source, /VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY/)
-  assert.match(source, /formatUsageAmount/)
-  assert.match(source, /getProgressToneClass/)
-  assert.match(source, /formatValuePackageResetLine/)
-  assert.match(source, /resetSeconds\?: number/)
-  assert.match(source, /limited\?: boolean/)
-  assert.match(source, /reset_seconds_5h/)
-  assert.match(source, /reset_seconds_7d/)
-  assert.match(source, /limited_5h/)
-  assert.match(source, /limited_7d/)
-  assert.match(source, /!Number\.isFinite\(limit\) \|\| limit <= 0/)
-  assert.match(source, /hasUsageProgress/)
-  assert.match(source, /Math\.round\(amount \|\| 0\)/)
+  assert.match(source, /getValuePackagePeriodLimits/)
+  assert.match(source, /ValuePackagePeriodList/)
   assert.match(
     source,
-    /getValuePackageTotalLimitLabelKey\(plan\.package_type\)[\s\S]*?'Package total limit'[\s\S]*?percent=\{usage\.total_percent\}/
+    /getValuePackagePeriodLimits\(usage, plan\.package_type\)/
   )
+  assert.match(source, /<ValuePackagePeriodList periods=\{usagePeriods\} \/>/)
+  assert.doesNotMatch(source, /LimitProgressRow/)
+  assert.doesNotMatch(source, /plan\.total_amount/)
   assert.match(
     source,
     /show7dPeriodLimit && Number\(plan\.limit_7d_amount \|\| 0\) > 0/
   )
-  assert.match(source, /show7dPeriodLimit && usage\.limit_7d > 0/)
-  assert.match(
-    source,
-    /usage &&\s*\([\s\S]*?usage\.total_limit > 0[\s\S]*?usage\.limit_5h > 0[\s\S]*?\(show7dPeriodLimit && usage\.limit_7d > 0\)/
-  )
+  assert.match(periodListSource, /formatQuota/)
+  assert.match(periodListSource, /Progress/)
+  assert.match(periodListSource, /formatValuePackageResetLine/)
+  assert.match(periodListSource, /5-hour remaining/)
+  assert.match(periodListSource, /Current 7-day stage remaining/)
+  assert.match(periodListSource, /1-day total remaining/)
+  assert.match(periodListSource, /7-day total remaining/)
+  assert.match(periodListSource, /30-day total remaining/)
+  assert.match(periodListSource, /Does not refresh/)
+  assert.match(periodListSource, /Number\.isFinite\(resetAt\)/)
+  assert.match(periodListSource, /Math\.max\(0,/)
   assert.match(source, /getValuePackageDisplayCurrency/)
   assert.match(source, /currencyOverride/)
   assert.match(source, /CNY/)

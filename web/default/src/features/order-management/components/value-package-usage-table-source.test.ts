@@ -35,51 +35,37 @@ const staleUsageTableCopy = [
   ['7-day ', 'remaining'].join(''),
 ]
 
-test('order management value package usage table shows month-card 7-day period semantics', async () => {
+test('order management value package usage table uses the shared period renderer', async () => {
   const source = await readFile(sourcePath, 'utf8')
 
   assert.match(source, /ValuePackageUsageTable/)
   assert.match(source, /TableHeader/)
-  assert.match(source, /5-hour remaining/)
-  assert.match(source, /7-day period remaining/)
-  assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
-  assert.match(source, /Period7dQuotaCell/)
-  assert.match(source, /Not applicable/)
-  assert.match(source, /used_5h/)
-  assert.match(source, /limit_5h/)
-  assert.match(source, /used_7d/)
-  assert.match(source, /limit_7d/)
-  assert.match(source, /formatQuota/)
-  assert.match(source, /formatValuePackageResetLine/)
-  assert.match(source, /resetSeconds\?: number/)
-  assert.match(source, /limited\?: boolean/)
-  assert.match(source, /reset_seconds_5h/)
-  assert.match(source, /reset_seconds_7d/)
-  assert.match(source, /limited_5h/)
-  assert.match(source, /limited_7d/)
+  assert.match(source, /Quota periods/)
+  assert.match(source, /getValuePackagePeriodLimits/)
+  assert.match(source, /ValuePackagePeriodList/)
+  assert.match(
+    source,
+    /getValuePackagePeriodLimits\(\s*row\.usage,\s*row\.plan\.package_type\s*\)/
+  )
+  assert.doesNotMatch(source, /WindowQuotaCell/)
+  assert.doesNotMatch(source, /Period7dQuotaCell/)
+  assert.doesNotMatch(source, /TotalRemainingCell/)
+  assert.doesNotMatch(source, /Not applicable/)
+  assert.doesNotMatch(source, /Package total remaining/)
 
   for (const staleCopy of staleUsageTableCopy) {
     assert.equal(source.includes(staleCopy), false, staleCopy)
   }
 })
 
-test('value package usage table keeps per-user period quota columns', async () => {
+test('value package usage table keeps realtime refresh with one period column', async () => {
   const source = await readFile(sourcePath, 'utf8')
   const pageSource = (await readFile(pageSourcePath, 'utf8')).replaceAll(
     '15_000',
     '15000'
   )
 
-  assert.match(source, /used_5h/)
-  assert.match(source, /limit_5h/)
-  assert.match(source, /used_7d/)
-  assert.match(source, /limit_7d/)
-  assert.match(source, /total_remaining/)
-  assert.match(source, /Period7dQuotaCell/)
-  assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
-  assert.match(source, /resetSeconds=\{usage\?\.reset_seconds_5h \|\| 0\}/)
-  assert.match(source, /resetSeconds=\{usage\?\.reset_seconds_7d \|\| 0\}/)
-  assert.match(source, /limited=\{usage\?\.limited_5h \|\| false\}/)
-  assert.match(source, /limited=\{usage\?\.limited_7d \|\| false\}/)
+  assert.match(source, /<ValuePackagePeriodList periods=\{periods\} \/>/)
+  assert.doesNotMatch(source, /plan\.total_amount/)
   assert.match(pageSource, /refetchInterval:\s*15000/)
 })

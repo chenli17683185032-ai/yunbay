@@ -46,6 +46,24 @@ export type SubscriptionPlanKind =
 
 export type ValuePackageType = 'day' | 'week' | 'month'
 
+export type ValuePackagePeriodKind =
+  | 'five_hour'
+  | 'seven_day_stage'
+  | 'lifecycle'
+
+export interface ValuePackagePeriodLimit {
+  kind: ValuePackagePeriodKind
+  label_unit: 'hour' | 'day'
+  label_value: number
+  limit: number
+  used: number
+  remaining: number
+  percent: number
+  refreshes: boolean
+  reset_at: number
+  limited: boolean
+}
+
 export type UserSubscriptionStatus =
   | 'active'
   | 'expired'
@@ -144,6 +162,7 @@ export interface ValuePackageUsageSummary {
   exhausted: boolean
   exhausted_reason: string
   exhausted_message: string
+  period_limits?: ValuePackagePeriodLimit[]
 }
 
 export interface ValuePackagePlan extends SubscriptionPlanLike {

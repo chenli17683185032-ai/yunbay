@@ -58,24 +58,26 @@ test('value package management page uses dedicated admin APIs and realtime refre
   )
 })
 
-test('value package management page shows reset-count and month-card period quota columns', async () => {
+test('value package management page shows reset-count and shared quota periods', async () => {
   const source = await readFile(pageSourcePath, 'utf8')
 
   assert.match(source, /Reset count/)
   assert.match(source, /Last reset/)
-  assert.match(source, /5-hour remaining/)
-  assert.match(source, /7-day period remaining/)
-  assert.match(source, /shouldExposeValuePackage7dPeriodLimit/)
-  assert.match(source, /Period7dQuotaCell/)
-  assert.match(source, /Not applicable/)
-  assert.match(source, /Package total remaining/)
+  assert.match(source, /Quota periods/)
+  assert.match(source, /getValuePackagePeriodLimits/)
+  assert.match(source, /ValuePackagePeriodList/)
+  assert.match(
+    source,
+    /getValuePackagePeriodLimits\(\s*row\.usage,\s*row\.package_type\s*\)/
+  )
+  assert.match(source, /<ValuePackagePeriodList periods=\{periods\} \/>/)
+  assert.doesNotMatch(source, /WindowQuotaCell/)
+  assert.doesNotMatch(source, /Period7dQuotaCell/)
+  assert.doesNotMatch(source, /TotalRemainingCell/)
+  assert.doesNotMatch(source, /Not applicable/)
+  assert.doesNotMatch(source, /plan\.total_amount/)
   assert.match(source, /reset_count/)
   assert.match(source, /last_reset_at/)
-  assert.match(source, /reset_seconds_5h/)
-  assert.match(source, /reset_seconds_7d/)
-  assert.match(source, /total_remaining/)
-  assert.match(source, /formatValuePackageResetLine/)
-  assert.match(source, /formatQuota/)
 
   for (const staleCopy of staleManagementCopy) {
     assert.equal(source.includes(staleCopy), false, staleCopy)

@@ -22,6 +22,7 @@ import type {
   SubscriptionPlanStats,
   UserSubscription,
 } from '@/features/subscriptions/types'
+import type { ValuePackagePeriodLimit } from '@/features/value-packages/types'
 
 export type MailCheckStatus =
   | 'not_required'
@@ -206,6 +207,7 @@ export interface OrderManagementValuePackageUsageSummary {
   exhausted: boolean
   exhausted_reason: string
   exhausted_message: string
+  period_limits?: ValuePackagePeriodLimit[]
 }
 
 export interface OrderManagementValuePackageUsageRow {

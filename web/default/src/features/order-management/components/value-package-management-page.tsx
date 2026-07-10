@@ -21,7 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { RefreshCw, RotateCcw, Search, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { formatTimestampToDate } from '@/lib/format'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -57,7 +57,6 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
-import { Progress } from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -70,8 +69,8 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { SectionPageLayout } from '@/components/layout'
-import { shouldExposeValuePackage7dPeriodLimit } from '@/features/subscriptions/lib/value-package-limit-labels'
-import { formatValuePackageResetLine } from '@/features/value-packages/lib/reset-time'
+import { ValuePackagePeriodList } from '@/features/value-packages/components/value-package-period-list'
+import { getValuePackagePeriodLimits } from '@/features/value-packages/lib/period-limits'
 import {
   adjustOrderManagementValuePackageResetCount,
   getOrderManagementValuePackageUsers,
@@ -109,125 +108,10 @@ function formatResetTime(timestamp: number, t: (key: string) => string) {
   return timestamp > 0 ? formatTimestampToDate(timestamp) : t('Never')
 }
 
-function remainingQuota(used: number, limit: number): number | null {
-  if (!Number.isFinite(limit) || limit <= 0) return null
-  return Math.max(0, limit - Math.max(0, used || 0))
-}
-
-function WindowQuotaCell({
-  used,
-  limit,
-  percent,
-  resetSeconds,
-  limited,
-}: {
-  used: number
-  limit: number
-  percent: number
-  resetSeconds?: number
-  limited?: boolean
-}) {
-  const { t } = useTranslation()
-  const remaining = remainingQuota(used, limit)
-
-  if (remaining === null) {
-    return <span className='font-semibold'>{t('Unlimited')}</span>
-  }
-
-  const resetLine = formatValuePackageResetLine({
-    limit,
-    resetSeconds,
-    limited,
-    t,
-  })
-
-  return (
-    <div className='flex min-w-[170px] flex-col gap-1.5'>
-      <div className='font-semibold tabular-nums'>
-        {formatQuota(remaining)} / {formatQuota(limit)}
-      </div>
-      <Progress value={Math.min(Math.max(percent || 0, 0), 100)} />
-      <div className='text-muted-foreground text-xs tabular-nums'>
-        {t('Used: {{used}} / {{limit}}', {
-          used: formatQuota(used || 0),
-          limit: formatQuota(limit),
-        })}
-      </div>
-      <div
-        className={
-          limited
-            ? 'text-destructive text-xs font-medium'
-            : 'text-muted-foreground text-xs'
-        }
-      >
-        {resetLine}
-      </div>
-    </div>
-  )
-}
-
-function Period7dQuotaCell({
-  packageType,
-  used,
-  limit,
-  percent,
-  resetSeconds,
-  limited,
-}: {
-  packageType?: string
-  used: number
-  limit: number
-  percent: number
-  resetSeconds?: number
-  limited?: boolean
-}) {
-  const { t } = useTranslation()
-
-  if (!shouldExposeValuePackage7dPeriodLimit(packageType) || limit <= 0) {
-    return <span className='text-muted-foreground'>{t('Not applicable')}</span>
-  }
-
-  return (
-    <WindowQuotaCell
-      used={used}
-      limit={limit}
-      percent={percent}
-      resetSeconds={resetSeconds}
-      limited={limited}
-    />
-  )
-}
-
-function TotalRemainingCell({
-  row,
-}: {
-  row: OrderManagementValuePackageManagementRow
-}) {
-  const { t } = useTranslation()
-  const usage = row.usage
-  if (!usage || usage.total_limit <= 0) {
-    return <span className='font-semibold'>{t('Unlimited')}</span>
-  }
-
-  return (
-    <div className='flex min-w-[140px] flex-col gap-1'>
-      <span className='font-semibold tabular-nums'>
-        {formatQuota(usage.total_remaining || 0)}
-      </span>
-      <span className='text-muted-foreground text-xs tabular-nums'>
-        {t('Used: {{used}} / {{limit}}', {
-          used: formatQuota(usage.total_used || 0),
-          limit: formatQuota(usage.total_limit),
-        })}
-      </span>
-    </div>
-  )
-}
-
 function LoadingRows() {
   return Array.from({ length: 8 }, (_, index) => (
     <TableRow key={`value-package-management-skeleton-${index}`}>
-      {Array.from({ length: 10 }, (_, cellIndex) => (
+      {Array.from({ length: 8 }, (_, cellIndex) => (
         <TableCell key={cellIndex}>
           <Skeleton className='h-5 w-24' />
         </TableCell>
@@ -533,8 +417,7 @@ export function ValuePackageManagementPage() {
               <CardHeader>
                 <CardTitle>{t('Value Package Management')}</CardTitle>
                 <CardDescription>
-                  {t('Reset count')} / {t('5-hour remaining')} /{' '}
-                  {t('7-day period remaining')}
+                  {t('Reset count')} / {t('Quota periods')}
                 </CardDescription>
               </CardHeader>
               <CardContent className='min-h-0 flex-1'>
@@ -546,9 +429,7 @@ export function ValuePackageManagementPage() {
                         <TableHead>{t('Package')}</TableHead>
                         <TableHead>{t('Status')}</TableHead>
                         <TableHead>{t('Reset count')}</TableHead>
-                        <TableHead>{t('5-hour remaining')}</TableHead>
-                        <TableHead>{t('7-day period remaining')}</TableHead>
-                        <TableHead>{t('Package total remaining')}</TableHead>
+                        <TableHead>{t('Quota periods')}</TableHead>
                         <TableHead>{t('Last reset')}</TableHead>
                         <TableHead>{t('Expires at')}</TableHead>
                         <TableHead className='text-right'>
@@ -561,7 +442,7 @@ export function ValuePackageManagementPage() {
                         <LoadingRows />
                       ) : rows.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={10}>
+                          <TableCell colSpan={8}>
                             <Empty className='border-0'>
                               <EmptyHeader>
                                 <EmptyMedia variant='icon'>
@@ -581,7 +462,10 @@ export function ValuePackageManagementPage() {
                         </TableRow>
                       ) : (
                         rows.map((row) => {
-                          const usage = row.usage
+                          const periods = getValuePackagePeriodLimits(
+                            row.usage,
+                            row.package_type
+                          )
                           return (
                             <TableRow key={row.subscription_id}>
                               <TableCell>
@@ -626,26 +510,7 @@ export function ValuePackageManagementPage() {
                                 </span>
                               </TableCell>
                               <TableCell>
-                                <WindowQuotaCell
-                                  used={usage?.used_5h || 0}
-                                  limit={usage?.limit_5h || 0}
-                                  percent={usage?.percent_5h || 0}
-                                  resetSeconds={usage?.reset_seconds_5h || 0}
-                                  limited={usage?.limited_5h || false}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Period7dQuotaCell
-                                  packageType={row.package_type}
-                                  used={usage?.used_7d || 0}
-                                  limit={usage?.limit_7d || 0}
-                                  percent={usage?.percent_7d || 0}
-                                  resetSeconds={usage?.reset_seconds_7d || 0}
-                                  limited={usage?.limited_7d || false}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <TotalRemainingCell row={row} />
+                                <ValuePackagePeriodList periods={periods} />
                               </TableCell>
                               <TableCell>
                                 <span className='text-muted-foreground tabular-nums'>

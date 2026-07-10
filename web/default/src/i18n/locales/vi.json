@@ -5114,6 +5114,12 @@
     "Month cards can use this total quota from activation time until the 30-day expiration. The total quota must be greater than 0.": "Thẻ tháng có thể dùng tổng hạn mức này từ thời điểm kích hoạt đến khi hết hạn sau 30 ngày. Tổng hạn mức phải lớn hơn 0.",
     "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.": "Hạn mức chu kỳ tùy chọn cho thẻ tháng. Hạn mức này tự đặt lại theo mỗi chu kỳ cố định 7 ngày tính từ thời điểm kích hoạt, và thao tác đặt lại thẻ tháng có thể xóa mức dùng của chu kỳ 7 ngày hiện tại. 0 sẽ tắt giới hạn chu kỳ này.",
     "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.": "Thao tác này sẽ tiêu hao 1 lượt đặt lại. Thẻ ngày và thẻ tuần chỉ xóa cửa sổ sử dụng 5 giờ. Thẻ tháng xóa cả cửa sổ 5 giờ và mức dùng của chu kỳ 7 ngày hiện tại. Thao tác này không khôi phục tổng hạn mức và không gia hạn thời hạn.",
-    "Realtime 5-hour remaining, month-card 7-day period remaining, and package total quota for active value package users.": "Hiển thị theo thời gian thực hạn mức còn lại trong 5 giờ, phần còn lại của kỳ 7 ngày cho thẻ tháng và tổng hạn mức gói cho người dùng gói giá trị đang hoạt động."
+    "Realtime 5-hour remaining, month-card 7-day period remaining, and package total quota for active value package users.": "Hiển thị theo thời gian thực hạn mức còn lại trong 5 giờ, phần còn lại của kỳ 7 ngày cho thẻ tháng và tổng hạn mức gói cho người dùng gói giá trị đang hoạt động.",
+    "Quota periods": "Các chu kỳ hạn mức",
+    "Current 7-day stage remaining": "Hạn mức còn lại của giai đoạn 7 ngày hiện tại",
+    "1-day total remaining": "Tổng hạn mức còn lại trong 1 ngày",
+    "7-day total remaining": "Tổng hạn mức còn lại trong 7 ngày",
+    "30-day total remaining": "Tổng hạn mức còn lại trong 30 ngày",
+    "Does not refresh": "Không làm mới"
   }
 }

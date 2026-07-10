@@ -5114,6 +5114,12 @@
     "Month cards can use this total quota from activation time until the 30-day expiration. The total quota must be greater than 0.": "月カードは有効化時刻から30日後の期限までこの合計クォータを使用できます。合計クォータは 0 より大きく設定する必要があります。",
     "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.": "月カード用の任意の期間クォータです。有効化時刻から固定の7日ごとにリセットされ、月カードのリセットでは現在の7日間期間の使用量もクリアできます。0 はこの期間上限を無効にします。",
     "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.": "リセット回数を1回消費します。日カードと週カードは5時間の使用ウィンドウのみをクリアします。月カードは5時間の使用ウィンドウと現在の7日間期間の使用量の両方をクリアします。合計クォータは復元されず、有効期限も延長されません。",
-    "Realtime 5-hour remaining, month-card 7-day period remaining, and package total quota for active value package users.": "有効なバリューパッケージユーザーの5時間残量、月間カードの7日間期間残量、パッケージ総クォータをリアルタイム表示します。"
+    "Realtime 5-hour remaining, month-card 7-day period remaining, and package total quota for active value package users.": "有効なバリューパッケージユーザーの5時間残量、月間カードの7日間期間残量、パッケージ総クォータをリアルタイム表示します。",
+    "Quota periods": "クォータ期間",
+    "Current 7-day stage remaining": "現在の7日間ステージの残量",
+    "1-day total remaining": "1日分の合計残量",
+    "7-day total remaining": "7日分の合計残量",
+    "30-day total remaining": "30日分の合計残量",
+    "Does not refresh": "更新されません"
   }
 }

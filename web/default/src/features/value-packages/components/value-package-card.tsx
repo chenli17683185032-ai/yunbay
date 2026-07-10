@@ -40,21 +40,20 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import {
-  getValuePackageTotalLimitLabelKey,
   shouldExposeValuePackage7dPeriodLimit,
   VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY,
   VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY,
 } from '@/features/subscriptions/lib/value-package-limit-labels'
-import { formatValuePackageResetLine } from '../lib/reset-time'
+import { getValuePackagePeriodLimits } from '../lib/period-limits'
 import {
   getPackageCardState,
   getPackageLevelLabel,
   type ValuePackageCardStateKind,
 } from '../lib/rules'
 import type { ValuePackagePlan, ValuePackageState } from '../types'
+import { ValuePackagePeriodList } from './value-package-period-list'
 
 interface ValuePackageCardProps {
   plan: ValuePackagePlan
@@ -92,95 +91,6 @@ function formatLimitAmount(amount: number, t: (key: string) => string): string {
   }
 
   return new Intl.NumberFormat().format(amount)
-}
-
-function clampPercent(percent: number): number {
-  if (!Number.isFinite(percent)) {
-    return 0
-  }
-
-  return Math.min(Math.max(percent, 0), 100)
-}
-
-function formatUsageAmount(amount: number): string {
-  if (!Number.isFinite(amount)) {
-    return '0'
-  }
-
-  return new Intl.NumberFormat().format(Math.max(0, Math.round(amount || 0)))
-}
-
-function getProgressToneClass(percent: number): string {
-  const clampedPercent = clampPercent(percent)
-
-  if (clampedPercent >= 90) {
-    return '[&_[data-slot=progress-indicator]]:bg-destructive'
-  }
-
-  if (clampedPercent >= 70) {
-    return '[&_[data-slot=progress-indicator]]:bg-amber-500'
-  }
-
-  return '[&_[data-slot=progress-indicator]]:bg-primary'
-}
-
-function LimitProgressRow({
-  label,
-  used,
-  limit,
-  percent,
-  resetSeconds,
-  limited,
-  showReset = false,
-}: {
-  label: string
-  used: number
-  limit: number
-  percent: number
-  resetSeconds?: number
-  limited?: boolean
-  showReset?: boolean
-}) {
-  const { t } = useTranslation()
-
-  if (!Number.isFinite(limit) || limit <= 0) {
-    return null
-  }
-
-  const progressPercent = clampPercent(percent)
-  const resetLine = showReset
-    ? formatValuePackageResetLine({
-        limit,
-        resetSeconds,
-        limited,
-        t,
-      })
-    : null
-
-  return (
-    <div className='flex flex-col gap-1.5'>
-      <div className='flex items-center justify-between gap-3 text-xs'>
-        <span className='text-muted-foreground font-medium'>{label}</span>
-        <span className='text-muted-foreground tabular-nums'>
-          {formatUsageAmount(used)} / {formatUsageAmount(limit)}
-        </span>
-      </div>
-      <Progress
-        value={progressPercent}
-        className={cn('h-1.5', getProgressToneClass(progressPercent))}
-      />
-      {resetLine ? (
-        <div
-          className={cn(
-            'text-muted-foreground text-[11px] leading-snug',
-            limited ? 'text-destructive font-medium' : null
-          )}
-        >
-          {resetLine}
-        </div>
-      ) : null}
-    </div>
-  )
 }
 
 function getPlanDurationLabel(
@@ -289,11 +199,7 @@ export function ValuePackageCard({
     plan.ldxp_product_amount || plan.price_amount || 0
   )
   const usage = state?.subscription?.plan_id === plan.id ? state.usage : null
-  const hasUsageProgress =
-    usage &&
-    (usage.total_limit > 0 ||
-      usage.limit_5h > 0 ||
-      (show7dPeriodLimit && usage.limit_7d > 0))
+  const usagePeriods = getValuePackagePeriodLimits(usage, plan.package_type)
   const exhaustedMessage =
     usage?.exhausted_message ||
     '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
@@ -439,39 +345,9 @@ export function ValuePackageCard({
           ) : null}
         </div>
 
-        {hasUsageProgress ? (
-          <div className='flex flex-col gap-3 rounded-lg border p-3'>
-            <LimitProgressRow
-              label={t(
-                getValuePackageTotalLimitLabelKey(plan.package_type) ||
-                  'Package total limit'
-              )}
-              used={usage.total_used}
-              limit={usage.total_limit}
-              percent={usage.total_percent}
-            />
-            <LimitProgressRow
-              label={t('5-hour limit')}
-              used={usage.used_5h}
-              limit={usage.limit_5h}
-              percent={usage.percent_5h}
-              resetSeconds={usage.reset_seconds_5h}
-              limited={usage.limited_5h}
-              showReset
-            />
-            {show7dPeriodLimit && usage.limit_7d > 0 ? (
-              <LimitProgressRow
-                label={t(VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY)}
-                used={usage.used_7d}
-                limit={usage.limit_7d}
-                percent={usage.percent_7d}
-                resetSeconds={usage.reset_seconds_7d}
-                limited={usage.limited_7d}
-                showReset
-              />
-            ) : null}
-          </div>
-        ) : null}
+        <div className='rounded-lg border p-3'>
+          <ValuePackagePeriodList periods={usagePeriods} />
+        </div>
 
         <Separator />
 
