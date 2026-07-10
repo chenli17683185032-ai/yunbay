@@ -350,6 +350,7 @@ func seedValuePackageControllerPlan(t *testing.T, packageType string, packageLev
 		DurationValue:         1,
 		Enabled:               true,
 		SortOrder:             10,
+		TotalAmount:           10000,
 		PlanKind:              model.SubscriptionPlanKindValuePackage,
 		PackageType:           packageType,
 		PackageLevel:          packageLevel,
@@ -386,6 +387,7 @@ func validAdminValuePackagePlanForTest(packageType string) model.SubscriptionPla
 		DurationUnit:          model.SubscriptionDurationDay,
 		DurationValue:         1,
 		Enabled:               true,
+		TotalAmount:           10000,
 		PlanKind:              model.SubscriptionPlanKindValuePackage,
 		PackageType:           packageType,
 		PackageLevel:          level,
@@ -1131,6 +1133,81 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageValidationCases(t 
 			body := decodeTestResponse(t, rec)
 			require.Equal(t, false, body["success"], rec.Body.String())
 			assert.Contains(t, body["message"], tt.message)
+		})
+	}
+}
+
+func TestNormalizeAndValidateSubscriptionPlanRequestValidatesValuePackageTotals(t *testing.T) {
+	tests := []struct {
+		name    string
+		plan    model.SubscriptionPlan
+		message string
+	}{
+		{
+			name: "value package zero total",
+			plan: func() model.SubscriptionPlan {
+				plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+				plan.TotalAmount = 0
+				return plan
+			}(),
+			message: "超值套餐总额度必须大于0",
+		},
+		{
+			name: "value package negative total",
+			plan: func() model.SubscriptionPlan {
+				plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+				plan.TotalAmount = -1
+				return plan
+			}(),
+			message: "超值套餐总额度必须大于0",
+		},
+		{
+			name: "month stage exceeds total",
+			plan: func() model.SubscriptionPlan {
+				plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeMonth)
+				plan.TotalAmount = 999
+				plan.Limit7dAmount = 1000
+				return plan
+			}(),
+			message: "7天阶段额度不能大于30天总额度",
+		},
+		{
+			name: "month stage equals total",
+			plan: func() model.SubscriptionPlan {
+				plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeMonth)
+				plan.TotalAmount = 1000
+				plan.Limit7dAmount = 1000
+				return plan
+			}(),
+		},
+		{
+			name: "day stale stage remains invalid",
+			plan: func() model.SubscriptionPlan {
+				plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeDay)
+				plan.Limit7dAmount = 1
+				return plan
+			}(),
+			message: "日卡和周卡不支持7天阶段限额",
+		},
+		{
+			name: "week stale stage remains invalid",
+			plan: func() model.SubscriptionPlan {
+				plan := validAdminValuePackagePlanForTest(model.ValuePackageTypeWeek)
+				plan.Limit7dAmount = 1
+				return plan
+			}(),
+			message: "日卡和周卡不支持7天阶段限额",
+		},
+		{
+			name: "ordinary subscription zero total remains valid",
+			plan: model.SubscriptionPlan{PlanKind: model.SubscriptionPlanKindSubscription, TotalAmount: 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := tt.plan
+			require.Equal(t, tt.message, normalizeAndValidateSubscriptionPlanRequest(&plan))
 		})
 	}
 }

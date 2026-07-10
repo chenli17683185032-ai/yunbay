@@ -16,15 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getValuePackageDuration } from '../constants'
 import type { SubscriptionPlan } from '../types'
 import {
   formValuesToPlanPayload,
+  getPlanFormSchema,
   planToFormValues,
   PLAN_FORM_DEFAULTS,
 } from './plan-form'
+
+const t = ((key: string) => key) as TFunction
 
 test('value package durations use fixed day-based validity windows', () => {
   assert.deepEqual(getValuePackageDuration('week'), {
@@ -37,6 +41,81 @@ test('value package durations use fixed day-based validity windows', () => {
     duration_value: 30,
     custom_seconds: 0,
   })
+})
+
+test('value package plan schema requires positive total quota', () => {
+  const result = getPlanFormSchema(t).safeParse({
+    ...PLAN_FORM_DEFAULTS,
+    title: '日卡',
+    plan_kind: 'value_package',
+    package_type: 'day',
+    total_amount: 0,
+  })
+
+  assert.equal(result.success, false)
+  if (result.success)
+    throw new Error('expected zero value package total to fail')
+  assert.deepEqual(result.error.issues[0]?.path, ['total_amount'])
+  assert.equal(
+    result.error.issues[0]?.message,
+    'Value package total quota must be greater than 0'
+  )
+})
+
+test('month value package stage quota cannot exceed total quota', () => {
+  const result = getPlanFormSchema(t).safeParse({
+    ...PLAN_FORM_DEFAULTS,
+    title: '月卡',
+    plan_kind: 'value_package',
+    package_type: 'month',
+    total_amount: 100,
+    limit_7d_amount: 101,
+  })
+
+  assert.equal(result.success, false)
+  if (result.success)
+    throw new Error('expected oversized month stage quota to fail')
+  assert.deepEqual(result.error.issues[0]?.path, ['limit_7d_amount'])
+  assert.equal(
+    result.error.issues[0]?.message,
+    '7-day stage quota cannot exceed total quota'
+  )
+})
+
+test('plan schema permits equal month quotas and ignores hidden stages for day and week', () => {
+  const schema = getPlanFormSchema(t)
+  const month = schema.safeParse({
+    ...PLAN_FORM_DEFAULTS,
+    title: '月卡',
+    plan_kind: 'value_package',
+    package_type: 'month',
+    total_amount: 100,
+    limit_7d_amount: 100,
+  })
+  assert.equal(month.success, true)
+
+  for (const packageType of ['day', 'week'] as const) {
+    const result = schema.safeParse({
+      ...PLAN_FORM_DEFAULTS,
+      title: `${packageType} card`,
+      plan_kind: 'value_package',
+      package_type: packageType,
+      total_amount: 100,
+      limit_7d_amount: 101,
+    })
+    assert.equal(result.success, true)
+  }
+})
+
+test('ordinary subscription plan schema still permits zero total quota', () => {
+  const result = getPlanFormSchema(t).safeParse({
+    ...PLAN_FORM_DEFAULTS,
+    title: '普通订阅',
+    plan_kind: 'subscription',
+    total_amount: 0,
+  })
+
+  assert.equal(result.success, true)
 })
 
 test('value package limit fields convert dollars to quota payload', () => {

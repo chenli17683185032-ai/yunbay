@@ -34,10 +34,10 @@ const VALUE_PACKAGE_TOTAL_LIMIT_DESCRIPTION_KEYS: Record<
   ValuePackageType,
   string
 > = {
-  day: 'Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.',
-  week: 'Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.',
+  day: 'Day cards can use this total quota from activation time until the 1-day expiration. The total quota must be greater than 0.',
+  week: 'Week cards can use this total quota from activation time until the 7-day expiration. The total quota must be greater than 0.',
   month:
-    'Month cards can use this total quota from activation time until the 30-day expiration. 0 means unlimited total quota.',
+    'Month cards can use this total quota from activation time until the 30-day expiration. The total quota must be greater than 0.',
 }
 
 export function getValuePackageTotalLimitLabelKey(

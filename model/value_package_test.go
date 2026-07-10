@@ -259,8 +259,15 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3004, UserGroupTiyan)
 	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.TotalAmount = 22000
+	require.NoError(t, DB.Save(&month).Error)
 	now := common.GetTimestamp()
 	existing := createActiveValuePackageSub(t, user.Id, month, now-100, now+20*86400)
+	existing.AmountUsed = 600
+	require.NoError(t, DB.Save(&existing).Error)
+	originalEnd := existing.EndTime
+	originalTotal := existing.AmountTotal
+	originalUsed := existing.AmountUsed
 	activated, err := ActivateValuePackage(user.Id, existing.Id)
 	require.NoError(t, err)
 	require.True(t, activated.Preference.Enabled)
@@ -271,7 +278,14 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 
 	require.NoError(t, err)
 	require.Equal(t, existing.Id, completed.Id)
-	require.GreaterOrEqual(t, completed.EndTime, existing.EndTime+29*86400)
+	require.Equal(t, originalEnd+30*valuePackageDaySeconds, completed.EndTime)
+	require.Equal(t, originalTotal+month.TotalAmount, completed.AmountTotal)
+	require.Equal(t, originalUsed, completed.AmountUsed)
+	var reloadedSub UserSubscription
+	require.NoError(t, DB.First(&reloadedSub, existing.Id).Error)
+	require.Equal(t, completed.EndTime, reloadedSub.EndTime)
+	require.Equal(t, completed.AmountTotal, reloadedSub.AmountTotal)
+	require.Equal(t, originalUsed, reloadedSub.AmountUsed)
 	var reloaded User
 	require.NoError(t, DB.First(&reloaded, user.Id).Error)
 	require.Equal(t, UserGroupTiyan, reloaded.Group)
@@ -283,6 +297,367 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 	require.Equal(t, completed.Id, state.Subscription.Id)
 	require.NotNil(t, state.Plan)
 	require.Equal(t, month.Id, state.Plan.Id)
+}
+
+func TestCreateValuePackageSubscriptionFromPlanTxExtendsTimeAndTotalWithoutChangingUsed(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3007, UserGroupTiyan)
+	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	week.TotalAmount = 4500
+	require.NoError(t, DB.Save(&week).Error)
+	now := common.GetTimestamp()
+	existing := createActiveValuePackageSub(t, user.Id, week, now-100, now+3*valuePackageDaySeconds)
+	existing.AmountUsed = 700
+	require.NoError(t, DB.Save(&existing).Error)
+
+	var completed *UserSubscription
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		completed, createErr = CreateValuePackageSubscriptionFromPlanTx(tx, user.Id, &week, "test-renewal")
+		return createErr
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+	require.Equal(t, existing.Id, completed.Id)
+	require.Equal(t, existing.EndTime+7*valuePackageDaySeconds, completed.EndTime)
+	require.Equal(t, existing.AmountTotal+week.TotalAmount, completed.AmountTotal)
+	require.Equal(t, existing.AmountUsed, completed.AmountUsed)
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+	require.Equal(t, completed.EndTime, reloaded.EndTime)
+	require.Equal(t, completed.AmountTotal, reloaded.AmountTotal)
+	require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+}
+
+func TestCreateValuePackageSubscriptionFromPlanTxSnapshotsTotalForNewPurchase(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3008, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 2400
+	require.NoError(t, DB.Save(&day).Error)
+
+	var completed *UserSubscription
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var createErr error
+		completed, createErr = CreateValuePackageSubscriptionFromPlanTx(tx, user.Id, &day, "test-new-purchase")
+		return createErr
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+	require.Equal(t, day.TotalAmount, completed.AmountTotal)
+	require.Zero(t, completed.AmountUsed)
+}
+
+func TestCreateValuePackageSubscriptionFromPlanTxLocksUserBeforePurchaseIntent(t *testing.T) {
+	setupValuePackageTestDB(t)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 2400
+	require.NoError(t, DB.Save(&day).Error)
+
+	queryOrder := make([]string, 0, 4)
+	userLockSeen := false
+	callbackName := "test:record_value_package_create_query_order:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil {
+			return
+		}
+		switch tx.Statement.Schema.Name {
+		case "User":
+			queryOrder = append(queryOrder, "User")
+			locking, ok := tx.Statement.Clauses["FOR"].Expression.(clause.Locking)
+			userLockSeen = ok && locking.Strength == "UPDATE"
+		case "UserSubscription":
+			queryOrder = append(queryOrder, "UserSubscription")
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, DB.Callback().Query().Remove(callbackName))
+	})
+
+	tests := []struct {
+		name        string
+		userID      int
+		hasExisting bool
+	}{
+		{name: "create", userID: 3013},
+		{name: "extend", userID: 3014, hasExisting: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user := createValuePackageUser(t, tt.userID, UserGroupTiyan)
+			if tt.hasExisting {
+				now := common.GetTimestamp()
+				createActiveValuePackageSub(t, user.Id, day, now-100, now+valuePackageDaySeconds)
+			}
+			queryOrder = queryOrder[:0]
+			userLockSeen = false
+
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				_, createErr := CreateValuePackageSubscriptionFromPlanTx(tx, user.Id, &day, "test-lock-order")
+				return createErr
+			})
+
+			require.NoError(t, err)
+			require.NotEmpty(t, queryOrder)
+			require.Equal(t, "User", queryOrder[0], "user row lock must be the first business-state query")
+			require.True(t, userLockSeen, "user query must carry FOR UPDATE")
+			firstSubscriptionQuery := -1
+			for i, schemaName := range queryOrder {
+				if schemaName == "UserSubscription" {
+					firstSubscriptionQuery = i
+					break
+				}
+			}
+			require.Greater(t, firstSubscriptionQuery, 0, "purchase intent must query subscriptions after the user lock")
+		})
+	}
+}
+
+func TestExtendValuePackageSubscriptionTxRejectsNonPositiveTotalWithoutWriting(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3009, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	now := common.GetTimestamp()
+	existing := createActiveValuePackageSub(t, user.Id, day, now-100, now+valuePackageDaySeconds)
+	existing.AmountTotal = 2400
+	existing.AmountUsed = 600
+	require.NoError(t, DB.Save(&existing).Error)
+
+	for _, total := range []int64{0, -1} {
+		t.Run(fmt.Sprintf("total_%d", total), func(t *testing.T) {
+			invalidPlan := day
+			invalidPlan.TotalAmount = total
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				_, extendErr := extendValuePackageSubscriptionTx(tx, existing.Id, &invalidPlan, now, now+valuePackageDaySeconds)
+				return extendErr
+			})
+
+			require.Error(t, err)
+			var reloaded UserSubscription
+			require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+			require.Equal(t, existing.EndTime, reloaded.EndTime)
+			require.Equal(t, existing.AmountTotal, reloaded.AmountTotal)
+			require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+		})
+	}
+}
+
+func TestExtendValuePackageSubscriptionTxSaveFailureRollsBackTimeAndTotal(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3010, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 2400
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	existing := createActiveValuePackageSub(t, user.Id, day, now-100, now+valuePackageDaySeconds)
+	existing.AmountUsed = 600
+	require.NoError(t, DB.Save(&existing).Error)
+
+	forcedErr := errors.New("forced value package extension save failure")
+	callbackName := "test:force_value_package_extension_save_failure:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "UserSubscription" {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, DB.Callback().Update().Remove(callbackName))
+	})
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		_, extendErr := extendValuePackageSubscriptionTx(tx, existing.Id, &day, now, now+valuePackageDaySeconds)
+		return extendErr
+	})
+
+	require.ErrorIs(t, err, forcedErr)
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+	require.Equal(t, existing.EndTime, reloaded.EndTime)
+	require.Equal(t, existing.AmountTotal, reloaded.AmountTotal)
+	require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+}
+
+func TestExtendValuePackageSubscriptionTxRejectsInactiveSubscription(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3015, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 2400
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+
+	for _, status := range []string{UserSubscriptionStatusCovered, UserSubscriptionStatusCancelled} {
+		t.Run(status, func(t *testing.T) {
+			existing := UserSubscription{
+				UserId:      user.Id,
+				PlanId:      day.Id,
+				AmountTotal: 1000,
+				AmountUsed:  250,
+				StartTime:   now - 100,
+				EndTime:     now + valuePackageDaySeconds,
+				Status:      status,
+				Source:      "test-inactive-extension",
+			}
+			require.NoError(t, DB.Create(&existing).Error)
+
+			var extended *UserSubscription
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				var extendErr error
+				extended, extendErr = extendValuePackageSubscriptionTx(tx, existing.Id, &day, now, now+valuePackageDaySeconds)
+				return extendErr
+			})
+
+			require.EqualError(t, err, "value package subscription is not active")
+			require.Nil(t, extended)
+			var reloaded UserSubscription
+			require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+			require.Equal(t, existing.EndTime, reloaded.EndTime)
+			require.Equal(t, existing.AmountTotal, reloaded.AmountTotal)
+			require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+			require.Equal(t, status, reloaded.Status)
+		})
+	}
+}
+
+func TestValuePackageExtendUsesMaxExistingEndAndNow(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3011, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.TotalAmount = 2400
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	const duration = valuePackageDaySeconds
+
+	tests := []struct {
+		name        string
+		existingEnd int64
+		wantEnd     int64
+	}{
+		{name: "expired", existingEnd: now - 10, wantEnd: now + duration},
+		{name: "ends exactly now", existingEnd: now, wantEnd: now + duration},
+		{name: "future", existingEnd: now + 10, wantEnd: now + 10 + duration},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			existing := UserSubscription{
+				UserId:      user.Id,
+				PlanId:      day.Id,
+				AmountTotal: 1000,
+				AmountUsed:  250,
+				StartTime:   now - 100,
+				EndTime:     tt.existingEnd,
+				Status:      UserSubscriptionStatusActive,
+				Source:      "test-extension-base",
+			}
+			require.NoError(t, DB.Create(&existing).Error)
+
+			var extended *UserSubscription
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				var extendErr error
+				extended, extendErr = extendValuePackageSubscriptionTx(tx, existing.Id, &day, now, now+duration)
+				return extendErr
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, extended)
+			require.Equal(t, tt.wantEnd, extended.EndTime)
+			require.Equal(t, existing.AmountTotal+day.TotalAmount, extended.AmountTotal)
+			require.Equal(t, existing.AmountUsed, extended.AmountUsed)
+			var reloaded UserSubscription
+			require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+			require.Equal(t, tt.wantEnd, reloaded.EndTime)
+			require.Equal(t, existing.AmountTotal+day.TotalAmount, reloaded.AmountTotal)
+			require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+		})
+	}
+}
+
+func TestCompleteValuePackageOrderExtensionRollsBackAfterTopUpFailure(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3012, UserGroupTiyan)
+	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.TotalAmount = 22000
+	require.NoError(t, DB.Save(&month).Error)
+	now := common.GetTimestamp()
+	existing := createActiveValuePackageSub(t, user.Id, month, now-100, now+20*valuePackageDaySeconds)
+	existing.AmountUsed = 600
+	require.NoError(t, DB.Save(&existing).Error)
+	preference, err := ActivateValuePackage(user.Id, existing.Id)
+	require.NoError(t, err)
+	originalPreference := preference.Preference
+	order := SubscriptionOrder{
+		UserId:          user.Id,
+		PlanId:          month.Id,
+		Money:           month.PriceAmount,
+		TradeNo:         "vp-extension-rollback-order",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      now,
+	}
+	require.NoError(t, DB.Create(&order).Error)
+
+	forcedErr := errors.New("forced topup creation failure after value package extension")
+	callbackSuffix := strings.ReplaceAll(t.Name(), "/", "_")
+	updateCallbackName := "test:count_value_package_extension_update:" + callbackSuffix
+	createCallbackName := "test:fail_value_package_extension_topup:" + callbackSuffix
+	callbackOrder := make([]string, 0, 2)
+	subscriptionUpdateCount := 0
+	topUpFailureCount := 0
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(updateCallbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "UserSubscription" {
+			subscriptionUpdateCount++
+			callbackOrder = append(callbackOrder, "subscription_update")
+		}
+	}))
+	require.NoError(t, DB.Callback().Create().Before("gorm:create").Register(createCallbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Name != "TopUp" {
+			return
+		}
+		topUp, ok := tx.Statement.Dest.(*TopUp)
+		if !ok || topUp.TradeNo != order.TradeNo {
+			return
+		}
+		topUpFailureCount++
+		callbackOrder = append(callbackOrder, "topup_create_failure")
+		tx.AddError(forcedErr)
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, DB.Callback().Update().Remove(updateCallbackName))
+		require.NoError(t, DB.Callback().Create().Remove(createCallbackName))
+	})
+
+	completed, err := CompleteValuePackageOrder(order.TradeNo, "rollback-payload", PaymentProviderLDXP, PaymentMethodLDXP, true)
+
+	require.ErrorIs(t, err, forcedErr)
+	require.Nil(t, completed)
+	require.Equal(t, 1, subscriptionUpdateCount)
+	require.Equal(t, 1, topUpFailureCount)
+	require.Equal(t, []string{"subscription_update", "topup_create_failure"}, callbackOrder)
+
+	var reloadedSub UserSubscription
+	require.NoError(t, DB.First(&reloadedSub, existing.Id).Error)
+	require.Equal(t, existing.EndTime, reloadedSub.EndTime)
+	require.Equal(t, existing.AmountTotal, reloadedSub.AmountTotal)
+	require.Equal(t, existing.AmountUsed, reloadedSub.AmountUsed)
+	var reloadedOrder SubscriptionOrder
+	require.NoError(t, DB.First(&reloadedOrder, order.Id).Error)
+	require.Equal(t, common.TopUpStatusPending, reloadedOrder.Status)
+	require.Equal(t, order.UserSubscriptionId, reloadedOrder.UserSubscriptionId)
+	require.Equal(t, order.CompleteTime, reloadedOrder.CompleteTime)
+	require.Equal(t, order.ProviderPayload, reloadedOrder.ProviderPayload)
+	var reloadedPreference UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&reloadedPreference).Error)
+	require.Equal(t, originalPreference, reloadedPreference)
+	var topUpCount int64
+	require.NoError(t, DB.Model(&TopUp{}).Where("trade_no = ?", order.TradeNo).Count(&topUpCount).Error)
+	require.Zero(t, topUpCount)
+	var commissionCount int64
+	require.NoError(t, DB.Model(&AffiliateCommission{}).Count(&commissionCount).Error)
+	require.Zero(t, commissionCount)
 }
 
 func TestCompleteValuePackagePurchaseCoversLowerPlanAndCountsVIPTopup(t *testing.T) {
@@ -1073,6 +1448,8 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3101, UserGroupTiyan)
 	month := createValuePackagePlan(t, ValuePackageTypeMonth, ValuePackageLevelMonth, 30, 29.9)
+	month.TotalAmount = 22000
+	require.NoError(t, DB.Save(&month).Error)
 	now := common.GetTimestamp()
 	order := SubscriptionOrder{UserId: user.Id, PlanId: month.Id, Money: month.PriceAmount, TradeNo: "vp-idempotent-order", PaymentMethod: PaymentMethodLDXP, PaymentProvider: PaymentProviderLDXP, Status: common.TopUpStatusPending, CreateTime: now}
 	require.NoError(t, DB.Create(&order).Error)
@@ -1084,6 +1461,13 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	require.NoError(t, err)
 	require.True(t, activated.Preference.Enabled)
 	require.Equal(t, first.Id, activated.Preference.ActiveUserSubscriptionId)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", first.Id).Update("amount_used", 321).Error)
+	var firstPersisted UserSubscription
+	require.NoError(t, DB.First(&firstPersisted, first.Id).Error)
+	firstEnd := firstPersisted.EndTime
+	firstTotal := firstPersisted.AmountTotal
+	firstUsed := firstPersisted.AmountUsed
+	require.Equal(t, month.TotalAmount, firstTotal)
 
 	other := UserSubscription{UserId: user.Id, PlanId: month.Id, AmountTotal: month.TotalAmount, StartTime: now + 10, EndTime: first.EndTime + 90*86400, Status: UserSubscriptionStatusActive, Source: "test-other"}
 	require.NoError(t, DB.Create(&other).Error)
@@ -1093,6 +1477,14 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	require.NotNil(t, retry)
 	require.Equal(t, first.Id, retry.Id)
 	require.NotEqual(t, other.Id, retry.Id)
+	require.Equal(t, firstEnd, retry.EndTime)
+	require.Equal(t, firstTotal, retry.AmountTotal)
+	require.Equal(t, firstUsed, retry.AmountUsed)
+	var reloadedSub UserSubscription
+	require.NoError(t, DB.First(&reloadedSub, first.Id).Error)
+	require.Equal(t, firstEnd, reloadedSub.EndTime)
+	require.Equal(t, firstTotal, reloadedSub.AmountTotal)
+	require.Equal(t, firstUsed, reloadedSub.AmountUsed)
 
 	var reloadedOrder SubscriptionOrder
 	require.NoError(t, DB.Where("trade_no = ?", order.TradeNo).First(&reloadedOrder).Error)

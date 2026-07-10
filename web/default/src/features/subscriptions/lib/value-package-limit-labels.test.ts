@@ -30,6 +30,9 @@ import {
 const localeDir = join(import.meta.dirname, '../../../i18n/locales')
 const localeNames = ['en', 'zh', 'fr', 'ru', 'ja', 'vi'] as const
 const staleLocaleKeys = [
+  'Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.',
+  'Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.',
+  'Month cards can use this total quota from activation time until the 30-day expiration. 0 means unlimited total quota.',
   [
     'This will consume 1 reset count and clear your current package',
     "'s ",
@@ -50,6 +53,11 @@ const staleLocaleKeys = [
   ].join(''),
   ['5-hour limit and 7-day limit ', 'protection'].join(''),
 ]
+const requiredTotalDescriptionKeys = [
+  'Day cards can use this total quota from activation time until the 1-day expiration. The total quota must be greater than 0.',
+  'Week cards can use this total quota from activation time until the 7-day expiration. The total quota must be greater than 0.',
+  'Month cards can use this total quota from activation time until the 30-day expiration. The total quota must be greater than 0.',
+]
 
 test('value package total limit labels describe the full valid period', () => {
   assert.equal(getValuePackageTotalLimitLabelKey('day'), '1-day total limit')
@@ -60,7 +68,7 @@ test('value package total limit labels describe the full valid period', () => {
 test('week card total limit description uses the 7-day activation window wording', () => {
   assert.equal(
     getValuePackageTotalLimitDescriptionKey('week'),
-    'Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.'
+    'Week cards can use this total quota from activation time until the 7-day expiration. The total quota must be greater than 0.'
   )
 })
 
@@ -84,6 +92,14 @@ test('value package limit locales do not keep stale rolling-window-era copy', ()
         undefined,
         `${localeName}: ${staleKey}`
       )
+    }
+    for (const requiredKey of requiredTotalDescriptionKeys) {
+      assert.equal(
+        typeof translation[requiredKey],
+        'string',
+        `${localeName}: ${requiredKey}`
+      )
+      assert.ok(translation[requiredKey], `${localeName}: ${requiredKey}`)
     }
   }
 })

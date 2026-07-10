@@ -813,6 +813,9 @@ func CreateValuePackageSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Sub
 	if !plan.Enabled {
 		return nil, errors.New("套餐未启用")
 	}
+	if err := ensureExistingUserForUpdateTx(tx, userId); err != nil {
+		return nil, err
+	}
 	intent, err := checkValuePackagePurchaseIntentTx(tx, userId, plan, true)
 	if err != nil {
 		return nil, err
@@ -826,21 +829,11 @@ func CreateValuePackageSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Sub
 	var completed *UserSubscription
 	switch intent.Action {
 	case ValuePackagePurchaseActionExtend:
-		var existing UserSubscription
-		if err := withUpdateLock(tx).Where("id = ?", intent.CurrentSubscription.Id).First(&existing).Error; err != nil {
+		existing, err := extendValuePackageSubscriptionTx(tx, intent.CurrentSubscription.Id, plan, nowUnix, endUnix)
+		if err != nil {
 			return nil, err
 		}
-		base := existing.EndTime
-		if base < nowUnix {
-			base = nowUnix
-		}
-		duration := endUnix - nowUnix
-		existing.EndTime = base + duration
-		existing.UpdatedAt = common.GetTimestamp()
-		if err := tx.Save(&existing).Error; err != nil {
-			return nil, err
-		}
-		completed = &existing
+		completed = existing
 	case ValuePackagePurchaseActionUpgrade:
 		if intent.CurrentSubscription != nil {
 			if err := tx.Model(&UserSubscription{}).Where("id = ?", intent.CurrentSubscription.Id).Updates(map[string]interface{}{
@@ -884,6 +877,41 @@ func CreateValuePackageSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Sub
 		return nil, err
 	}
 	return completed, nil
+}
+
+func extendValuePackageSubscriptionTx(tx *gorm.DB, subscriptionID int, plan *SubscriptionPlan, nowUnix int64, purchasedEndUnix int64) (*UserSubscription, error) {
+	if tx == nil {
+		return nil, errors.New("tx is nil")
+	}
+	if subscriptionID <= 0 {
+		return nil, errors.New("invalid subscription id")
+	}
+	if plan == nil || !plan.IsValuePackage() || plan.TotalAmount <= 0 {
+		return nil, errors.New("invalid value package plan total")
+	}
+	duration := purchasedEndUnix - nowUnix
+	if nowUnix <= 0 || duration <= 0 {
+		return nil, errors.New("invalid value package purchase duration")
+	}
+
+	var existing UserSubscription
+	if err := withUpdateLock(tx).Where("id = ?", subscriptionID).First(&existing).Error; err != nil {
+		return nil, err
+	}
+	if existing.Status != UserSubscriptionStatusActive {
+		return nil, errors.New("value package subscription is not active")
+	}
+	base := existing.EndTime
+	if base < nowUnix {
+		base = nowUnix
+	}
+	existing.EndTime = base + duration
+	existing.AmountTotal += plan.TotalAmount
+	existing.UpdatedAt = common.GetTimestamp()
+	if err := tx.Save(&existing).Error; err != nil {
+		return nil, err
+	}
+	return &existing, nil
 }
 
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
@@ -2283,7 +2311,7 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		if intent.RequiresConfirmation {
 			return errors.New("购买高级套餐需要确认覆盖当前低级套餐")
 		}
-		nowUnix := GetDBTimestamp()
+		nowUnix := getDBTimestampTx(tx)
 		start := time.Unix(nowUnix, 0)
 		endUnix, err := calcPlanEndTime(start, plan)
 		if err != nil {
@@ -2291,20 +2319,11 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		}
 		switch intent.Action {
 		case ValuePackagePurchaseActionExtend:
-			var existing UserSubscription
-			if err := withUpdateLock(tx).Where("id = ?", intent.CurrentSubscription.Id).First(&existing).Error; err != nil {
+			existing, err := extendValuePackageSubscriptionTx(tx, intent.CurrentSubscription.Id, plan, nowUnix, endUnix)
+			if err != nil {
 				return err
 			}
-			base := existing.EndTime
-			if base < nowUnix {
-				base = nowUnix
-			}
-			duration := endUnix - nowUnix
-			existing.EndTime = base + duration
-			if err := tx.Save(&existing).Error; err != nil {
-				return err
-			}
-			completed = &existing
+			completed = existing
 		case ValuePackagePurchaseActionUpgrade:
 			if intent.CurrentSubscription != nil {
 				if err := tx.Model(&UserSubscription{}).Where("id = ?", intent.CurrentSubscription.Id).Updates(map[string]interface{}{

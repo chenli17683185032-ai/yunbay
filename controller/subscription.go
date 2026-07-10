@@ -171,6 +171,7 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	plan.LdxpProductUrl = strings.TrimSpace(plan.LdxpProductUrl)
 	plan.LdxpProductName = strings.TrimSpace(plan.LdxpProductName)
 	plan.LdxpProductRef = strings.TrimSpace(plan.LdxpProductRef)
+	requestedTotalAmount := plan.TotalAmount
 	requestedLimit5hAmount := plan.Limit5hAmount
 	requestedLimit7dAmount := plan.Limit7dAmount
 	plan.NormalizeDefaults()
@@ -180,7 +181,13 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 		return "套餐类型无效"
 	}
 	if plan.PlanKind != model.SubscriptionPlanKindValuePackage {
+		if requestedTotalAmount < 0 {
+			return "总额度不能为负数"
+		}
 		return ""
+	}
+	if requestedTotalAmount <= 0 {
+		return "超值套餐总额度必须大于0"
 	}
 
 	plan.UpgradeGroup = ""
@@ -205,6 +212,9 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	}
 	if (plan.PackageType == model.ValuePackageTypeDay || plan.PackageType == model.ValuePackageTypeWeek) && requestedLimit7dAmount != 0 {
 		return "日卡和周卡不支持7天阶段限额"
+	}
+	if plan.PackageType == model.ValuePackageTypeMonth && requestedLimit7dAmount > requestedTotalAmount {
+		return "7天阶段额度不能大于30天总额度"
 	}
 	if plan.PackageType == model.ValuePackageTypeMonth && requestedLimit5hAmount > 0 && requestedLimit7dAmount > 0 && requestedLimit7dAmount < requestedLimit5hAmount {
 		return "7天额度不能小于5小时额度"
@@ -254,10 +264,6 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 	}
 	if req.Plan.MaxPurchasePerUser < 0 {
 		common.ApiErrorMsg(c, "购买上限不能为负数")
-		return
-	}
-	if req.Plan.TotalAmount < 0 {
-		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)
@@ -336,10 +342,6 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 	}
 	if req.Plan.MaxPurchasePerUser < 0 {
 		common.ApiErrorMsg(c, "购买上限不能为负数")
-		return
-	}
-	if req.Plan.TotalAmount < 0 {
-		common.ApiErrorMsg(c, "总额度不能为负数")
 		return
 	}
 	req.Plan.UpgradeGroup = strings.TrimSpace(req.Plan.UpgradeGroup)

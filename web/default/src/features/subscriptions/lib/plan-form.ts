@@ -24,7 +24,7 @@ import type { SubscriptionPlan, PlanPayload } from '../types'
 import { shouldExposeValuePackage7dPeriodLimit } from './value-package-limit-labels'
 
 export function getPlanFormSchema(t: TFunction) {
-  return z.object({
+  const schema = z.object({
     title: z.string().min(1, t('Please enter plan title')),
     subtitle: z.string().optional(),
     price_amount: z.coerce.number().min(0, t('Please enter amount')),
@@ -63,6 +63,28 @@ export function getPlanFormSchema(t: TFunction) {
     ldxp_product_amount: z.coerce.number().min(0).optional(),
     ldxp_product_ref: z.string().optional(),
     ldxp_session_ttl_seconds: z.coerce.number().min(0).optional(),
+  })
+
+  return schema.superRefine((values, ctx) => {
+    if (values.plan_kind !== 'value_package') return
+
+    if (values.total_amount <= 0) {
+      ctx.addIssue({
+        code: 'custom',
+        message: t('Value package total quota must be greater than 0'),
+        path: ['total_amount'],
+      })
+    }
+    if (
+      values.package_type === 'month' &&
+      (values.limit_7d_amount ?? 0) > values.total_amount
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: t('7-day stage quota cannot exceed total quota'),
+        path: ['limit_7d_amount'],
+      })
+    }
   })
 }
 
