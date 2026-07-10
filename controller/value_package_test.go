@@ -553,6 +553,105 @@ func TestGetValuePackageSelfReturnsCurrentState(t *testing.T) {
 	assert.Equal(t, float64(0), valuePackageUsageNumber(t, usage, "reset_seconds_7d"))
 }
 
+func TestValuePackageStatePeriodLimitsByPackageType(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	now := common.GetTimestamp()
+
+	tests := []struct {
+		name          string
+		packageType   string
+		packageLevel  int
+		amountTotal   int64
+		limit7dAmount int64
+		want          []valuePackagePeriodResponseExpectation
+	}{
+		{
+			name:          "day",
+			packageType:   model.ValuePackageTypeDay,
+			packageLevel:  model.ValuePackageLevelDay,
+			amountTotal:   2400,
+			limit7dAmount: 0,
+			want: []valuePackagePeriodResponseExpectation{
+				{Kind: model.ValuePackagePeriodKindFiveHour, LabelUnit: "hour", LabelValue: 5, Limit: 900, Used: 100, Remaining: 800, Percent: 100.0 / 900 * 100, Refreshes: true},
+				{Kind: model.ValuePackagePeriodKindLifecycle, LabelUnit: "day", LabelValue: 1, Limit: 2400, Used: 600, Remaining: 1800, Percent: 25, Refreshes: false},
+			},
+		},
+		{
+			name:          "week ignores legacy seven day limit",
+			packageType:   model.ValuePackageTypeWeek,
+			packageLevel:  model.ValuePackageLevelWeek,
+			amountTotal:   4500,
+			limit7dAmount: 5500,
+			want: []valuePackagePeriodResponseExpectation{
+				{Kind: model.ValuePackagePeriodKindFiveHour, LabelUnit: "hour", LabelValue: 5, Limit: 900, Used: 100, Remaining: 800, Percent: 100.0 / 900 * 100, Refreshes: true},
+				{Kind: model.ValuePackagePeriodKindLifecycle, LabelUnit: "day", LabelValue: 7, Limit: 4500, Used: 600, Remaining: 3900, Percent: 600.0 / 4500 * 100, Refreshes: false},
+			},
+		},
+		{
+			name:          "month includes seven day stage",
+			packageType:   model.ValuePackageTypeMonth,
+			packageLevel:  model.ValuePackageLevelMonth,
+			amountTotal:   22000,
+			limit7dAmount: 5500,
+			want: []valuePackagePeriodResponseExpectation{
+				{Kind: model.ValuePackagePeriodKindFiveHour, LabelUnit: "hour", LabelValue: 5, Limit: 900, Used: 100, Remaining: 800, Percent: 100.0 / 900 * 100, Refreshes: true},
+				{Kind: model.ValuePackagePeriodKindSevenDayStage, LabelUnit: "day", LabelValue: 7, Limit: 5500, Used: 100, Remaining: 5400, Percent: 100.0 / 5500 * 100, Refreshes: true},
+				{Kind: model.ValuePackagePeriodKindLifecycle, LabelUnit: "day", LabelValue: 30, Limit: 22000, Used: 600, Remaining: 21400, Percent: 600.0 / 22000 * 100, Refreshes: false},
+			},
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			user := createLdxpControllerTestUser(t, fmt.Sprintf("vp_period_state_%d", i))
+			plan := seedValuePackageControllerPlan(t, tt.packageType, tt.packageLevel)
+			require.NoError(t, model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", plan.Id).Updates(map[string]interface{}{
+				"limit_5h_amount": 900,
+				"limit_7d_amount": tt.limit7dAmount,
+			}).Error)
+			model.InvalidateSubscriptionPlanCache(plan.Id)
+			plan.Limit5hAmount = 900
+			plan.Limit7dAmount = tt.limit7dAmount
+			sub := model.UserSubscription{
+				UserId:      user.Id,
+				PlanId:      plan.Id,
+				AmountTotal: tt.amountTotal,
+				AmountUsed:  600,
+				StartTime:   now - 3600,
+				EndTime:     now + 86400,
+				Status:      model.UserSubscriptionStatusActive,
+				Source:      "controller-period-test",
+			}
+			require.NoError(t, model.DB.Create(&sub).Error)
+			require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id}).Error)
+			require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{
+				UserId:             user.Id,
+				UserSubscriptionId: sub.Id,
+				PlanId:             plan.Id,
+				PackageType:        plan.PackageType,
+				ModelGroup:         plan.ModelGroup,
+				RequestId:          fmt.Sprintf("state-period-%d", i),
+				Quota:              100,
+				CreatedAt:          now - 1800,
+			}))
+
+			recorder := valuePackageControllerRequest(GetValuePackageSelf, http.MethodGet, "/value-packages/self", nil, user.Id)
+
+			require.Equal(t, http.StatusOK, recorder.Code)
+			body := decodeTestResponse(t, recorder)
+			require.Equal(t, true, body["success"], recorder.Body.String())
+			data, ok := body["data"].(map[string]interface{})
+			require.True(t, ok)
+			usage, ok := data["usage"].(map[string]interface{})
+			require.True(t, ok)
+			requireValuePackagePeriodResponse(t, decodeValuePackagePeriodResponse(t, usage), tt.want)
+			if tt.packageType == model.ValuePackageTypeWeek {
+				requireValuePackageLegacyWeek7dZero(t, usage)
+			}
+		})
+	}
+}
+
 func TestGetValuePackagePurchaseIntentConfirmedCover(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	user := createLdxpControllerTestUser(t, "vp_intent_user")
@@ -1405,4 +1504,75 @@ func valuePackageUsageNumber(t *testing.T, usage map[string]interface{}, key str
 	value, ok := usage[key].(float64)
 	require.True(t, ok)
 	return value
+}
+
+type valuePackagePeriodResponseExpectation struct {
+	Kind       string
+	LabelUnit  string
+	LabelValue int
+	Limit      int64
+	Used       int64
+	Remaining  int64
+	Percent    float64
+	Refreshes  bool
+}
+
+type valuePackagePeriodResponseDTO struct {
+	Kind       string  `json:"kind"`
+	LabelUnit  string  `json:"label_unit"`
+	LabelValue int     `json:"label_value"`
+	Limit      int64   `json:"limit"`
+	Used       int64   `json:"used"`
+	Remaining  int64   `json:"remaining"`
+	Percent    float64 `json:"percent"`
+	Refreshes  bool    `json:"refreshes"`
+	ResetAt    int64   `json:"reset_at"`
+	Limited    bool    `json:"limited"`
+}
+
+func decodeValuePackagePeriodResponse(t *testing.T, usage map[string]interface{}) []valuePackagePeriodResponseDTO {
+	t.Helper()
+	rawPeriods, exists := usage["period_limits"]
+	require.True(t, exists, "usage JSON must contain period_limits")
+	require.NotNil(t, rawPeriods, "period_limits must be a non-null array")
+	periodArray, ok := rawPeriods.([]interface{})
+	require.True(t, ok, "period_limits must be a JSON array")
+	payload, err := common.Marshal(periodArray)
+	require.NoError(t, err)
+	var periods []valuePackagePeriodResponseDTO
+	require.NoError(t, common.Unmarshal(payload, &periods))
+	return periods
+}
+
+func requireValuePackagePeriodResponse(t *testing.T, got []valuePackagePeriodResponseDTO, want []valuePackagePeriodResponseExpectation) {
+	t.Helper()
+	require.Len(t, got, len(want))
+	for i := range want {
+		require.Equal(t, want[i].Kind, got[i].Kind, "period %d kind", i)
+		require.Equal(t, want[i].LabelUnit, got[i].LabelUnit, "period %d label unit", i)
+		require.Equal(t, want[i].LabelValue, got[i].LabelValue, "period %d label value", i)
+		require.Equal(t, want[i].Limit, got[i].Limit, "period %d limit", i)
+		require.Equal(t, want[i].Used, got[i].Used, "period %d used", i)
+		require.Equal(t, want[i].Remaining, got[i].Remaining, "period %d remaining", i)
+		require.InDelta(t, want[i].Percent, got[i].Percent, 0.000001, "period %d percent", i)
+		require.Equal(t, want[i].Refreshes, got[i].Refreshes, "period %d refreshes", i)
+		require.False(t, got[i].Limited, "period %d limited", i)
+		if want[i].Refreshes {
+			require.Greater(t, got[i].ResetAt, int64(0), "period %d reset at", i)
+		} else {
+			require.Zero(t, got[i].ResetAt, "period %d reset at", i)
+		}
+	}
+}
+
+func requireValuePackageLegacyWeek7dZero(t *testing.T, usage map[string]interface{}) {
+	t.Helper()
+	for _, key := range []string{"used_7d", "limit_7d", "reset_at_7d", "reset_seconds_7d"} {
+		value, exists := usage[key]
+		require.True(t, exists, "week usage JSON must contain %s", key)
+		require.Equal(t, float64(0), value, "week usage JSON %s", key)
+	}
+	limited7d, exists := usage["limited_7d"]
+	require.True(t, exists, "week usage JSON must contain limited_7d")
+	require.Equal(t, false, limited7d, "week usage JSON limited_7d")
 }

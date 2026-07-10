@@ -495,6 +495,10 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 	require.True(t, ok)
 	usage, ok := rawRow["usage"].(map[string]interface{})
 	require.True(t, ok)
+	requireValuePackagePeriodResponse(t, decodeValuePackagePeriodResponse(t, usage), []valuePackagePeriodResponseExpectation{
+		{Kind: model.ValuePackagePeriodKindFiveHour, LabelUnit: "hour", LabelValue: 5, Limit: 500, Used: 50, Remaining: 450, Percent: 10, Refreshes: true},
+		{Kind: model.ValuePackagePeriodKindLifecycle, LabelUnit: "day", LabelValue: 1, Limit: 2000, Used: 350, Remaining: 1650, Percent: 17.5, Refreshes: false},
+	})
 	requireValuePackageUsageResetFields(t, usage)
 	assert.Greater(t, valuePackageUsageNumber(t, usage, "reset_seconds_5h"), float64(0))
 	assert.Equal(t, float64(0), valuePackageUsageNumber(t, usage, "reset_seconds_7d"))
@@ -502,7 +506,55 @@ func TestAdminOrderManagementValuePackageUsageReturnsActiveUsers(t *testing.T) {
 	assert.Equal(t, false, usage["limited_7d"])
 }
 
-func TestAdminValuePackageManagementUsersReturnsRows(t *testing.T) {
+func TestAdminOrderManagementValuePackageUsagePeriodLimitsForWeek(t *testing.T) {
+	setupOrderManagementControllerTestDB(t)
+	now := common.GetTimestamp()
+	user := &model.User{Id: 8894, Username: "vp-admin-week-periods", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, AffCode: "vp-admin-week-periods-aff"}
+	require.NoError(t, model.DB.Create(user).Error)
+	plan := &model.SubscriptionPlan{
+		Title:           "周卡",
+		Enabled:         true,
+		PlanKind:        model.SubscriptionPlanKindValuePackage,
+		PackageType:     model.ValuePackageTypeWeek,
+		PackageLevel:    model.ValuePackageLevelWeek,
+		Currency:        "CNY",
+		DurationUnit:    model.SubscriptionDurationDay,
+		DurationValue:   7,
+		ModelGroup:      "week-card-periods",
+		TotalAmount:     4500,
+		Limit5hAmount:   900,
+		Limit7dAmount:   5500,
+		PriceAmount:     9.9,
+		AllowBalancePay: nil,
+	}
+	require.NoError(t, model.DB.Create(plan).Error)
+	sub := &model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 4500, AmountUsed: 600, StartTime: now - 3600, EndTime: now + 86400, Status: model.UserSubscriptionStatusActive, Source: "test"}
+	require.NoError(t, model.DB.Create(sub).Error)
+	require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id}).Error)
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "admin-week-periods-5h", Quota: 100, CreatedAt: now - 1800}))
+
+	ctx, recorder := newOrderManagementContext(http.MethodGet, "/api/order-management/admin/value-package-usage", "")
+	AdminOrderManagementValuePackageUsage(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response map[string]interface{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, true, response["success"], recorder.Body.String())
+	data, ok := response["data"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, data, 1)
+	row, ok := data[0].(map[string]interface{})
+	require.True(t, ok)
+	usage, ok := row["usage"].(map[string]interface{})
+	require.True(t, ok)
+	requireValuePackagePeriodResponse(t, decodeValuePackagePeriodResponse(t, usage), []valuePackagePeriodResponseExpectation{
+		{Kind: model.ValuePackagePeriodKindFiveHour, LabelUnit: "hour", LabelValue: 5, Limit: 900, Used: 100, Remaining: 800, Percent: 100.0 / 900 * 100, Refreshes: true},
+		{Kind: model.ValuePackagePeriodKindLifecycle, LabelUnit: "day", LabelValue: 7, Limit: 4500, Used: 600, Remaining: 3900, Percent: 600.0 / 4500 * 100, Refreshes: false},
+	})
+	requireValuePackageLegacyWeek7dZero(t, usage)
+}
+
+func TestAdminValuePackageManagementPeriodLimitsReturnsRows(t *testing.T) {
 	setupOrderManagementControllerTestDB(t)
 	now := common.GetTimestamp()
 	user := &model.User{Id: 8893, Username: "vp-management-user", Password: "password123", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, AffCode: "vp-management-aff"}
@@ -537,6 +589,23 @@ func TestAdminValuePackageManagementUsersReturnsRows(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"items"`)
 	require.Contains(t, recorder.Body.String(), "vp-management-user")
 	require.Contains(t, recorder.Body.String(), `"used_5h":50`)
+	var response map[string]interface{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, true, response["success"], recorder.Body.String())
+	data, ok := response["data"].(map[string]interface{})
+	require.True(t, ok)
+	items, ok := data["items"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, items, 1)
+	row, ok := items[0].(map[string]interface{})
+	require.True(t, ok)
+	usage, ok := row["usage"].(map[string]interface{})
+	require.True(t, ok)
+	requireValuePackagePeriodResponse(t, decodeValuePackagePeriodResponse(t, usage), []valuePackagePeriodResponseExpectation{
+		{Kind: model.ValuePackagePeriodKindFiveHour, LabelUnit: "hour", LabelValue: 5, Limit: 500, Used: 50, Remaining: 450, Percent: 10, Refreshes: true},
+		{Kind: model.ValuePackagePeriodKindSevenDayStage, LabelUnit: "day", LabelValue: 7, Limit: 5000, Used: 50, Remaining: 4950, Percent: 1, Refreshes: true},
+		{Kind: model.ValuePackagePeriodKindLifecycle, LabelUnit: "day", LabelValue: 30, Limit: 10000, Used: 350, Remaining: 9650, Percent: 3.5, Refreshes: false},
+	})
 }
 
 func TestAdminAdjustValuePackageResetCount(t *testing.T) {
