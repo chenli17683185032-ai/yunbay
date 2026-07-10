@@ -49,26 +49,32 @@ func prepareMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo, price
 	return nil
 }
 
-func refundUnsettledMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo) bool {
+func refundUnsettledMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo) {
 	if info != nil && info.Billing != nil && info.Billing.NeedsRefund() {
 		info.Billing.Refund(c)
-		return true
 	}
-	return false
 }
 
-func markMidjourneyBillingRefunded(task *model.Midjourney) {
+func refundInsertedMidjourneyBilling(c *gin.Context, task *model.Midjourney, reason string) {
 	if task == nil {
 		return
 	}
 	task.Status = "FAILURE"
-	task.Progress = "100%"
+	task.Progress = "REFUND_PENDING"
 	if task.FailReason == "" {
-		task.FailReason = "billing was not completed"
+		task.FailReason = reason
 	}
-	task.BillingContext.BillingRefunded = true
 	if err := task.Update(); err != nil {
-		common.SysError("mark midjourney billing refund error: " + err.Error())
+		common.SysError("mark midjourney billing refund pending error: " + err.Error())
+		return
+	}
+	if err := service.RefundMidjourneyQuota(c, task, reason); err != nil {
+		common.SysError("refund persisted midjourney billing error: " + err.Error())
+		return
+	}
+	task.Progress = "100%"
+	if err := task.Update(); err != nil {
+		common.SysError("complete midjourney billing refund error: " + err.Error())
 	}
 }
 
@@ -271,10 +277,16 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		return billingErr
 	}
 	var insertedTask *model.Midjourney
+	billingCompleted := info.Billing == nil
 	defer func() {
-		if refundUnsettledMidjourneyBilling(c, info) {
-			markMidjourneyBillingRefunded(insertedTask)
+		if billingCompleted {
+			return
 		}
+		if insertedTask == nil {
+			refundUnsettledMidjourneyBilling(c, info)
+			return
+		}
+		refundInsertedMidjourneyBilling(c, insertedTask, "midjourney request failed before billing settlement")
 	}()
 
 	requestURL := getMjRequestPath(c.Request.URL.String())
@@ -324,10 +336,10 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		// A later settlement error cannot rewrite the already-forwarded success body.
 		if info.Billing != nil {
 			if err := midjourneySettleBilling(c, info, info.PriceData.Quota); err != nil {
-				markMidjourneyBillingRefunded(midjourneyTask)
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "settle_midjourney_billing_failed")
 			}
 		}
+		billingCompleted = true
 		tokenName := c.GetString("token_name")
 		logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s", info.PriceData.ModelPrice, info.PriceData.GroupRatioInfo.GroupRatio, constant.MjActionSwapFace)
 		other := service.GenerateMjOtherInfo(info, info.PriceData)
@@ -576,10 +588,16 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		return billingErr
 	}
 	var insertedTask *model.Midjourney
+	billingCompleted := relayInfo.Billing == nil
 	defer func() {
-		if refundUnsettledMidjourneyBilling(c, relayInfo) {
-			markMidjourneyBillingRefunded(insertedTask)
+		if billingCompleted {
+			return
 		}
+		if insertedTask == nil {
+			refundUnsettledMidjourneyBilling(c, relayInfo)
+			return
+		}
+		refundInsertedMidjourneyBilling(c, insertedTask, "midjourney request failed before billing settlement")
 	}()
 
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
@@ -587,6 +605,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		return &midjResponseWithStatus.Response
 	}
 	midjResponse := &midjResponseWithStatus.Response
+	taskQuota := 0
+	if consumeQuota {
+		taskQuota = relayInfo.PriceData.Quota
+	}
 
 	// 文档：https://github.com/novicezk/midjourney-proxy/blob/main/docs/api.md
 	//1-提交成功
@@ -612,7 +634,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		Progress:       "0%",
 		FailReason:     "",
 		ChannelId:      c.GetInt("channel_id"),
-		Quota:          relayInfo.PriceData.Quota,
+		Quota:          taskQuota,
 		BillingContext: snapshotMidjourneyBilling(relayInfo),
 	}
 	if midjResponse.Code == 3 {
@@ -699,10 +721,10 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		// A later settlement error cannot rewrite the already-forwarded success body.
 		if relayInfo.Billing != nil {
 			if err := midjourneySettleBilling(c, relayInfo, relayInfo.PriceData.Quota); err != nil {
-				markMidjourneyBillingRefunded(midjourneyTask)
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "settle_midjourney_billing_failed")
 			}
 		}
+		billingCompleted = true
 		tokenName := c.GetString("token_name")
 		logContent := fmt.Sprintf("模型固定价格 %.2f，分组倍率 %.2f，操作 %s，ID %s", relayInfo.PriceData.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupRatio, midjRequest.Action, midjResponse.Result)
 		other := service.GenerateMjOtherInfo(relayInfo, relayInfo.PriceData)

@@ -259,6 +259,15 @@ func applySubscriptionBillingRatio(relayInfo *relaycommon.RelayInfo, preConsumed
 	}
 }
 
+func RestoreBillingSessionTuple(relayInfo *relaycommon.RelayInfo) {
+	if relayInfo == nil {
+		return
+	}
+	if session, ok := relayInfo.Billing.(*BillingSession); ok {
+		session.restoreBillingTuple()
+	}
+}
+
 func EnsureSubscriptionBillingRatio(relayInfo *relaycommon.RelayInfo) {
 	if relayInfo == nil || relayInfo.BillingSource != BillingSourceSubscription {
 		return

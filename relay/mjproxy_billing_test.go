@@ -89,7 +89,9 @@ func setupMidjourneyBillingTest(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&model.Midjourney{},
 		&model.User{},
+		&model.Token{},
 		&model.Channel{},
+		&model.Log{},
 		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
 		&model.SubscriptionPreConsumeRecord{},
@@ -310,6 +312,61 @@ func TestRelayMidjourneySubmitFreeModelDoesNotUseLegacySettlement(t *testing.T) 
 	require.Nil(t, info.Billing)
 }
 
+func TestRelayMidjourneySubmitNonChargeableTaskCannotRefundPhantomQuota(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":1,"description":"ok","result":"mj-inpaint"}`)
+	baseURL := upstream.URL
+	require.NoError(t, db.Create(&model.User{Id: 901, Username: "mj-inpaint", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, db.Create(&model.Token{
+		Id: 902, UserId: 901, Key: "mj-inpaint-token", Name: "mj-inpaint-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 1000,
+	}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id: 42, Name: "mj-inpaint", Key: "secret", BaseURL: &baseURL,
+		Status: common.ChannelStatusEnabled,
+	}).Error)
+	origin := &model.Midjourney{
+		UserId: 901, ChannelId: 42, MjId: "mj-origin", Action: constant.MjActionImagine,
+		Status: "SUCCESS", Progress: "100%", Prompt: "origin",
+	}
+	require.NoError(t, origin.Insert())
+	preConsumeCalls := 0
+	midjourneyModelPriceHelperPerCall = func(*gin.Context, *relaycommon.RelayInfo) (types.PriceData, error) {
+		return types.PriceData{Quota: 300, QuotaBeforeGroup: 1000, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.3}}, nil
+	}
+	midjourneyPreConsumeBilling = func(*gin.Context, int, *relaycommon.RelayInfo) *types.NewAPIError {
+		preConsumeCalls++
+		return nil
+	}
+	c, _ := newMidjourneyBillingContext(
+		"/mj/submit/change",
+		`{"taskId":"mj-origin","action":"INPAINT","index":1}`,
+		upstream.URL,
+	)
+	info := &relaycommon.RelayInfo{
+		UserId: 901, TokenId: 902, UsingGroup: "gpt-plus", OriginModelName: "mj_inpaint",
+		RelayMode: relayconstant.RelayModeMidjourneyChange, RequestId: "mj-inpaint-request",
+		StartTime: time.Now(), IsPlayground: false,
+	}
+
+	require.Nil(t, RelayMidjourneySubmit(c, info))
+	require.Zero(t, preConsumeCalls)
+	var task model.Midjourney
+	require.NoError(t, db.Where("mj_id = ?", "mj-inpaint").First(&task).Error)
+	require.Zero(t, task.Quota)
+
+	task.Status = "FAILURE"
+	task.Progress = "100%"
+	require.NoError(t, task.Update())
+	require.NoError(t, service.RefundMidjourneyQuota(c, &task, "terminal failure"))
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	var token model.Token
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 1000, token.RemainQuota)
+}
+
 func TestMidjourneyChargeableEntrypointsRefundUnsettledFailures(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -320,6 +377,7 @@ func TestMidjourneyChargeableEntrypointsRefundUnsettledFailures(t *testing.T) {
 		response   string
 		closeEarly bool
 		insertFail bool
+		persisted  bool
 		call       func(*gin.Context, *relaycommon.RelayInfo) *dto.MidjourneyResponse
 	}{
 		{
@@ -331,19 +389,19 @@ func TestMidjourneyChargeableEntrypointsRefundUnsettledFailures(t *testing.T) {
 			name: "submit non success http",
 			path: "/mj/submit/imagine", body: `{"prompt":"billing test"}`,
 			mode: relayconstant.RelayModeMidjourneyImagine, status: http.StatusBadGateway,
-			response: `{"code":1,"description":"bad gateway","result":"mj-http"}`, call: RelayMidjourneySubmit,
+			response: `{"code":1,"description":"bad gateway","result":"mj-http"}`, persisted: true, call: RelayMidjourneySubmit,
 		},
 		{
 			name: "submit business failure",
 			path: "/mj/submit/imagine", body: `{"prompt":"billing test"}`,
 			mode: relayconstant.RelayModeMidjourneyImagine, status: http.StatusOK,
-			response: `{"code":23,"description":"queue full","result":"mj-business"}`, call: RelayMidjourneySubmit,
+			response: `{"code":23,"description":"queue full","result":"mj-business"}`, persisted: true, call: RelayMidjourneySubmit,
 		},
 		{
 			name: "submit policy business failure",
 			path: "/mj/submit/imagine", body: `{"prompt":"billing test"}`,
 			mode: relayconstant.RelayModeMidjourneyImagine, status: http.StatusOK,
-			response: `{"code":24,"description":"blocked","result":"mj-policy"}`, call: RelayMidjourneySubmit,
+			response: `{"code":24,"description":"blocked","result":"mj-policy"}`, persisted: true, call: RelayMidjourneySubmit,
 		},
 		{
 			name: "swap local insert failure",
@@ -355,7 +413,7 @@ func TestMidjourneyChargeableEntrypointsRefundUnsettledFailures(t *testing.T) {
 			name: "swap business failure",
 			path: "/mj/insight-face/swap", body: `{"sourceBase64":"source","targetBase64":"target"}`,
 			mode: relayconstant.RelayModeSwapFace, status: http.StatusOK,
-			response: `{"code":4,"description":"failed","result":"mj-swap-business"}`, call: RelaySwapFace,
+			response: `{"code":4,"description":"failed","result":"mj-swap-business"}`, persisted: true, call: RelaySwapFace,
 		},
 	}
 
@@ -392,8 +450,17 @@ func TestMidjourneyChargeableEntrypointsRefundUnsettledFailures(t *testing.T) {
 			require.Equal(t, 1, *prepareCalls)
 			require.Zero(t, *settleCalls)
 			require.Zero(t, billing.settled)
-			require.Equal(t, 1, billing.refunded)
-			require.False(t, billing.NeedsRefund())
+			if tt.persisted {
+				require.Zero(t, billing.refunded)
+				require.True(t, billing.NeedsRefund())
+				var task model.Midjourney
+				require.NoError(t, db.Order("id desc").First(&task).Error)
+				require.Equal(t, "REFUND_PENDING", task.Progress)
+				require.False(t, task.BillingContext.BillingRefunded)
+			} else {
+				require.Equal(t, 1, billing.refunded)
+				require.False(t, billing.NeedsRefund())
+			}
 		})
 	}
 }
@@ -421,7 +488,77 @@ func TestRelaySwapFaceRefundsWhenResponseCopyFails(t *testing.T) {
 	require.Equal(t, 1, *prepareCalls)
 	require.Zero(t, *settleCalls)
 	require.Zero(t, billing.settled)
-	require.Equal(t, 1, billing.refunded)
+	require.Zero(t, billing.refunded)
+	var task model.Midjourney
+	require.NoError(t, model.DB.Where("mj_id = ?", "mj-copy").First(&task).Error)
+	require.Equal(t, "REFUND_PENDING", task.Progress)
+	require.False(t, task.BillingContext.BillingRefunded)
+}
+
+func TestRelayMidjourneyInsertedFailurePersistsIncompleteWalletRefund(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":23,"description":"queue full","result":"mj-persisted-refund"}`)
+	require.NoError(t, db.Create(&model.User{Id: 901, Username: "mj-wallet-refund", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, db.Create(&model.Token{
+		Id: 902, UserId: 901, Key: "mj-wallet-refund-token", Name: "mj-wallet-refund-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 1000,
+	}).Error)
+	midjourneyModelPriceHelperPerCall = func(*gin.Context, *relaycommon.RelayInfo) (types.PriceData, error) {
+		return types.PriceData{Quota: 500, QuotaBeforeGroup: 1000, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.5}}, nil
+	}
+	billing := &recordingMidjourneyBilling{preConsumed: 500, needsRefund: true}
+	callbackName := "test:fail_first_inserted_mj_token_refund"
+	failed := false
+	midjourneyPreConsumeBilling = func(c *gin.Context, quota int, info *relaycommon.RelayInfo) *types.NewAPIError {
+		require.Equal(t, 500, quota)
+		require.NoError(t, db.Model(&model.User{}).Where("id = ?", info.UserId).
+			Update("quota", gorm.Expr("quota - ?", quota)).Error)
+		require.NoError(t, db.Model(&model.Token{}).Where("id = ?", info.TokenId).Updates(map[string]any{
+			"remain_quota": gorm.Expr("remain_quota - ?", quota),
+			"used_quota":   gorm.Expr("used_quota + ?", quota),
+		}).Error)
+		info.Billing = billing
+		info.BillingSource = service.BillingSourceWallet
+		info.BillingUsingGroup = info.UsingGroup
+		require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+			if !failed && tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Token" {
+				failed = true
+				tx.AddError(errors.New("forced inserted token refund failure"))
+			}
+		}))
+		return nil
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callbackName) })
+	c, _ := newMidjourneyBillingContext("/mj/submit/imagine", `{"prompt":"billing test"}`, upstream.URL)
+	info := &relaycommon.RelayInfo{
+		UserId: 901, TokenId: 902, TokenKey: "mj-wallet-refund-token",
+		UsingGroup: "group-a", OriginModelName: "mj_imagine",
+		RelayMode: relayconstant.RelayModeMidjourneyImagine, RequestId: "mj-persisted-refund",
+		StartTime: time.Now(), IsPlayground: false,
+		UserSetting: dto.UserSetting{BillingPreference: "wallet_only"},
+	}
+
+	require.Nil(t, RelayMidjourneySubmit(c, info))
+	var pending model.Midjourney
+	require.NoError(t, db.Where("mj_id = ?", "mj-persisted-refund").First(&pending).Error)
+	require.Equal(t, "REFUND_PENDING", pending.Progress)
+	require.True(t, pending.BillingContext.FundingRefunded)
+	require.False(t, pending.BillingContext.TokenRefunded)
+	require.False(t, pending.BillingContext.BillingRefunded)
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	var token model.Token
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 500, token.RemainQuota)
+
+	require.NoError(t, service.RefundMidjourneyQuota(c, &pending, "retry"))
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 1000, token.RemainQuota)
+	var completed model.Midjourney
+	require.NoError(t, db.First(&completed, pending.Id).Error)
+	require.True(t, completed.BillingContext.BillingRefunded)
+	require.Zero(t, billing.refunded)
 }
 
 func TestRelayMidjourneySubmitRefundsUnsettledSessionWhenSettlementFails(t *testing.T) {
@@ -447,19 +584,17 @@ func TestRelayMidjourneySubmitRefundsUnsettledSessionWhenSettlementFails(t *test
 	require.Equal(t, 1, *prepareCalls)
 	require.Equal(t, 1, settleCalls)
 	require.Zero(t, billing.settled)
-	require.Equal(t, 1, billing.refunded)
+	require.Zero(t, billing.refunded)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"code":1`)
 	var task model.Midjourney
 	require.NoError(t, db.Where("mj_id = ?", "mj-settle").First(&task).Error)
 	require.Equal(t, "FAILURE", task.Status)
-	require.Equal(t, "100%", task.Progress)
-	require.True(t, task.BillingContext.BillingRefunded)
-	refundUnsettledMidjourneyBilling(c, info)
-	require.Equal(t, 1, billing.refunded)
+	require.Equal(t, "REFUND_PENDING", task.Progress)
+	require.False(t, task.BillingContext.BillingRefunded)
 }
 
-func TestRelayMidjourneySubmitMarksTerminalWhenSettlementFundingCannotRefund(t *testing.T) {
+func TestRelayMidjourneySubmitKeepsPendingWhenPersistedFundingCannotRefund(t *testing.T) {
 	db := setupMidjourneyBillingTest(t)
 	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":1,"description":"ok","result":"mj-funded-settle"}`)
 	billing, _, _ := installRecordingMidjourneyBillingHooks(t, 450)
@@ -481,8 +616,62 @@ func TestRelayMidjourneySubmitMarksTerminalWhenSettlementFundingCannotRefund(t *
 	var task model.Midjourney
 	require.NoError(t, db.Where("mj_id = ?", "mj-funded-settle").First(&task).Error)
 	require.Equal(t, "FAILURE", task.Status)
+	require.Equal(t, "REFUND_PENDING", task.Progress)
+	require.False(t, task.BillingContext.BillingRefunded)
+}
+
+func TestRelayMidjourneySettlementErrorUsesPersistedRefundWhenSessionNeedsRefundIsFalse(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":1,"description":"ok","result":"mj-funded-settle-persisted"}`)
+	require.NoError(t, db.Create(&model.User{Id: 901, Username: "mj-funded-settle", Quota: 1000, Status: common.UserStatusEnabled}).Error)
+	require.NoError(t, db.Create(&model.Token{
+		Id: 902, UserId: 901, Key: "mj-funded-settle-token", Name: "mj-funded-settle-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 1000,
+	}).Error)
+	midjourneyModelPriceHelperPerCall = func(*gin.Context, *relaycommon.RelayInfo) (types.PriceData, error) {
+		return types.PriceData{Quota: 500, QuotaBeforeGroup: 1000, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.5}}, nil
+	}
+	billing := &recordingMidjourneyBilling{preConsumed: 500, needsRefund: true}
+	midjourneyPreConsumeBilling = func(_ *gin.Context, quota int, info *relaycommon.RelayInfo) *types.NewAPIError {
+		require.NoError(t, db.Model(&model.User{}).Where("id = ?", info.UserId).
+			Update("quota", gorm.Expr("quota - ?", quota)).Error)
+		require.NoError(t, db.Model(&model.Token{}).Where("id = ?", info.TokenId).Updates(map[string]any{
+			"remain_quota": gorm.Expr("remain_quota - ?", quota),
+			"used_quota":   gorm.Expr("used_quota + ?", quota),
+		}).Error)
+		info.Billing = billing
+		info.BillingSource = service.BillingSourceWallet
+		info.BillingUsingGroup = info.UsingGroup
+		return nil
+	}
+	midjourneySettleBilling = func(*gin.Context, *relaycommon.RelayInfo, int) error {
+		billing.needsRefund = false
+		return errors.New("funding already committed")
+	}
+	c, _ := newMidjourneyBillingContext("/mj/submit/imagine", `{"prompt":"billing test"}`, upstream.URL)
+	info := &relaycommon.RelayInfo{
+		UserId: 901, TokenId: 902, UsingGroup: "group-a", OriginModelName: "mj_imagine",
+		RelayMode: relayconstant.RelayModeMidjourneyImagine, RequestId: "mj-funded-settle-persisted",
+		StartTime: time.Now(), IsPlayground: false,
+	}
+
+	mjErr := RelayMidjourneySubmit(c, info)
+
+	require.NotNil(t, mjErr)
+	require.Equal(t, "settle_midjourney_billing_failed", mjErr.Description)
+	require.Zero(t, billing.refunded)
+	var task model.Midjourney
+	require.NoError(t, db.Where("mj_id = ?", "mj-funded-settle-persisted").First(&task).Error)
 	require.Equal(t, "100%", task.Progress)
+	require.True(t, task.BillingContext.FundingRefunded)
+	require.True(t, task.BillingContext.TokenRefunded)
 	require.True(t, task.BillingContext.BillingRefunded)
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	var token model.Token
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 1000, token.RemainQuota)
 }
 
 func TestPrepareMidjourneyBillingSkipsFreeOrNonChargeableRequests(t *testing.T) {

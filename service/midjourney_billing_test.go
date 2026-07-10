@@ -256,3 +256,48 @@ func TestRefundMidjourneyQuotaRetriesIdempotentSubscriptionAfterStatePersistence
 	require.True(t, completed.BillingContext.FundingRefunded)
 	require.True(t, completed.BillingContext.BillingRefunded)
 }
+
+func TestRefundMidjourneyQuotaRetriesValuePackageAfterStatePersistenceFails(t *testing.T) {
+	setupMidjourneyRefundTest(t)
+	const userID, channelID, subscriptionID, planID, quota = 121, 122, 123, 124, 500
+	const requestID = "mj-idempotent-value-package"
+	seedUser(t, userID, 0)
+	seedChannel(t, channelID)
+	seedSubscription(t, subscriptionID, userID, 10000, quota)
+	seedMidjourneyPreConsumeRecord(t, requestID, userID, subscriptionID, quota)
+	require.NoError(t, model.DB.Create(&model.ValuePackageUsageRecord{
+		UserId: userID, UserSubscriptionId: subscriptionID, PlanId: planID,
+		PackageType: model.ValuePackageTypeMonth, ModelGroup: "month-card",
+		RequestId: requestID, Quota: quota,
+	}).Error)
+	task := makeMidjourneyRefundTask(userID, channelID, quota, model.MidjourneyBillingContext{
+		BillingSource: BillingSourceSubscription, SubscriptionId: subscriptionID,
+		RequestId: requestID, ValuePackageSubscriptionId: subscriptionID,
+		ValuePackagePlanId: planID, ValuePackageBillingGroup: "month-card",
+		BillingUsingGroup: "group-a",
+	})
+	persistMidjourneyRefundTask(t, task)
+	callbackName := "test:fail_mj_value_package_state_update"
+	failed := false
+	require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if !failed && tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Midjourney" {
+			failed = true
+			tx.AddError(fmt.Errorf("forced value package context failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = model.DB.Callback().Update().Remove(callbackName) })
+
+	require.Error(t, RefundMidjourneyQuota(context.Background(), task, "first attempt"))
+	require.Zero(t, getSubscriptionUsed(t, subscriptionID))
+	var usage model.ValuePackageUsageRecord
+	require.NoError(t, model.DB.Where("user_subscription_id = ? AND request_id = ?", subscriptionID, requestID).First(&usage).Error)
+	require.Zero(t, usage.Quota)
+	var retryTask model.Midjourney
+	require.NoError(t, model.DB.First(&retryTask, task.Id).Error)
+	require.NoError(t, RefundMidjourneyQuota(context.Background(), &retryTask, "retry"))
+	require.Zero(t, getSubscriptionUsed(t, subscriptionID))
+	var completed model.Midjourney
+	require.NoError(t, model.DB.First(&completed, task.Id).Error)
+	require.True(t, completed.BillingContext.FundingRefunded)
+	require.True(t, completed.BillingContext.BillingRefunded)
+}

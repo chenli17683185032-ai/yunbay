@@ -35,6 +35,11 @@ type BillingSession struct {
 	subscriptionRatio       float64
 	subscriptionRatioSource string
 	billingUsingGroup       string
+	billingGroupRatioInfo   types.GroupRatioInfo
+	hasBillingGroupRatio    bool
+	tieredGroupRatio        float64
+	tieredEstimatedQuota    int
+	hasTieredBillingTuple   bool
 	mu                      sync.Mutex
 }
 
@@ -51,6 +56,37 @@ func (s *BillingSession) billingUsingGroupSnapshot() string {
 		return ""
 	}
 	return s.billingUsingGroup
+}
+
+func (s *BillingSession) freezeBillingTuple() {
+	if s == nil || s.relayInfo == nil {
+		return
+	}
+	s.billingGroupRatioInfo = s.relayInfo.PriceData.GroupRatioInfo
+	s.hasBillingGroupRatio = true
+	if snapshot := s.relayInfo.TieredBillingSnapshot; snapshot != nil && snapshot.BillingMode == "tiered_expr" {
+		s.tieredGroupRatio = snapshot.GroupRatio
+		s.tieredEstimatedQuota = snapshot.EstimatedQuotaAfterGroup
+		s.hasTieredBillingTuple = true
+	}
+}
+
+func (s *BillingSession) restoreBillingTuple() {
+	if s == nil || s.relayInfo == nil {
+		return
+	}
+	if s.billingUsingGroup != "" {
+		s.relayInfo.BillingUsingGroup = s.billingUsingGroup
+	}
+	if s.hasBillingGroupRatio {
+		s.relayInfo.PriceData.GroupRatioInfo = s.billingGroupRatioInfo
+	}
+	if s.hasTieredBillingTuple {
+		if snapshot := s.relayInfo.TieredBillingSnapshot; snapshot != nil && snapshot.BillingMode == "tiered_expr" {
+			snapshot.GroupRatio = s.tieredGroupRatio
+			snapshot.EstimatedQuotaAfterGroup = s.tieredEstimatedQuota
+		}
+	}
 }
 
 // Settle 根据实际消耗额度进行结算。
@@ -450,6 +486,7 @@ func (s *BillingSession) shouldTrust(c *gin.Context) bool {
 // syncRelayInfo 将 BillingSession 的状态同步到 RelayInfo 的兼容字段上。
 func (s *BillingSession) syncRelayInfo() {
 	info := s.relayInfo
+	s.restoreBillingTuple()
 	info.FinalPreConsumedQuota = s.preConsumedQuota
 	info.BillingSource = s.funding.Source()
 	if s.billingUsingGroup != "" {
@@ -507,6 +544,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		}
 		applySubscriptionBillingRatio(relayInfo, subConsumeInt, ratio, source)
 		session.preConsumedQuota = subConsumeInt
+		session.freezeBillingTuple()
 		session.syncRelayInfo()
 		return session, nil
 	}
@@ -547,6 +585,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			funding:           &WalletFunding{userId: relayInfo.UserId},
 			billingUsingGroup: strings.TrimSpace(relayInfo.UsingGroup),
 		}
+		session.freezeBillingTuple()
 		if apiErr := session.preConsume(c, walletConsume); apiErr != nil {
 			return nil, apiErr
 		}
@@ -580,6 +619,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		}
 		applySubscriptionBillingRatio(relayInfo, subConsumeInt, ratio, source)
 		session.preConsumedQuota = subConsumeInt
+		session.freezeBillingTuple()
 		session.syncRelayInfo()
 		return session, nil
 	}

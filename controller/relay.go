@@ -311,6 +311,7 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	if info.Billing == nil {
 		info.BillingUsingGroup = info.UsingGroup
 	}
+	service.RestoreBillingSessionTuple(info)
 	service.EnsureSubscriptionBillingRatio(info)
 
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -29,6 +30,9 @@ func setupRelayRetryBillingRatioTest(t *testing.T) *gorm.DB {
 	oldUsingSQLite := common.UsingSQLite
 	oldUsingMySQL := common.UsingMySQL
 	oldUsingPostgreSQL := common.UsingPostgreSQL
+	oldLogConsumeEnabled := common.LogConsumeEnabled
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	oldDataExportEnabled := common.DataExportEnabled
 	oldGroupRatio := ratio_setting.GroupRatio2JSONString()
 	oldGroupGroupRatio := ratio_setting.GroupGroupRatio2JSONString()
 	oldSelector := cacheGetRandomSatisfiedChannel
@@ -37,10 +41,16 @@ func setupRelayRetryBillingRatioTest(t *testing.T) *gorm.DB {
 	common.UsingSQLite = true
 	common.UsingMySQL = false
 	common.UsingPostgreSQL = false
+	common.LogConsumeEnabled = true
+	common.BatchUpdateEnabled = false
+	common.DataExportEnabled = false
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
+		&model.User{},
+		&model.Channel{},
+		&model.Log{},
 		&model.SubscriptionPlan{},
 		&model.UserSubscription{},
 		&model.SubscriptionPreConsumeRecord{},
@@ -63,6 +73,9 @@ func setupRelayRetryBillingRatioTest(t *testing.T) *gorm.DB {
 		common.UsingSQLite = oldUsingSQLite
 		common.UsingMySQL = oldUsingMySQL
 		common.UsingPostgreSQL = oldUsingPostgreSQL
+		common.LogConsumeEnabled = oldLogConsumeEnabled
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+		common.DataExportEnabled = oldDataExportEnabled
 		sqlDB, dbErr := db.DB()
 		if dbErr == nil {
 			_ = sqlDB.Close()
@@ -164,6 +177,72 @@ func TestGetChannelRestoresFrozenSubscriptionRatioAfterLiveRefresh(t *testing.T)
 				require.Equal(t, 0.6, info.TieredBillingSnapshot.GroupRatio)
 				require.Equal(t, 600, info.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
 			}
+		})
+	}
+}
+
+func TestGetChannelRestoresFrozenWalletRatioAfterLiveRefresh(t *testing.T) {
+	for _, tiered := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tiered_%t", tiered), func(t *testing.T) {
+			db := setupRelayRetryBillingRatioTest(t)
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":0.5,"group-b":2}`))
+			require.NoError(t, db.Create(&model.User{
+				Id: 801, Username: "wallet-retry", Quota: 100000, Status: common.UserStatusEnabled,
+			}).Error)
+			require.NoError(t, db.Create(&model.Channel{
+				Id: 802, Name: "wallet-retry", Key: "test", Status: common.ChannelStatusEnabled,
+			}).Error)
+			ctx := newRelayRetryBillingContext()
+			ctx.Set("token_name", "wallet-retry")
+			info := &relaycommon.RelayInfo{
+				ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 802},
+				TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "submit"},
+				UserId:          801,
+				UsingGroup:      "group-a",
+				OriginModelName: "gpt-test",
+				RequestId:       fmt.Sprintf("wallet-retry-%t", tiered),
+				IsPlayground:    true,
+				ForcePreConsume: true,
+				UserSetting:     dto.UserSetting{BillingPreference: "wallet_only"},
+				PriceData: types.PriceData{
+					Quota:             500,
+					QuotaBeforeGroup:  1000,
+					QuotaToPreConsume: 500,
+					GroupRatioInfo: types.GroupRatioInfo{
+						GroupRatio: 0.5,
+					},
+				},
+			}
+			if tiered {
+				info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{
+					BillingMode:               "tiered_expr",
+					GroupRatio:                0.5,
+					EstimatedQuotaBeforeGroup: 1000,
+					EstimatedQuotaAfterGroup:  500,
+				}
+			}
+			require.Nil(t, service.PreConsumeBilling(ctx, info.PriceData.QuotaToPreConsume, info))
+			require.Equal(t, "group-a", info.BillingUsingGroup)
+
+			ctx.Set("auto_group", "group-b")
+			_, apiErr := getChannel(ctx, info, &service.RetryParam{Ctx: ctx, TokenGroup: "auto", ModelName: info.OriginModelName})
+
+			require.NotNil(t, apiErr)
+			require.Equal(t, "group-b", info.UsingGroup)
+			require.Equal(t, "group-a", info.BillingUsingGroup)
+			require.Equal(t, "group-a", info.BillingGroup())
+			require.Equal(t, 0.5, info.PriceData.GroupRatioInfo.GroupRatio)
+			if tiered {
+				require.Equal(t, 0.5, info.TieredBillingSnapshot.GroupRatio)
+				require.Equal(t, 500, info.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
+			}
+			service.LogTaskConsumption(ctx, info)
+			var log model.Log
+			require.NoError(t, db.Order("id desc").First(&log).Error)
+			require.Equal(t, "group-a", log.Group)
+			var other map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+			require.Equal(t, 0.5, other["group_ratio"])
 		})
 	}
 }
