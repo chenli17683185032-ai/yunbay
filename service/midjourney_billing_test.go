@@ -64,6 +64,29 @@ func TestRefundMidjourneyQuotaWalletRestoresFundingAndToken(t *testing.T) {
 	require.Equal(t, "group-a", log.Group)
 }
 
+func TestRefundMidjourneyQuotaUsesPersistedPerLegAmounts(t *testing.T) {
+	setupMidjourneyRefundTest(t)
+	const userID, tokenID, channelID = 45, 46, 47
+	seedUser(t, userID, 100)
+	seedToken(t, tokenID, userID, "mj-per-leg-token", 300)
+	require.NoError(t, model.DB.Model(&model.Token{}).Where("id = ?", tokenID).Update("used_quota", 200).Error)
+	seedChannel(t, channelID)
+	task := makeMidjourneyRefundTask(userID, channelID, 900, model.MidjourneyBillingContext{
+		Version:       model.MidjourneyBillingContextVersion,
+		BillingSource: BillingSourceWallet, TokenId: tokenID,
+		FundingQuota: 500, TokenQuota: 200, BillingUsingGroup: "group-a",
+	})
+	persistMidjourneyRefundTask(t, task)
+
+	require.NoError(t, RefundMidjourneyQuota(context.Background(), task, "terminal failure"))
+
+	require.Equal(t, 600, getUserQuota(t, userID))
+	require.Equal(t, 500, getTokenRemainQuota(t, tokenID))
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	require.Equal(t, 500, log.Quota)
+}
+
 func TestRefundMidjourneyQuotaRegularSubscriptionUsesOriginalFunding(t *testing.T) {
 	setupMidjourneyRefundTest(t)
 	const userID, tokenID, channelID, subscriptionID, quota = 51, 52, 53, 54, 600

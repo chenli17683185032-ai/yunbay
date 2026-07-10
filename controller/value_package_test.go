@@ -37,9 +37,12 @@ func (b *failingTaskSettleBilling) Settle(actualQuota int) error {
 	return errors.New("usage reservation write failed")
 }
 
-func (b *failingTaskSettleBilling) Refund(c *gin.Context)         {}
-func (b *failingTaskSettleBilling) NeedsRefund() bool             { return false }
-func (b *failingTaskSettleBilling) GetPreConsumedQuota() int      { return 100 }
+func (b *failingTaskSettleBilling) Refund(c *gin.Context)    {}
+func (b *failingTaskSettleBilling) NeedsRefund() bool        { return false }
+func (b *failingTaskSettleBilling) GetPreConsumedQuota() int { return 100 }
+func (b *failingTaskSettleBilling) GetQuotaSnapshot() relaycommon.BillingQuotaSnapshot {
+	return relaycommon.BillingQuotaSnapshot{FundingQuota: 100, TokenQuota: 100}
+}
 func (b *failingTaskSettleBilling) Reserve(targetQuota int) error { return nil }
 
 func (b *successfulTaskSettleBilling) Settle(actualQuota int) error {
@@ -47,9 +50,12 @@ func (b *successfulTaskSettleBilling) Settle(actualQuota int) error {
 	return nil
 }
 
-func (b *successfulTaskSettleBilling) Refund(c *gin.Context)         {}
-func (b *successfulTaskSettleBilling) NeedsRefund() bool             { return false }
-func (b *successfulTaskSettleBilling) GetPreConsumedQuota() int      { return 100 }
+func (b *successfulTaskSettleBilling) Refund(c *gin.Context)    {}
+func (b *successfulTaskSettleBilling) NeedsRefund() bool        { return false }
+func (b *successfulTaskSettleBilling) GetPreConsumedQuota() int { return 100 }
+func (b *successfulTaskSettleBilling) GetQuotaSnapshot() relaycommon.BillingQuotaSnapshot {
+	return relaycommon.BillingQuotaSnapshot{FundingQuota: 100, TokenQuota: 100}
+}
 func (b *successfulTaskSettleBilling) Reserve(targetQuota int) error { return nil }
 
 func TestFinalizeSuccessfulRelayTaskPersistsBillingContextOnSettleError(t *testing.T) {

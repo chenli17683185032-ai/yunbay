@@ -10,6 +10,9 @@ import (
 
 func refundMidjourneyFunding(task *model.Midjourney) (bool, error) {
 	billingContext := task.BillingContext
+	if task.FundingRefundQuota() <= 0 {
+		return model.MarkMidjourneyFundingRefunded(task)
+	}
 	if billingContext.BillingSource == BillingSourceSubscription {
 		if requestID := strings.TrimSpace(billingContext.RequestId); requestID != "" {
 			if err := model.RefundSubscriptionPreConsume(requestID); err != nil {
@@ -26,7 +29,7 @@ func refundMidjourneyFunding(task *model.Midjourney) (bool, error) {
 
 func refundMidjourneyToken(ctx context.Context, task *model.Midjourney) (bool, error) {
 	tokenID := task.BillingContext.TokenId
-	if tokenID <= 0 || task.Quota <= 0 {
+	if tokenID <= 0 || task.TokenRefundQuota() <= 0 {
 		return false, nil
 	}
 	tokenKey := resolveTokenKey(ctx, tokenID, task.MjId)
@@ -48,6 +51,10 @@ func midjourneyRefundOther(task *model.Midjourney, reason string) map[string]int
 	if context.EffectiveGroupRatio != 0 {
 		other["group_ratio"] = context.EffectiveGroupRatio
 	}
+	if context.Version >= model.MidjourneyBillingContextVersion {
+		other["funding_quota"] = context.FundingQuota
+		other["token_quota"] = context.TokenQuota
+	}
 	if context.ValuePackageSubscriptionId > 0 {
 		other["value_package_subscription_id"] = context.ValuePackageSubscriptionId
 		other["value_package_billing_group"] = context.ValuePackageBillingGroup
@@ -60,7 +67,10 @@ func midjourneyRefundOther(task *model.Midjourney, reason string) map[string]int
 
 // RefundMidjourneyQuota refunds a terminally failed MJ task using its frozen funding snapshot.
 func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason string) error {
-	if task == nil || task.Quota <= 0 || task.BillingContext.BillingRefunded {
+	if task == nil || task.BillingContext.BillingRefunded {
+		return nil
+	}
+	if task.BillingContext.Version < model.MidjourneyBillingContextVersion && task.Quota <= 0 {
 		return nil
 	}
 	fundingPerformed, err := refundMidjourneyFunding(task)
@@ -71,18 +81,47 @@ func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason s
 	if err != nil {
 		return err
 	}
-	if !fundingPerformed && !tokenPerformed {
+	if (!fundingPerformed || task.FundingRefundQuota() <= 0) &&
+		(!tokenPerformed || task.TokenRefundQuota() <= 0) {
 		return nil
+	}
+	logQuota := task.FundingRefundQuota()
+	if logQuota <= 0 {
+		logQuota = task.TokenRefundQuota()
 	}
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
 		ChannelId: task.ChannelId,
 		ModelName: CovertMjpActionToModelName(task.Action),
-		Quota:     task.Quota,
+		Quota:     logQuota,
 		TokenId:   task.BillingContext.TokenId,
 		Group:     task.BillingContext.BillingUsingGroup,
 		Other:     midjourneyRefundOther(task, reason),
 	})
 	return nil
+}
+
+// CommitMidjourneyTaskUpdate applies a CAS state transition and synchronously
+// completes persisted refund legs before exposing the requested final progress.
+func CommitMidjourneyTaskUpdate(ctx context.Context, task *model.Midjourney, preStatus string, shouldRefund bool, reason string) (bool, error) {
+	if task == nil {
+		return false, fmt.Errorf("midjourney task is nil")
+	}
+	targetProgress := task.Progress
+	if shouldRefund {
+		task.Progress = "REFUND_PENDING"
+	}
+	won, err := task.UpdateWithStatus(preStatus)
+	if err != nil || !won || !shouldRefund {
+		return won, err
+	}
+	if err := RefundMidjourneyQuota(ctx, task, reason); err != nil {
+		return true, err
+	}
+	task.Progress = targetProgress
+	if err := task.Update(); err != nil {
+		return true, err
+	}
+	return true, nil
 }

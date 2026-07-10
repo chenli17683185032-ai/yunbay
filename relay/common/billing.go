@@ -2,6 +2,11 @@ package common
 
 import "github.com/gin-gonic/gin"
 
+type BillingQuotaSnapshot struct {
+	FundingQuota int
+	TokenQuota   int
+}
+
 // BillingSettler 抽象计费会话的生命周期操作。
 // 由 service.BillingSession 实现，存储在 RelayInfo 上以避免循环引用。
 type BillingSettler interface {
@@ -18,6 +23,9 @@ type BillingSettler interface {
 
 	// GetPreConsumedQuota 返回实际预扣的额度值（信任用户可能为 0）。
 	GetPreConsumedQuota() int
+
+	// GetQuotaSnapshot 返回资金来源和令牌实际预扣额度的线程安全快照。
+	GetQuotaSnapshot() BillingQuotaSnapshot
 
 	// Reserve 将预扣额度补到目标值；若目标值不高于当前预扣额度则不做任何事。
 	Reserve(targetQuota int) error

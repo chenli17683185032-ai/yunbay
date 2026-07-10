@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type failingMidjourneyFlushWriter struct {
+	gin.ResponseWriter
+}
+
+func (w *failingMidjourneyFlushWriter) Write([]byte) (int, error) {
+	return 0, errors.New("forced client flush failure")
+}
 
 func TestRelayMidjourneySettlementErrorReturnsOneJSONResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -47,6 +56,45 @@ func TestRelayMidjourneySettlementErrorReturnsOneJSONResponse(t *testing.T) {
 	require.Equal(t, float64(4), response["code"])
 	require.Contains(t, response["description"], "settle_midjourney_billing_failed")
 	require.NotContains(t, recorder.Body.String(), "upstream success")
+}
+
+func TestRelayMidjourneyClientFlushFailureAuditsAcceptedTaskWithoutRollback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	originalSubmit := relayMidjourneySubmitHandler
+	originalGenerator := generateMidjourneyRelayInfo
+	originalAudit := midjourneyFlushErrorLogger
+	completed := false
+	var audit string
+	generateMidjourneyRelayInfo = func(*gin.Context) (*relaycommon.RelayInfo, error) {
+		return &relaycommon.RelayInfo{RequestId: "request-flush-1"}, nil
+	}
+	relayMidjourneySubmitHandler = func(c *gin.Context, _ *relaycommon.RelayInfo) *dto.MidjourneyResponse {
+		c.Set("midjourney_task_id", "mj-flush-1")
+		_, _ = c.Writer.Write([]byte(`{"code":1,"description":"accepted","result":"mj-flush-1"}`))
+		completed = true
+		return nil
+	}
+	midjourneyFlushErrorLogger = func(_ context.Context, message string) {
+		audit = message
+	}
+	t.Cleanup(func() {
+		relayMidjourneySubmitHandler = originalSubmit
+		generateMidjourneyRelayInfo = originalGenerator
+		midjourneyFlushErrorLogger = originalAudit
+	})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Writer = &failingMidjourneyFlushWriter{ResponseWriter: c.Writer}
+	c.Request = httptest.NewRequest(http.MethodPost, "/mj/submit/imagine", strings.NewReader(`{}`))
+	c.Set("channel_id", 42)
+
+	RelayMidjourney(c)
+
+	require.True(t, completed)
+	require.Contains(t, audit, "request_id=request-flush-1")
+	require.Contains(t, audit, "task_id=mj-flush-1")
+	require.Contains(t, audit, "channel_id=42")
+	require.Contains(t, audit, "forced client flush failure")
 }
 
 func setupMidjourneyControllerBillingTest(t *testing.T) *gorm.DB {
@@ -120,13 +168,13 @@ func TestCommitMidjourneyTaskUpdateRefundsOnlyCASWinner(t *testing.T) {
 	stale.Status = "FAILURE"
 	stale.Progress = "100%"
 
-	won, err := commitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "terminal failure")
+	won, err := service.CommitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "terminal failure")
 	require.NoError(t, err)
 	require.True(t, won)
-	won, err = commitMidjourneyTaskUpdate(context.Background(), &stale, "IN_PROGRESS", true, "duplicate poll")
+	won, err = service.CommitMidjourneyTaskUpdate(context.Background(), &stale, "IN_PROGRESS", true, "duplicate poll")
 	require.NoError(t, err)
 	require.False(t, won)
-	won, err = commitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "repeat")
+	won, err = service.CommitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "repeat")
 	require.NoError(t, err)
 	require.False(t, won)
 
@@ -147,7 +195,7 @@ func TestCommitMidjourneyTaskUpdateLegacyRecordRefundsWallet(t *testing.T) {
 	task.Status = "FAILURE"
 	task.Progress = "100%"
 
-	won, err := commitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "legacy failure")
+	won, err := service.CommitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "legacy failure")
 
 	require.NoError(t, err)
 	require.True(t, won)
@@ -166,7 +214,7 @@ func TestCommitMidjourneyTaskUpdateRetriesIncompleteRefundLegs(t *testing.T) {
 	task.Status = "FAILURE"
 	task.Progress = "100%"
 
-	won, err := commitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "terminal failure")
+	won, err := service.CommitMidjourneyTaskUpdate(context.Background(), task, "IN_PROGRESS", true, "terminal failure")
 	require.Error(t, err)
 	require.True(t, won)
 	var pending model.Midjourney
@@ -184,7 +232,7 @@ func TestCommitMidjourneyTaskUpdateRetriesIncompleteRefundLegs(t *testing.T) {
 	}).Error)
 	pending.Status = "FAILURE"
 	pending.Progress = "100%"
-	won, err = commitMidjourneyTaskUpdate(context.Background(), &pending, "FAILURE", true, "retry")
+	won, err = service.CommitMidjourneyTaskUpdate(context.Background(), &pending, "FAILURE", true, "retry")
 	require.NoError(t, err)
 	require.True(t, won)
 	require.NoError(t, db.First(&user, 81).Error)

@@ -23,25 +23,62 @@ const (
 )
 
 const invalidValuePackageBillingRatioWarningWindow = 5 * time.Minute
+const invalidValuePackageBillingRatioWarningMaxEntries = 1024
 
 type billingRatioWarningLimiter struct {
-	mu     sync.Mutex
-	window time.Duration
-	last   map[string]time.Time
+	mu         sync.Mutex
+	window     time.Duration
+	maxEntries int
+	lastNow    time.Time
+	last       map[string]time.Time
 }
 
 func newBillingRatioWarningLimiter(window time.Duration) *billingRatioWarningLimiter {
+	return newBillingRatioWarningLimiterWithCapacity(window, invalidValuePackageBillingRatioWarningMaxEntries)
+}
+
+func newBillingRatioWarningLimiterWithCapacity(window time.Duration, maxEntries int) *billingRatioWarningLimiter {
+	if maxEntries <= 0 {
+		maxEntries = 1
+	}
 	return &billingRatioWarningLimiter{
-		window: window,
-		last:   make(map[string]time.Time),
+		window:     window,
+		maxEntries: maxEntries,
+		last:       make(map[string]time.Time),
 	}
 }
 
 func (l *billingRatioWarningLimiter) Allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if !l.lastNow.IsZero() && now.Before(l.lastNow) {
+		if l.lastNow.Sub(now) >= l.window {
+			clear(l.last)
+			l.lastNow = now
+		} else {
+			now = l.lastNow
+		}
+	} else {
+		l.lastNow = now
+	}
+	for existingKey, previous := range l.last {
+		if now.Sub(previous) >= l.window {
+			delete(l.last, existingKey)
+		}
+	}
 	if previous, ok := l.last[key]; ok && now.Sub(previous) < l.window {
 		return false
+	}
+	if len(l.last) >= l.maxEntries {
+		var oldestKey string
+		var oldest time.Time
+		for existingKey, previous := range l.last {
+			if oldestKey == "" || previous.Before(oldest) {
+				oldestKey = existingKey
+				oldest = previous
+			}
+		}
+		delete(l.last, oldestKey)
 	}
 	l.last[key] = now
 	return true

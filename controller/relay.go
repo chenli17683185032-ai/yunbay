@@ -410,6 +410,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 var (
 	relayMidjourneySubmitHandler = relay.RelayMidjourneySubmit
 	relaySwapFaceHandler         = relay.RelaySwapFace
+	midjourneyFlushErrorLogger   = logger.LogError
 	generateMidjourneyRelayInfo  = func(c *gin.Context) (*relaycommon.RelayInfo, error) {
 		return relaycommon.GenRelayInfo(c, types.RelayFormatMjProxy, nil, nil)
 	}
@@ -468,7 +469,13 @@ func relayMidjourneyWithInfo(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
 		return
 	}
 	if flushErr := responseBuffer.FlushToOriginal(); flushErr != nil {
-		common.SysError("flush midjourney response error: " + flushErr.Error())
+		midjourneyFlushErrorLogger(c, fmt.Sprintf(
+			"midjourney client response flush failed: request_id=%s task_id=%s channel_id=%d error=%s",
+			relayInfo.RequestId,
+			c.GetString("midjourney_task_id"),
+			c.GetInt("channel_id"),
+			flushErr.Error(),
+		))
 	}
 }
 

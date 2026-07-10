@@ -59,22 +59,14 @@ func refundInsertedMidjourneyBilling(c *gin.Context, task *model.Midjourney, rea
 	if task == nil {
 		return
 	}
+	preStatus := task.Status
 	task.Status = "FAILURE"
-	task.Progress = "REFUND_PENDING"
+	task.Progress = "100%"
 	if task.FailReason == "" {
 		task.FailReason = reason
 	}
-	if err := task.Update(); err != nil {
-		common.SysError("mark midjourney billing refund pending error: " + err.Error())
-		return
-	}
-	if err := service.RefundMidjourneyQuota(c, task, reason); err != nil {
+	if _, err := service.CommitMidjourneyTaskUpdate(c, task, preStatus, task.HasRefundableQuota(), reason); err != nil {
 		common.SysError("refund persisted midjourney billing error: " + err.Error())
-		return
-	}
-	task.Progress = "100%"
-	if err := task.Update(); err != nil {
-		common.SysError("complete midjourney billing refund error: " + err.Error())
 	}
 }
 
@@ -82,11 +74,15 @@ func snapshotMidjourneyBilling(info *relaycommon.RelayInfo) model.MidjourneyBill
 	if info == nil || info.Billing == nil {
 		return model.MidjourneyBillingContext{}
 	}
+	quotaSnapshot := info.Billing.GetQuotaSnapshot()
 	return model.MidjourneyBillingContext{
+		Version:                    model.MidjourneyBillingContextVersion,
 		BillingSource:              info.BillingSource,
 		SubscriptionId:             info.SubscriptionId,
 		RequestId:                  info.RequestId,
 		TokenId:                    info.TokenId,
+		FundingQuota:               quotaSnapshot.FundingQuota,
+		TokenQuota:                 quotaSnapshot.TokenQuota,
 		ValuePackageSubscriptionId: info.ValuePackageSubscriptionId,
 		ValuePackagePlanId:         info.ValuePackagePlanId,
 		ValuePackageModelGroup:     info.ValuePackageModelGroup,
@@ -180,6 +176,17 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 			Result:      "",
 		}
 	}
+	preStatus := midjourneyTask.Status
+	if midjourneyTask.Progress == "REFUND_PENDING" {
+		midjourneyTask.Progress = "100%"
+		if _, err = service.CommitMidjourneyTaskUpdate(c, midjourneyTask, preStatus, midjourneyTask.HasRefundableQuota(), midjourneyTask.FailReason); err != nil {
+			return &dto.MidjourneyResponse{Code: 4, Description: "update_midjourney_task_failed"}
+		}
+		return nil
+	}
+	if midjourneyTask.Progress == "100%" {
+		return nil
+	}
 	midjourneyTask.Progress = midjRequest.Progress
 	midjourneyTask.PromptEn = midjRequest.PromptEn
 	midjourneyTask.State = midjRequest.State
@@ -192,7 +199,13 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 	midjourneyTask.VideoUrls = string(videoUrlsStr)
 	midjourneyTask.Status = midjRequest.Status
 	midjourneyTask.FailReason = midjRequest.FailReason
-	err = midjourneyTask.Update()
+	shouldRefund := false
+	if (midjourneyTask.Progress != "100%" && midjourneyTask.FailReason != "") ||
+		(midjourneyTask.Progress == "100%" && midjourneyTask.Status == "FAILURE") {
+		midjourneyTask.Progress = "100%"
+		shouldRefund = midjourneyTask.HasRefundableQuota()
+	}
+	_, err = service.CommitMidjourneyTaskUpdate(c, midjourneyTask, preStatus, shouldRefund, midjourneyTask.FailReason)
 	if err != nil {
 		return &dto.MidjourneyResponse{
 			Code:        4,
@@ -322,6 +335,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
 	}
 	insertedTask = midjourneyTask
+	c.Set("midjourney_task_id", midjourneyTask.MjId)
 	c.Writer.WriteHeader(mjResp.StatusCode)
 	respBody, err := json.Marshal(midjResponse)
 	if err != nil {
@@ -332,8 +346,9 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "copy_response_body_failed")
 	}
 	if mjResp.StatusCode == http.StatusOK && mjResp.Response.Code == 1 {
-		// Copy must finish before settlement so local write failures can still refund.
-		// A later settlement error cannot rewrite the already-forwarded success body.
+		// The relay copy targets the controller's in-memory response buffer. It must
+		// finish before settlement; a later client-socket flush failure does not
+		// roll back an accepted and persisted upstream task.
 		if info.Billing != nil {
 			if err := midjourneySettleBilling(c, info, info.PriceData.Quota); err != nil {
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "settle_midjourney_billing_failed")
@@ -688,6 +703,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 	insertedTask = midjourneyTask
+	c.Set("midjourney_task_id", midjourneyTask.MjId)
 
 	if midjResponse.Code == 22 { //22-排队中，说明任务已存在
 		//修改返回值
@@ -717,8 +733,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 	if consumeQuota && midjResponseWithStatus.StatusCode == http.StatusOK {
-		// Copy must finish before settlement so local write failures can still refund.
-		// A later settlement error cannot rewrite the already-forwarded success body.
+		// The relay copy targets the controller's in-memory response buffer. It must
+		// finish before settlement; a later client-socket flush failure does not
+		// roll back an accepted and persisted upstream task.
 		if relayInfo.Billing != nil {
 			if err := midjourneySettleBilling(c, relayInfo, relayInfo.PriceData.Quota); err != nil {
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "settle_midjourney_billing_failed")

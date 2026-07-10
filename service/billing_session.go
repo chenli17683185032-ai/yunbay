@@ -239,7 +239,21 @@ func (s *BillingSession) needsRefundLocked() bool {
 
 // GetPreConsumedQuota 返回实际预扣的额度。
 func (s *BillingSession) GetPreConsumedQuota() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.preConsumedQuota
+}
+
+func (s *BillingSession) GetQuotaSnapshot() relaycommon.BillingQuotaSnapshot {
+	if s == nil {
+		return relaycommon.BillingQuotaSnapshot{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return relaycommon.BillingQuotaSnapshot{
+		FundingQuota: s.preConsumedQuota,
+		TokenQuota:   s.tokenConsumed,
+	}
 }
 
 func (s *BillingSession) Reserve(targetQuota int) error {
@@ -258,13 +272,16 @@ func (s *BillingSession) Reserve(targetQuota int) error {
 	if err := s.reserveFunding(delta); err != nil {
 		return err
 	}
-	if err := s.reserveToken(delta); err != nil {
+	tokenReserved, err := s.reserveToken(delta)
+	if err != nil {
 		s.rollbackFundingReserve(delta)
 		return err
 	}
 
 	s.preConsumedQuota += delta
-	s.tokenConsumed += delta
+	if tokenReserved {
+		s.tokenConsumed += delta
+	}
 	s.extraReserved += delta
 	s.syncRelayInfo()
 	return nil
@@ -305,12 +322,13 @@ func (s *BillingSession) ReserveRealtime(deltaQuota int) (int, error) {
 	funding, isSubscription := s.funding.(*SubscriptionFunding)
 	if isSubscription && funding.valuePackageSubscriptionId > 0 {
 		previousTarget := s.preConsumedQuota
-		if err := s.reserveToken(extraDelta); err != nil {
+		tokenReserved, err := s.reserveToken(extraDelta)
+		if err != nil {
 			return currentTarget, err
 		}
 		res, err := model.ReserveValuePackageUsageToTarget(funding.requestId, funding.userId, funding.valuePackageSubscriptionId, int64(target))
 		if err != nil {
-			if !s.relayInfo.IsPlayground {
+			if tokenReserved {
 				if rollbackErr := model.IncreaseTokenQuota(s.relayInfo.TokenId, s.relayInfo.TokenKey, extraDelta); rollbackErr != nil {
 					common.SysLog(fmt.Sprintf("error rolling back realtime token reserve (userId=%d, tokenId=%d, amount=%d, fundingErr=%s): %s",
 						s.relayInfo.UserId, s.relayInfo.TokenId, extraDelta, err.Error(), rollbackErr.Error()))
@@ -319,7 +337,9 @@ func (s *BillingSession) ReserveRealtime(deltaQuota int) (int, error) {
 			return currentTarget, err
 		}
 		s.preConsumedQuota = target
-		s.tokenConsumed += extraDelta
+		if tokenReserved {
+			s.tokenConsumed += extraDelta
+		}
 		s.extraReserved += target - previousTarget
 		funding.subscriptionId = res.UserSubscriptionId
 		funding.AmountTotal = res.AmountTotal
@@ -332,13 +352,16 @@ func (s *BillingSession) ReserveRealtime(deltaQuota int) (int, error) {
 	if err := s.reserveFunding(extraDelta); err != nil {
 		return currentTarget, err
 	}
-	if err := s.reserveToken(extraDelta); err != nil {
+	tokenReserved, err := s.reserveToken(extraDelta)
+	if err != nil {
 		s.rollbackFundingReserve(extraDelta)
 		return currentTarget, err
 	}
 
 	s.preConsumedQuota += extraDelta
-	s.tokenConsumed += extraDelta
+	if tokenReserved {
+		s.tokenConsumed += extraDelta
+	}
 	s.extraReserved += extraDelta
 	s.syncRelayInfo()
 	s.relayInfo.RealtimeActualQuota = nextActual
@@ -369,7 +392,9 @@ func (s *BillingSession) preConsume(c *gin.Context, quota int) *types.NewAPIErro
 		if err := PreConsumeTokenQuota(s.relayInfo, effectiveQuota); err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 		}
-		s.tokenConsumed = effectiveQuota
+		if !s.relayInfo.IsPlayground {
+			s.tokenConsumed = effectiveQuota
+		}
 	}
 
 	// ---- 2) 预扣资金来源 ----
@@ -437,14 +462,14 @@ func (s *BillingSession) rollbackFundingReserve(delta int) {
 	}
 }
 
-func (s *BillingSession) reserveToken(delta int) error {
+func (s *BillingSession) reserveToken(delta int) (bool, error) {
 	if delta <= 0 || s.relayInfo.IsPlayground {
-		return nil
+		return false, nil
 	}
 	if err := PreConsumeTokenQuota(s.relayInfo, delta); err != nil {
-		return types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		return false, types.NewErrorWithStatusCode(err, types.ErrorCodePreConsumeTokenQuotaFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
 	}
-	return nil
+	return true, nil
 }
 
 // shouldTrust 统一信任额度检查，适用于钱包和订阅。

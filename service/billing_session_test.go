@@ -64,6 +64,48 @@ func setupValuePackageBillingSessionTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestBillingSessionQuotaSnapshotTracksActualLegs(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		force       bool
+		playground  bool
+		wantFunding int
+		wantToken   int
+	}{
+		{name: "ordinary force preconsume", force: true, wantFunding: 100, wantToken: 100},
+		{name: "playground", force: true, playground: true, wantFunding: 100, wantToken: 0},
+		{name: "trusted", force: false, wantFunding: 0, wantToken: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setupValuePackageBillingSessionTestDB(t)
+			quota := common.GetTrustQuota() + 1000
+			user := model.User{Username: "billing-snapshot", Status: common.UserStatusEnabled, Quota: quota}
+			require.NoError(t, model.DB.Create(&user).Error)
+			token := model.Token{
+				UserId: user.Id, Key: "billing-snapshot-token", Name: "billing-snapshot-token",
+				Status: common.TokenStatusEnabled, RemainQuota: quota,
+			}
+			require.NoError(t, model.DB.Create(&token).Error)
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Set("token_quota", quota)
+			info := &relaycommon.RelayInfo{
+				UserId: user.Id, UserQuota: quota, TokenId: token.Id, TokenKey: token.Key,
+				OriginModelName: "gpt-test", IsPlayground: tt.playground, ForcePreConsume: tt.force,
+				UserSetting: dto.UserSetting{BillingPreference: "wallet_only"},
+				PriceData:   types.PriceData{QuotaToPreConsume: 100},
+			}
+
+			session, apiErr := NewBillingSession(ctx, info, 100)
+
+			require.Nil(t, apiErr)
+			require.Equal(t, relaycommon.BillingQuotaSnapshot{
+				FundingQuota: tt.wantFunding,
+				TokenQuota:   tt.wantToken,
+			}, session.GetQuotaSnapshot())
+		})
+	}
+}
+
 func TestValuePackageBillingIgnoresWalletOnlyPreference(t *testing.T) {
 	setupValuePackageBillingSessionTestDB(t)
 	user := model.User{Username: "vp-billing-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupTiyan, Quota: 1000}

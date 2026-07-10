@@ -2,9 +2,11 @@ package service
 
 import (
 	"bytes"
+	"fmt"
 	"math"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,6 +37,74 @@ func captureBillingRatioWarnings(t *testing.T) *bytes.Buffer {
 	return buffer
 }
 
+func TestBillingRatioWarningLimiterPrunesExpiredEntries(t *testing.T) {
+	limiter := newBillingRatioWarningLimiterWithCapacity(time.Minute, 10)
+	now := time.Unix(1000, 0)
+	require.True(t, limiter.Allow("expired-a", now))
+	require.True(t, limiter.Allow("expired-b", now.Add(time.Second)))
+
+	require.True(t, limiter.Allow("current", now.Add(2*time.Minute)))
+
+	require.Len(t, limiter.last, 1)
+	require.Contains(t, limiter.last, "current")
+}
+
+func TestBillingRatioWarningLimiterEnforcesCapacity(t *testing.T) {
+	limiter := newBillingRatioWarningLimiterWithCapacity(time.Hour, 2)
+	now := time.Unix(2000, 0)
+	require.True(t, limiter.Allow("oldest", now))
+	require.True(t, limiter.Allow("middle", now.Add(time.Second)))
+	require.True(t, limiter.Allow("newest", now.Add(2*time.Second)))
+
+	require.Len(t, limiter.last, 2)
+	require.NotContains(t, limiter.last, "oldest")
+	require.Contains(t, limiter.last, "middle")
+	require.Contains(t, limiter.last, "newest")
+}
+
+func TestBillingRatioWarningLimiterIsBoundedUnderConcurrency(t *testing.T) {
+	now := time.Unix(3000, 0)
+	sameKeyLimiter := newBillingRatioWarningLimiterWithCapacity(time.Hour, 32)
+	var sameKeyAllowed atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if sameKeyLimiter.Allow("shared", now) {
+				sameKeyAllowed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, int32(1), sameKeyAllowed.Load())
+
+	boundedLimiter := newBillingRatioWarningLimiterWithCapacity(time.Hour, 32)
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			boundedLimiter.Allow(fmt.Sprintf("key-%d", index), now)
+		}(i)
+	}
+	wg.Wait()
+
+	require.LessOrEqual(t, len(boundedLimiter.last), 32)
+}
+
+func TestBillingRatioWarningLimiterResetsOnClockRollback(t *testing.T) {
+	limiter := newBillingRatioWarningLimiterWithCapacity(time.Hour, 10)
+	later := time.Unix(5000, 0)
+	require.True(t, limiter.Allow("same", later))
+	require.False(t, limiter.Allow("same", later.Add(-time.Minute)))
+	require.Equal(t, later, limiter.last["same"])
+
+	require.True(t, limiter.Allow("same", later.Add(-time.Hour)))
+
+	require.Len(t, limiter.last, 1)
+	require.Equal(t, later.Add(-time.Hour), limiter.last["same"])
+}
+
 type recordingRealtimeBilling struct {
 	deltas []int
 }
@@ -43,7 +113,10 @@ func (b *recordingRealtimeBilling) Settle(int) error         { return nil }
 func (b *recordingRealtimeBilling) Refund(*gin.Context)      {}
 func (b *recordingRealtimeBilling) NeedsRefund() bool        { return false }
 func (b *recordingRealtimeBilling) GetPreConsumedQuota() int { return 0 }
-func (b *recordingRealtimeBilling) Reserve(int) error        { return nil }
+func (b *recordingRealtimeBilling) GetQuotaSnapshot() relaycommon.BillingQuotaSnapshot {
+	return relaycommon.BillingQuotaSnapshot{}
+}
+func (b *recordingRealtimeBilling) Reserve(int) error { return nil }
 func (b *recordingRealtimeBilling) ReserveRealtime(delta int) (int, error) {
 	b.deltas = append(b.deltas, delta)
 	return delta, nil

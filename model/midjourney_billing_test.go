@@ -14,10 +14,13 @@ func TestMidjourneyBillingContextRoundTripAndLegacyCompatibility(t *testing.T) {
 		UserId: 1,
 		MjId:   "mj-billing-context",
 		BillingContext: MidjourneyBillingContext{
+			Version:                    MidjourneyBillingContextVersion,
 			BillingSource:              "subscription",
 			SubscriptionId:             12,
 			RequestId:                  "mj-request",
 			TokenId:                    34,
+			FundingQuota:               450,
+			TokenQuota:                 0,
 			ValuePackageSubscriptionId: 56,
 			ValuePackagePlanId:         78,
 			ValuePackageBillingGroup:   "month-card",
@@ -37,11 +40,17 @@ func TestMidjourneyBillingContextRoundTripAndLegacyCompatibility(t *testing.T) {
 	var storedLegacy Midjourney
 	require.NoError(t, DB.First(&storedLegacy, legacy.Id).Error)
 	require.Equal(t, MidjourneyBillingContext{}, storedLegacy.BillingContext)
+	storedLegacy.Quota = 125
+	storedLegacy.BillingContext.TokenId = 9
+	require.Equal(t, 125, storedLegacy.FundingRefundQuota())
+	require.Equal(t, 125, storedLegacy.TokenRefundQuota())
 
 	value, err := task.BillingContext.Value()
 	require.NoError(t, err)
 	encoded, ok := value.(string)
 	require.True(t, ok)
+	require.Contains(t, encoded, `"funding_quota":450`)
+	require.Contains(t, encoded, `"token_quota":0`)
 	var fromString MidjourneyBillingContext
 	require.NoError(t, fromString.Scan(encoded))
 	require.Equal(t, task.BillingContext, fromString)

@@ -40,7 +40,7 @@ func UpdateMidjourneyTaskBulk() {
 				task.Status = "FAILURE"
 				task.Progress = "100%"
 				task.FailReason = "empty upstream task id"
-				if _, err := commitMidjourneyTaskUpdate(ctx, task, preStatus, task.Quota != 0, task.FailReason); err != nil {
+				if _, err := service.CommitMidjourneyTaskUpdate(ctx, task, preStatus, task.HasRefundableQuota(), task.FailReason); err != nil {
 					logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
 				}
 				continue
@@ -66,7 +66,7 @@ func UpdateMidjourneyTaskBulk() {
 					task.FailReason = fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId)
 					task.Status = "FAILURE"
 					task.Progress = "100%"
-					if _, updateErr := commitMidjourneyTaskUpdate(ctx, task, preStatus, task.Quota != 0, task.FailReason); updateErr != nil {
+					if _, updateErr := service.CommitMidjourneyTaskUpdate(ctx, task, preStatus, task.HasRefundableQuota(), task.FailReason); updateErr != nil {
 						logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", updateErr))
 					}
 				}
@@ -164,11 +164,9 @@ func UpdateMidjourneyTaskBulk() {
 				if (task.Progress != "100%" && responseItem.FailReason != "") || (task.Progress == "100%" && task.Status == "FAILURE") {
 					logger.LogInfo(ctx, task.MjId+" 构建失败，"+task.FailReason)
 					task.Progress = "100%"
-					if task.Quota != 0 {
-						shouldReturnQuota = true
-					}
+					shouldReturnQuota = task.HasRefundableQuota()
 				}
-				won, err := commitMidjourneyTaskUpdate(ctx, task, preStatus, shouldReturnQuota, "构图失败")
+				won, err := service.CommitMidjourneyTaskUpdate(ctx, task, preStatus, shouldReturnQuota, "构图失败")
 				if err != nil {
 					logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
 				} else if !won {
@@ -177,25 +175,6 @@ func UpdateMidjourneyTaskBulk() {
 			}
 		}
 	}
-}
-
-func commitMidjourneyTaskUpdate(ctx context.Context, task *model.Midjourney, preStatus string, shouldRefund bool, reason string) (bool, error) {
-	targetProgress := task.Progress
-	if shouldRefund {
-		task.Progress = "REFUND_PENDING"
-	}
-	won, err := task.UpdateWithStatus(preStatus)
-	if err != nil || !won || !shouldRefund {
-		return won, err
-	}
-	if err := service.RefundMidjourneyQuota(ctx, task, reason); err != nil {
-		return true, err
-	}
-	task.Progress = targetProgress
-	if err := task.Update(); err != nil {
-		return true, err
-	}
-	return true, nil
 }
 
 func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {

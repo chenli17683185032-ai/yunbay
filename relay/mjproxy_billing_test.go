@@ -57,6 +57,9 @@ func (b *recordingMidjourneyBilling) NeedsRefund() bool { return b.needsRefund }
 func (b *recordingMidjourneyBilling) GetPreConsumedQuota() int {
 	return b.preConsumed
 }
+func (b *recordingMidjourneyBilling) GetQuotaSnapshot() relaycommon.BillingQuotaSnapshot {
+	return relaycommon.BillingQuotaSnapshot{FundingQuota: b.preConsumed, TokenQuota: b.preConsumed}
+}
 func (b *recordingMidjourneyBilling) Reserve(int) error { return nil }
 func (b *recordingMidjourneyBilling) ReserveRealtime(int) (int, error) {
 	return b.preConsumed, nil
@@ -367,6 +370,191 @@ func TestRelayMidjourneySubmitNonChargeableTaskCannotRefundPhantomQuota(t *testi
 	require.Equal(t, 1000, token.RemainQuota)
 }
 
+func TestRelayMidjourneyPlaygroundFailureRefundsFundingWithoutPhantomToken(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":23,"description":"queue full","result":"mj-playground-refund"}`)
+	require.NoError(t, db.Create(&model.User{
+		Id: 901, Username: "mj-playground", Quota: 1000, Status: common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Token{
+		Id: 902, UserId: 901, Key: "mj-playground-token", Name: "mj-playground-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 1000,
+	}).Error)
+	midjourneyModelPriceHelperPerCall = func(*gin.Context, *relaycommon.RelayInfo) (types.PriceData, error) {
+		return types.PriceData{
+			Quota: 500, QuotaBeforeGroup: 1000,
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 0.5},
+		}, nil
+	}
+	c, _ := newMidjourneyBillingContext("/mj/submit/imagine", `{"prompt":"playground"}`, upstream.URL)
+	info := &relaycommon.RelayInfo{
+		UserId: 901, TokenId: 902, UsingGroup: "group-a", OriginModelName: "mj_imagine",
+		RelayMode: relayconstant.RelayModeMidjourneyImagine, RequestId: "mj-playground-refund",
+		StartTime: time.Now(), IsPlayground: true,
+		UserSetting: dto.UserSetting{BillingPreference: "wallet_only"},
+	}
+
+	require.Nil(t, RelayMidjourneySubmit(c, info))
+	var task model.Midjourney
+	require.NoError(t, db.Where("mj_id = ?", "mj-playground-refund").First(&task).Error)
+	require.Equal(t, "100%", task.Progress)
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	var token model.Token
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 1000, token.RemainQuota)
+}
+
+func TestRelayMidjourneyNotifyTerminalFailureUsesPersistedRefundStateMachine(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	require.NoError(t, db.Create(&model.User{
+		Id: 901, Username: "mj-notify", Quota: 500, Status: common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Token{
+		Id: 902, UserId: 901, Key: "mj-notify-token", Name: "mj-notify-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 500, UsedQuota: 500,
+	}).Error)
+	task := &model.Midjourney{
+		UserId: 901, ChannelId: 42, MjId: "mj-notify-failure", Action: constant.MjActionImagine,
+		Status: "IN_PROGRESS", Progress: "50%", Quota: 500,
+		BillingContext: model.MidjourneyBillingContext{
+			BillingSource: service.BillingSourceWallet, TokenId: 902,
+		},
+	}
+	require.NoError(t, task.Insert())
+	c, _ := newMidjourneyBillingContext(
+		"/mj/notify",
+		`{"id":"mj-notify-failure","status":"FAILURE","progress":"100%","failReason":"upstream failed"}`,
+		"",
+	)
+
+	require.Nil(t, RelayMidjourneyNotify(c))
+	var completed model.Midjourney
+	require.NoError(t, db.First(&completed, task.Id).Error)
+	require.Equal(t, "100%", completed.Progress)
+	require.True(t, completed.BillingContext.BillingRefunded)
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	var token model.Token
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 1000, token.RemainQuota)
+}
+
+func TestRelayMidjourneyNotifyRetriesWhenPendingCASPersistenceFails(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	require.NoError(t, db.Create(&model.User{
+		Id: 901, Username: "mj-notify-cas", Quota: 500, Status: common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Token{
+		Id: 902, UserId: 901, Key: "mj-notify-cas-token", Name: "mj-notify-cas-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 500, UsedQuota: 500,
+	}).Error)
+	task := &model.Midjourney{
+		UserId: 901, ChannelId: 42, MjId: "mj-notify-cas", Action: constant.MjActionImagine,
+		Status: "IN_PROGRESS", Progress: "50%", Quota: 500,
+		BillingContext: model.MidjourneyBillingContext{
+			BillingSource: service.BillingSourceWallet, TokenId: 902,
+		},
+	}
+	require.NoError(t, task.Insert())
+	callbackName := "test:fail_first_notify_pending_cas"
+	failed := false
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if !failed && tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Midjourney" {
+			failed = true
+			tx.AddError(errors.New("forced notify pending CAS failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callbackName) })
+	requestBody := `{"id":"mj-notify-cas","status":"FAILURE","progress":"100%","failReason":"upstream failed"}`
+	first, _ := newMidjourneyBillingContext("/mj/notify", requestBody, "")
+
+	require.NotNil(t, RelayMidjourneyNotify(first))
+	var unchanged model.Midjourney
+	require.NoError(t, db.First(&unchanged, task.Id).Error)
+	require.Equal(t, "IN_PROGRESS", unchanged.Status)
+	require.Equal(t, "50%", unchanged.Progress)
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 500, user.Quota)
+	var token model.Token
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 500, token.RemainQuota)
+
+	retry, _ := newMidjourneyBillingContext("/mj/notify", requestBody, "")
+	require.Nil(t, RelayMidjourneyNotify(retry))
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 1000, token.RemainQuota)
+	var completed model.Midjourney
+	require.NoError(t, db.First(&completed, task.Id).Error)
+	require.Equal(t, "100%", completed.Progress)
+	require.True(t, completed.BillingContext.BillingRefunded)
+}
+
+func TestRelayMidjourneyNotifyRetriesPartialRefundWithoutRepeatingFunding(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	require.NoError(t, db.Create(&model.User{
+		Id: 901, Username: "mj-notify-retry", Quota: 500, Status: common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Token{
+		Id: 902, UserId: 901, Key: "mj-notify-retry-token", Name: "mj-notify-retry-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 500, UsedQuota: 500,
+	}).Error)
+	task := &model.Midjourney{
+		UserId: 901, ChannelId: 42, MjId: "mj-notify-retry", Action: constant.MjActionImagine,
+		Status: "IN_PROGRESS", Progress: "50%", Quota: 500,
+		BillingContext: model.MidjourneyBillingContext{
+			BillingSource: service.BillingSourceWallet, TokenId: 902,
+		},
+	}
+	require.NoError(t, task.Insert())
+	callbackName := "test:fail_first_notify_token_refund"
+	failed := false
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if !failed && tx.Statement.Schema != nil && tx.Statement.Schema.Name == "Token" {
+			failed = true
+			tx.AddError(errors.New("forced notify token refund failure"))
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callbackName) })
+	requestBody := `{"id":"mj-notify-retry","status":"FAILURE","progress":"100%","failReason":"upstream failed"}`
+	first, _ := newMidjourneyBillingContext("/mj/notify", requestBody, "")
+
+	firstErr := RelayMidjourneyNotify(first)
+
+	require.NotNil(t, firstErr)
+	var pending model.Midjourney
+	require.NoError(t, db.First(&pending, task.Id).Error)
+	require.Equal(t, "REFUND_PENDING", pending.Progress)
+	require.True(t, pending.BillingContext.FundingRefunded)
+	require.False(t, pending.BillingContext.TokenRefunded)
+	var user model.User
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	var token model.Token
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 500, token.RemainQuota)
+
+	retry, _ := newMidjourneyBillingContext(
+		"/mj/notify",
+		`{"id":"mj-notify-retry","status":"IN_PROGRESS","progress":"75%"}`,
+		"",
+	)
+	require.Nil(t, RelayMidjourneyNotify(retry))
+	require.NoError(t, db.First(&user, 901).Error)
+	require.Equal(t, 1000, user.Quota)
+	require.NoError(t, db.First(&token, 902).Error)
+	require.Equal(t, 1000, token.RemainQuota)
+	var completed model.Midjourney
+	require.NoError(t, db.First(&completed, task.Id).Error)
+	require.Equal(t, "100%", completed.Progress)
+	require.True(t, completed.BillingContext.BillingRefunded)
+}
+
 func TestMidjourneyChargeableEntrypointsRefundUnsettledFailures(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -465,7 +653,7 @@ func TestMidjourneyChargeableEntrypointsRefundUnsettledFailures(t *testing.T) {
 	}
 }
 
-func TestRelaySwapFaceRefundsWhenResponseCopyFails(t *testing.T) {
+func TestRelaySwapFaceRefundsWhenInternalBufferedWriteFails(t *testing.T) {
 	setupMidjourneyBillingTest(t)
 	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":1,"description":"ok","result":"mj-copy"}`)
 	billing, prepareCalls, settleCalls := installRecordingMidjourneyBillingHooks(t, 450)
