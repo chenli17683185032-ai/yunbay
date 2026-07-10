@@ -159,7 +159,7 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 }
 
 func appendTaskValuePackageBillingInfo(bc *model.TaskBillingContext, other map[string]interface{}) {
-	if bc == nil || other == nil {
+	if bc == nil || other == nil || !bc.SubscriptionRatioApplied {
 		return
 	}
 	billingGroup := strings.TrimSpace(bc.ValuePackageBillingGroup)

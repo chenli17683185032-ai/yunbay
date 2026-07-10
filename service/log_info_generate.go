@@ -186,19 +186,15 @@ func appendBillingInfoFromPriceData(relayInfo *relaycommon.RelayInfo, priceData 
 }
 
 func appendValuePackageBillingInfo(relayInfo *relaycommon.RelayInfo, priceData types.PriceData, other map[string]interface{}) {
-	if relayInfo == nil || other == nil || relayInfo.ValuePackageSubscriptionId <= 0 {
+	if relayInfo == nil || other == nil {
 		return
 	}
-	billingGroup := strings.TrimSpace(relayInfo.ValuePackageBillingGroup)
-	if billingGroup == "" {
-		return
+	if relayInfo.ValuePackageSubscriptionId != 0 {
+		other["value_package_subscription_id"] = relayInfo.ValuePackageSubscriptionId
 	}
-
-	other["value_package_subscription_id"] = relayInfo.ValuePackageSubscriptionId
 	if relayInfo.ValuePackagePlanId != 0 {
 		other["value_package_plan_id"] = relayInfo.ValuePackagePlanId
 	}
-	other["value_package_billing_group"] = billingGroup
 	if relayInfo.ValuePackageModelGroup != "" {
 		other["value_package_model_group"] = relayInfo.ValuePackageModelGroup
 	}
@@ -206,11 +202,20 @@ func appendValuePackageBillingInfo(relayInfo *relaycommon.RelayInfo, priceData t
 		other["value_package_package_type"] = relayInfo.ValuePackagePackageType
 	}
 
-	ratioSource := strings.TrimSpace(priceData.SubscriptionRatioSource)
-	if ratioSource == SubscriptionRatioSourceConfigured || ratioSource == SubscriptionRatioSourceDefault {
-		other["value_package_effective_ratio"] = priceData.GroupRatioInfo.GroupRatio
-		other["value_package_ratio_source"] = ratioSource
+	if !priceData.SubscriptionRatioApplied || relayInfo.ValuePackageSubscriptionId <= 0 {
+		return
 	}
+	billingGroup := strings.TrimSpace(relayInfo.ValuePackageBillingGroup)
+	if billingGroup == "" {
+		return
+	}
+	ratioSource := strings.TrimSpace(priceData.SubscriptionRatioSource)
+	if ratioSource != SubscriptionRatioSourceConfigured && ratioSource != SubscriptionRatioSourceDefault {
+		return
+	}
+	other["value_package_billing_group"] = billingGroup
+	other["value_package_effective_ratio"] = priceData.GroupRatioInfo.GroupRatio
+	other["value_package_ratio_source"] = ratioSource
 }
 
 func appendRequestConversionChain(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {

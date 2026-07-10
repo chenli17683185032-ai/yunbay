@@ -863,3 +863,42 @@ func TestGenerateMjOtherInfoIncludesValuePackageBillingAudit(t *testing.T) {
 	assert.Equal(t, 1.0, other["value_package_effective_ratio"])
 	assert.Equal(t, SubscriptionRatioSourceDefault, other["value_package_ratio_source"])
 }
+
+func TestGenerateMjOtherInfoValuePackageRatioAuditRequiresFrozenPackageState(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		billingGroup string
+		applied      bool
+		ratioSource  string
+	}{
+		{name: "configured source not applied", billingGroup: "month-card", ratioSource: SubscriptionRatioSourceConfigured},
+		{name: "default source not applied", billingGroup: "month-card", ratioSource: SubscriptionRatioSourceDefault},
+		{name: "regular source with residual package metadata", billingGroup: "month-card", applied: true, ratioSource: SubscriptionRatioSourceRegular},
+		{name: "missing billing group preserves compatibility metadata", billingGroup: "   ", applied: true, ratioSource: SubscriptionRatioSourceConfigured},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			relayInfo := &relaycommon.RelayInfo{
+				ValuePackageSubscriptionId: 123,
+				ValuePackagePlanId:         456,
+				ValuePackageBillingGroup:   tt.billingGroup,
+				ValuePackageModelGroup:     "month-card-models",
+				ValuePackagePackageType:    "month",
+			}
+			priceData := types.PriceData{
+				GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: 0.45},
+				SubscriptionRatioApplied: tt.applied,
+				SubscriptionRatioSource:  tt.ratioSource,
+			}
+
+			other := GenerateMjOtherInfo(relayInfo, priceData)
+
+			assert.Equal(t, 123, other["value_package_subscription_id"])
+			assert.Equal(t, 456, other["value_package_plan_id"])
+			assert.Equal(t, "month-card-models", other["value_package_model_group"])
+			assert.Equal(t, "month", other["value_package_package_type"])
+			assert.NotContains(t, other, "value_package_billing_group")
+			assert.NotContains(t, other, "value_package_effective_ratio")
+			assert.NotContains(t, other, "value_package_ratio_source")
+		})
+	}
+}

@@ -860,6 +860,7 @@ func TestTaskBillingOtherValuePackageAndRegularSubscriptionRatioAudit(t *testing
 		name                 string
 		billingContextJSON   string
 		wantValuePackage     bool
+		wantApplied          bool
 		wantEffectiveRatio   float64
 		wantSubscriptionFrom string
 	}{
@@ -873,6 +874,7 @@ func TestTaskBillingOtherValuePackageAndRegularSubscriptionRatioAudit(t *testing
 				"has_original_user_group_ratio":true,"original_user_group_ratio":-1
 			}`,
 			wantValuePackage:     true,
+			wantApplied:          true,
 			wantEffectiveRatio:   0.45,
 			wantSubscriptionFrom: SubscriptionRatioSourceConfigured,
 		},
@@ -885,6 +887,7 @@ func TestTaskBillingOtherValuePackageAndRegularSubscriptionRatioAudit(t *testing
 				"has_original_group_ratio":true,"original_group_ratio":0.3
 			}`,
 			wantValuePackage:     true,
+			wantApplied:          true,
 			wantEffectiveRatio:   1,
 			wantSubscriptionFrom: SubscriptionRatioSourceDefault,
 		},
@@ -893,8 +896,30 @@ func TestTaskBillingOtherValuePackageAndRegularSubscriptionRatioAudit(t *testing
 			billingContextJSON: `{
 				"model_price":0.02,"group_ratio":1,"origin_model_name":"test-model",
 				"subscription_ratio_applied":true,"subscription_ratio_source":"regular_subscription_1x",
+				"value_package_billing_group":"month-card",
 				"has_original_group_ratio":true,"original_group_ratio":0.3,
 				"has_original_user_group_ratio":true,"original_user_group_ratio":-1
+			}`,
+			wantValuePackage: false,
+			wantApplied:      true,
+		},
+		{
+			name: "configured package source not applied",
+			billingContextJSON: `{
+				"model_price":0.02,"group_ratio":0.45,"origin_model_name":"test-model",
+				"subscription_ratio_source":"configured",
+				"value_package_billing_group":"month-card",
+				"has_original_group_ratio":true,"original_group_ratio":0.3
+			}`,
+			wantValuePackage: false,
+		},
+		{
+			name: "default package source not applied",
+			billingContextJSON: `{
+				"model_price":0.02,"group_ratio":1,"origin_model_name":"test-model",
+				"subscription_ratio_source":"default_1x",
+				"value_package_billing_group":"month-card",
+				"has_original_group_ratio":true,"original_group_ratio":0.3
 			}`,
 			wantValuePackage: false,
 		},
@@ -905,7 +930,11 @@ func TestTaskBillingOtherValuePackageAndRegularSubscriptionRatioAudit(t *testing
 
 			other := taskBillingOther(task)
 
-			assert.Equal(t, true, other["subscription_ratio_applied"])
+			if tt.wantApplied {
+				assert.Equal(t, true, other["subscription_ratio_applied"])
+			} else {
+				assert.NotContains(t, other, "subscription_ratio_applied")
+			}
 			assert.Equal(t, 0.3, other["original_group_ratio"])
 			if tt.wantValuePackage {
 				assert.Equal(t, "month-card", other["value_package_billing_group"])
