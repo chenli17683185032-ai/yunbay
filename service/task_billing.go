@@ -66,7 +66,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		Quota:     info.PriceData.Quota,
 		Content:   logContent,
 		TokenId:   info.TokenId,
-		Group:     info.UsingGroup,
+		Group:     info.BillingGroup(),
 		Other:     other,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
@@ -168,6 +168,7 @@ func appendTaskValuePackageBillingInfo(bc *model.TaskBillingContext, other map[s
 		return
 	}
 	other["value_package_billing_group"] = billingGroup
+	other["value_package_billing_using_group"] = strings.TrimSpace(bc.BillingUsingGroup)
 	other["value_package_effective_ratio"] = bc.GroupRatio
 	other["value_package_ratio_source"] = ratioSource
 }
@@ -182,6 +183,18 @@ func taskModelName(task *model.Task) string {
 
 func resolveTaskBillingGroup(group string) string {
 	return constant.NormalizeTokenGroup(group)
+}
+
+func taskBillingGroup(task *model.Task) string {
+	if task != nil && task.PrivateData.BillingContext != nil {
+		if group := strings.TrimSpace(task.PrivateData.BillingContext.BillingUsingGroup); group != "" {
+			return group
+		}
+	}
+	if task == nil {
+		return ""
+	}
+	return resolveTaskBillingGroup(task.Group)
 }
 
 // RefundTaskQuota 统一的任务失败退款逻辑。
@@ -213,7 +226,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) {
 		ModelName: taskModelName(task),
 		Quota:     quota,
 		TokenId:   task.PrivateData.TokenId,
-		Group:     resolveTaskBillingGroup(task.Group),
+		Group:     taskBillingGroup(task),
 		Other:     other,
 	})
 }
@@ -276,7 +289,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		ModelName: taskModelName(task),
 		Quota:     logQuota,
 		TokenId:   task.PrivateData.TokenId,
-		Group:     resolveTaskBillingGroup(task.Group),
+		Group:     taskBillingGroup(task),
 		Other:     other,
 	})
 }

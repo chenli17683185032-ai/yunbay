@@ -91,6 +91,7 @@ type RelayInfo struct {
 	TokenGroup        string
 	UserId            int
 	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
+	BillingUsingGroup string // 计费选源时冻结的分组；auto-group 重试不覆盖
 	UserGroup         string // 用户所在分组
 	RealUserGroup     string // 真实用户分组，套餐计费不覆盖该值
 	BillingUserGroup  string // 用于计费倍率查询的用户分组
@@ -654,6 +655,16 @@ func (info *RelayInfo) BillingRatioUserGroup() string {
 		return group
 	}
 	return strings.TrimSpace(info.UserGroup)
+}
+
+func (info *RelayInfo) BillingGroup() string {
+	if info == nil {
+		return ""
+	}
+	if group := strings.TrimSpace(info.BillingUsingGroup); group != "" {
+		return group
+	}
+	return strings.TrimSpace(info.UsingGroup)
 }
 
 func (info *RelayInfo) GetFinalRequestRelayFormat() types.RelayFormat {

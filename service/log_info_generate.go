@@ -214,6 +214,7 @@ func appendValuePackageBillingInfo(relayInfo *relaycommon.RelayInfo, priceData t
 		return
 	}
 	other["value_package_billing_group"] = billingGroup
+	other["value_package_billing_using_group"] = relayInfo.BillingGroup()
 	other["value_package_effective_ratio"] = priceData.GroupRatioInfo.GroupRatio
 	other["value_package_ratio_source"] = ratioSource
 }

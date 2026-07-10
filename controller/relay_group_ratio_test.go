@@ -109,7 +109,7 @@ func newFrozenRelayRetryInfo(planID, subscriptionID int, tiered bool) *relaycomm
 	info := &relaycommon.RelayInfo{
 		ChannelMeta:                &relaycommon.ChannelMeta{},
 		UserId:                     801,
-		UsingGroup:                 "gpt-plus",
+		UsingGroup:                 "group-a",
 		BillingUserGroup:           "month-card",
 		OriginModelName:            "gpt-test",
 		RequestId:                  fmt.Sprintf("retry-frozen-%t", tiered),
@@ -145,16 +145,19 @@ func TestGetChannelRestoresFrozenSubscriptionRatioAfterLiveRefresh(t *testing.T)
 		t.Run(fmt.Sprintf("tiered_%t", tiered), func(t *testing.T) {
 			db := setupRelayRetryBillingRatioTest(t)
 			planID, subscriptionID := seedRelayRetryValuePackage(t, db)
-			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"gpt-plus":1}`))
-			require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"month-card":{"gpt-plus":0.6}}`))
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":1,"group-b":1}`))
+			require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"month-card":{"group-a":0.6,"group-b":1.8}}`))
 			ctx := newRelayRetryBillingContext()
 			info := newFrozenRelayRetryInfo(planID, subscriptionID, tiered)
 			require.Nil(t, service.PreConsumeBilling(ctx, info.PriceData.QuotaToPreConsume, info))
+			require.Equal(t, "group-a", info.BillingUsingGroup)
 
-			require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"month-card":{"gpt-plus":1.8}}`))
-			_, apiErr := getChannel(ctx, info, &service.RetryParam{Ctx: ctx, TokenGroup: "gpt-plus", ModelName: info.OriginModelName})
+			ctx.Set("auto_group", "group-b")
+			_, apiErr := getChannel(ctx, info, &service.RetryParam{Ctx: ctx, TokenGroup: "auto", ModelName: info.OriginModelName})
 
 			require.NotNil(t, apiErr)
+			require.Equal(t, "group-b", info.UsingGroup)
+			require.Equal(t, "group-a", info.BillingUsingGroup)
 			require.Equal(t, 0.6, info.PriceData.GroupRatioInfo.GroupRatio)
 			require.Equal(t, service.SubscriptionRatioSourceConfigured, info.PriceData.SubscriptionRatioSource)
 			if tiered {
@@ -167,19 +170,22 @@ func TestGetChannelRestoresFrozenSubscriptionRatioAfterLiveRefresh(t *testing.T)
 
 func TestGetChannelWithoutBillingSessionUsesLiveRatio(t *testing.T) {
 	setupRelayRetryBillingRatioTest(t)
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"gpt-plus":1}`))
-	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"month-card":{"gpt-plus":1.8}}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"group-a":1,"group-b":1}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"month-card":{"group-a":0.6,"group-b":1.8}}`))
 	ctx := newRelayRetryBillingContext()
+	ctx.Set("auto_group", "group-b")
 	info := &relaycommon.RelayInfo{
 		ChannelMeta:      &relaycommon.ChannelMeta{},
-		UsingGroup:       "gpt-plus",
+		UsingGroup:       "group-a",
 		BillingUserGroup: "month-card",
 		OriginModelName:  "gpt-test",
 	}
 
-	_, apiErr := getChannel(ctx, info, &service.RetryParam{Ctx: ctx, TokenGroup: "gpt-plus", ModelName: info.OriginModelName})
+	_, apiErr := getChannel(ctx, info, &service.RetryParam{Ctx: ctx, TokenGroup: "auto", ModelName: info.OriginModelName})
 
 	require.NotNil(t, apiErr)
+	require.Equal(t, "group-b", info.UsingGroup)
+	require.Equal(t, "group-b", info.BillingUsingGroup)
 	require.Equal(t, 1.8, info.PriceData.GroupRatioInfo.GroupRatio)
 	require.Equal(t, 1.8, info.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	require.True(t, info.PriceData.GroupRatioInfo.HasSpecialRatio)

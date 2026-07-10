@@ -49,9 +49,46 @@ func prepareMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo, price
 	return nil
 }
 
-func refundUnsettledMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo) {
+func refundUnsettledMidjourneyBilling(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	if info != nil && info.Billing != nil && info.Billing.NeedsRefund() {
 		info.Billing.Refund(c)
+		return true
+	}
+	return false
+}
+
+func markMidjourneyBillingRefunded(task *model.Midjourney) {
+	if task == nil {
+		return
+	}
+	task.Status = "FAILURE"
+	task.Progress = "100%"
+	if task.FailReason == "" {
+		task.FailReason = "billing was not completed"
+	}
+	task.BillingContext.BillingRefunded = true
+	if err := task.Update(); err != nil {
+		common.SysError("mark midjourney billing refund error: " + err.Error())
+	}
+}
+
+func snapshotMidjourneyBilling(info *relaycommon.RelayInfo) model.MidjourneyBillingContext {
+	if info == nil || info.Billing == nil {
+		return model.MidjourneyBillingContext{}
+	}
+	return model.MidjourneyBillingContext{
+		BillingSource:              info.BillingSource,
+		SubscriptionId:             info.SubscriptionId,
+		RequestId:                  info.RequestId,
+		TokenId:                    info.TokenId,
+		ValuePackageSubscriptionId: info.ValuePackageSubscriptionId,
+		ValuePackagePlanId:         info.ValuePackagePlanId,
+		ValuePackageModelGroup:     info.ValuePackageModelGroup,
+		ValuePackagePackageType:    info.ValuePackagePackageType,
+		ValuePackageBillingGroup:   info.ValuePackageBillingGroup,
+		BillingUsingGroup:          info.BillingGroup(),
+		EffectiveGroupRatio:        info.PriceData.GroupRatioInfo.GroupRatio,
+		SubscriptionRatioSource:    info.PriceData.SubscriptionRatioSource,
 	}
 }
 
@@ -233,7 +270,12 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	if billingErr := prepareMidjourneyBilling(c, info, priceData, true); billingErr != nil {
 		return billingErr
 	}
-	defer refundUnsettledMidjourneyBilling(c, info)
+	var insertedTask *model.Midjourney
+	defer func() {
+		if refundUnsettledMidjourneyBilling(c, info) {
+			markMidjourneyBillingRefunded(insertedTask)
+		}
+	}()
 
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
@@ -244,28 +286,30 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	}
 	midjResponse := &mjResp.Response
 	midjourneyTask := &model.Midjourney{
-		UserId:      info.UserId,
-		Code:        midjResponse.Code,
-		Action:      constant.MjActionSwapFace,
-		MjId:        midjResponse.Result,
-		Prompt:      "InsightFace",
-		PromptEn:    "",
-		Description: midjResponse.Description,
-		State:       "",
-		SubmitTime:  info.StartTime.UnixNano() / int64(time.Millisecond),
-		StartTime:   time.Now().UnixNano() / int64(time.Millisecond),
-		FinishTime:  0,
-		ImageUrl:    "",
-		Status:      "",
-		Progress:    "0%",
-		FailReason:  "",
-		ChannelId:   c.GetInt("channel_id"),
-		Quota:       info.PriceData.Quota,
+		UserId:         info.UserId,
+		Code:           midjResponse.Code,
+		Action:         constant.MjActionSwapFace,
+		MjId:           midjResponse.Result,
+		Prompt:         "InsightFace",
+		PromptEn:       "",
+		Description:    midjResponse.Description,
+		State:          "",
+		SubmitTime:     info.StartTime.UnixNano() / int64(time.Millisecond),
+		StartTime:      time.Now().UnixNano() / int64(time.Millisecond),
+		FinishTime:     0,
+		ImageUrl:       "",
+		Status:         "",
+		Progress:       "0%",
+		FailReason:     "",
+		ChannelId:      c.GetInt("channel_id"),
+		Quota:          info.PriceData.Quota,
+		BillingContext: snapshotMidjourneyBilling(info),
 	}
 	err = midjourneyTask.Insert()
 	if err != nil {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
 	}
+	insertedTask = midjourneyTask
 	c.Writer.WriteHeader(mjResp.StatusCode)
 	respBody, err := json.Marshal(midjResponse)
 	if err != nil {
@@ -280,6 +324,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 		// A later settlement error cannot rewrite the already-forwarded success body.
 		if info.Billing != nil {
 			if err := midjourneySettleBilling(c, info, info.PriceData.Quota); err != nil {
+				markMidjourneyBillingRefunded(midjourneyTask)
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "settle_midjourney_billing_failed")
 			}
 		}
@@ -293,7 +338,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			Quota:     info.PriceData.Quota,
 			Content:   logContent,
 			TokenId:   info.TokenId,
-			Group:     info.UsingGroup,
+			Group:     info.BillingGroup(),
 			Other:     other,
 		})
 		model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
@@ -530,7 +575,12 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	if billingErr := prepareMidjourneyBilling(c, relayInfo, priceData, consumeQuota); billingErr != nil {
 		return billingErr
 	}
-	defer refundUnsettledMidjourneyBilling(c, relayInfo)
+	var insertedTask *model.Midjourney
+	defer func() {
+		if refundUnsettledMidjourneyBilling(c, relayInfo) {
+			markMidjourneyBillingRefunded(insertedTask)
+		}
+	}()
 
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	if err != nil {
@@ -546,23 +596,24 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	// 24-prompt包含敏感词 {"code":24,"description":"可能包含敏感词","properties":{"promptEn":"nude body","bannedWord":"nude"}}
 	// other: 提交错误，description为错误描述
 	midjourneyTask := &model.Midjourney{
-		UserId:      relayInfo.UserId,
-		Code:        midjResponse.Code,
-		Action:      midjRequest.Action,
-		MjId:        midjResponse.Result,
-		Prompt:      midjRequest.Prompt,
-		PromptEn:    "",
-		Description: midjResponse.Description,
-		State:       "",
-		SubmitTime:  time.Now().UnixNano() / int64(time.Millisecond),
-		StartTime:   0,
-		FinishTime:  0,
-		ImageUrl:    "",
-		Status:      "",
-		Progress:    "0%",
-		FailReason:  "",
-		ChannelId:   c.GetInt("channel_id"),
-		Quota:       relayInfo.PriceData.Quota,
+		UserId:         relayInfo.UserId,
+		Code:           midjResponse.Code,
+		Action:         midjRequest.Action,
+		MjId:           midjResponse.Result,
+		Prompt:         midjRequest.Prompt,
+		PromptEn:       "",
+		Description:    midjResponse.Description,
+		State:          "",
+		SubmitTime:     time.Now().UnixNano() / int64(time.Millisecond),
+		StartTime:      0,
+		FinishTime:     0,
+		ImageUrl:       "",
+		Status:         "",
+		Progress:       "0%",
+		FailReason:     "",
+		ChannelId:      c.GetInt("channel_id"),
+		Quota:          relayInfo.PriceData.Quota,
+		BillingContext: snapshotMidjourneyBilling(relayInfo),
 	}
 	if midjResponse.Code == 3 {
 		//无实例账号自动禁用渠道（No available account instance）
@@ -614,6 +665,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			Description: "insert_midjourney_task_failed",
 		}
 	}
+	insertedTask = midjourneyTask
 
 	if midjResponse.Code == 22 { //22-排队中，说明任务已存在
 		//修改返回值
@@ -647,6 +699,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		// A later settlement error cannot rewrite the already-forwarded success body.
 		if relayInfo.Billing != nil {
 			if err := midjourneySettleBilling(c, relayInfo, relayInfo.PriceData.Quota); err != nil {
+				markMidjourneyBillingRefunded(midjourneyTask)
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "settle_midjourney_billing_failed")
 			}
 		}
@@ -660,7 +713,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			Quota:     relayInfo.PriceData.Quota,
 			Content:   logContent,
 			TokenId:   relayInfo.TokenId,
-			Group:     relayInfo.UsingGroup,
+			Group:     relayInfo.BillingGroup(),
 			Other:     other,
 		})
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, relayInfo.PriceData.Quota)

@@ -308,6 +308,9 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	channel, selectGroup, err := cacheGetRandomSatisfiedChannel(retryParam)
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
+	if info.Billing == nil {
+		info.BillingUsingGroup = info.UsingGroup
+	}
 	service.EnsureSubscriptionBillingRatio(info)
 
 	if err != nil {
@@ -403,8 +406,16 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 
 }
 
+var (
+	relayMidjourneySubmitHandler = relay.RelayMidjourneySubmit
+	relaySwapFaceHandler         = relay.RelaySwapFace
+	generateMidjourneyRelayInfo  = func(c *gin.Context) (*relaycommon.RelayInfo, error) {
+		return relaycommon.GenRelayInfo(c, types.RelayFormatMjProxy, nil, nil)
+	}
+)
+
 func RelayMidjourney(c *gin.Context) {
-	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatMjProxy, nil, nil)
+	relayInfo, err := generateMidjourneyRelayInfo(c)
 
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -414,6 +425,16 @@ func RelayMidjourney(c *gin.Context) {
 		})
 		return
 	}
+	relayMidjourneyWithInfo(c, relayInfo)
+}
+
+func relayMidjourneyWithInfo(c *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	originalWriter := c.Writer
+	responseBuffer := newTaskSubmitResponseBuffer(originalWriter)
+	c.Writer = responseBuffer
+	defer func() {
+		c.Writer = originalWriter
+	}()
 
 	var mjErr *dto.MidjourneyResponse
 	switch relayInfo.RelayMode {
@@ -424,12 +445,12 @@ func RelayMidjourney(c *gin.Context) {
 	case relayconstant.RelayModeMidjourneyTaskImageSeed:
 		mjErr = relay.RelayMidjourneyTaskImageSeed(c)
 	case relayconstant.RelayModeSwapFace:
-		mjErr = relay.RelaySwapFace(c, relayInfo)
+		mjErr = relaySwapFaceHandler(c, relayInfo)
 	default:
-		mjErr = relay.RelayMidjourneySubmit(c, relayInfo)
+		mjErr = relayMidjourneySubmitHandler(c, relayInfo)
 	}
-	//err = relayMidjourneySubmit(c, relayMode)
 	log.Println(mjErr)
+	c.Writer = originalWriter
 	if mjErr != nil {
 		statusCode := http.StatusBadRequest
 		if mjErr.Code == 30 {
@@ -443,6 +464,10 @@ func RelayMidjourney(c *gin.Context) {
 		})
 		channelId := c.GetInt("channel_id")
 		logger.LogError(c, fmt.Sprintf("relay error (channel #%d, status code %d): %s", channelId, statusCode, fmt.Sprintf("%s %s", mjErr.Description, mjErr.Result)))
+		return
+	}
+	if flushErr := responseBuffer.FlushToOriginal(); flushErr != nil {
+		common.SysError("flush midjourney response error: " + flushErr.Error())
 	}
 }
 
@@ -614,6 +639,7 @@ func finalizeSuccessfulRelayTask(c *gin.Context, relayInfo *relaycommon.RelayInf
 		SubscriptionRatioApplied:  relayInfo.PriceData.SubscriptionRatioApplied,
 		SubscriptionRatioSource:   relayInfo.PriceData.SubscriptionRatioSource,
 		ValuePackageBillingGroup:  relayInfo.ValuePackageBillingGroup,
+		BillingUsingGroup:         relayInfo.BillingGroup(),
 		HasOriginalGroupRatio:     relayInfo.PriceData.HasOriginalGroupRatioInfo,
 		OriginalGroupRatio:        relayInfo.PriceData.OriginalGroupRatioInfo.GroupRatio,
 		HasOriginalUserGroupRatio: relayInfo.PriceData.HasOriginalGroupRatioInfo,

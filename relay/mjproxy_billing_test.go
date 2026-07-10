@@ -166,6 +166,8 @@ func installRecordingMidjourneyBillingHooks(t *testing.T, frozenQuota int) (*rec
 		require.Equal(t, 300, info.PriceData.Quota)
 		info.Billing = billing
 		info.BillingSource = service.BillingSourceSubscription
+		info.SubscriptionId = 77
+		info.BillingUsingGroup = info.UsingGroup
 		info.PriceData.Quota = frozenQuota
 		info.PriceData.GroupRatioInfo.GroupRatio = float64(frozenQuota) / info.PriceData.QuotaBeforeGroup
 		info.PriceData.SubscriptionRatioApplied = true
@@ -212,14 +214,19 @@ func TestMidjourneyChargeableEntrypointsUseBillingSession(t *testing.T) {
 			billing, prepareCalls, settleCalls := installRecordingMidjourneyBillingHooks(t, 450)
 			c, _ := newMidjourneyBillingContext(tt.path, tt.body, upstream.URL)
 			info := &relaycommon.RelayInfo{
-				UserId:          901,
-				TokenId:         902,
-				UsingGroup:      "gpt-plus",
-				OriginModelName: "mj_imagine",
-				RelayMode:       tt.mode,
-				RequestId:       "mj-success-" + tt.name,
-				StartTime:       time.Now(),
-				IsPlayground:    true,
+				UserId:                     901,
+				TokenId:                    902,
+				UsingGroup:                 "gpt-plus",
+				OriginModelName:            "mj_imagine",
+				RelayMode:                  tt.mode,
+				RequestId:                  "mj-success-" + tt.name,
+				StartTime:                  time.Now(),
+				IsPlayground:               true,
+				ValuePackageSubscriptionId: 88,
+				ValuePackagePlanId:         99,
+				ValuePackageBillingGroup:   "month-card",
+				ValuePackageModelGroup:     "month-card",
+				ValuePackagePackageType:    model.ValuePackageTypeMonth,
 			}
 
 			mjErr := tt.call(c, info)
@@ -234,6 +241,16 @@ func TestMidjourneyChargeableEntrypointsUseBillingSession(t *testing.T) {
 			var task model.Midjourney
 			require.NoError(t, db.Where("mj_id = ?", "mj-123").First(&task).Error)
 			require.Equal(t, 450, task.Quota)
+			require.Equal(t, service.BillingSourceSubscription, task.BillingContext.BillingSource)
+			require.Equal(t, 77, task.BillingContext.SubscriptionId)
+			require.Equal(t, info.RequestId, task.BillingContext.RequestId)
+			require.Equal(t, info.TokenId, task.BillingContext.TokenId)
+			require.Equal(t, 88, task.BillingContext.ValuePackageSubscriptionId)
+			require.Equal(t, 99, task.BillingContext.ValuePackagePlanId)
+			require.Equal(t, "month-card", task.BillingContext.ValuePackageBillingGroup)
+			require.Equal(t, "gpt-plus", task.BillingContext.BillingUsingGroup)
+			require.Equal(t, 0.45, task.BillingContext.EffectiveGroupRatio)
+			require.Equal(t, service.SubscriptionRatioSourceConfigured, task.BillingContext.SubscriptionRatioSource)
 		})
 	}
 }
@@ -408,7 +425,7 @@ func TestRelaySwapFaceRefundsWhenResponseCopyFails(t *testing.T) {
 }
 
 func TestRelayMidjourneySubmitRefundsUnsettledSessionWhenSettlementFails(t *testing.T) {
-	setupMidjourneyBillingTest(t)
+	db := setupMidjourneyBillingTest(t)
 	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":1,"description":"ok","result":"mj-settle"}`)
 	billing, prepareCalls, _ := installRecordingMidjourneyBillingHooks(t, 450)
 	settleCalls := 0
@@ -433,8 +450,39 @@ func TestRelayMidjourneySubmitRefundsUnsettledSessionWhenSettlementFails(t *test
 	require.Equal(t, 1, billing.refunded)
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Contains(t, recorder.Body.String(), `"code":1`)
+	var task model.Midjourney
+	require.NoError(t, db.Where("mj_id = ?", "mj-settle").First(&task).Error)
+	require.Equal(t, "FAILURE", task.Status)
+	require.Equal(t, "100%", task.Progress)
+	require.True(t, task.BillingContext.BillingRefunded)
 	refundUnsettledMidjourneyBilling(c, info)
 	require.Equal(t, 1, billing.refunded)
+}
+
+func TestRelayMidjourneySubmitMarksTerminalWhenSettlementFundingCannotRefund(t *testing.T) {
+	db := setupMidjourneyBillingTest(t)
+	upstream := newMidjourneyUpstream(t, http.StatusOK, `{"code":1,"description":"ok","result":"mj-funded-settle"}`)
+	billing, _, _ := installRecordingMidjourneyBillingHooks(t, 450)
+	midjourneySettleBilling = func(*gin.Context, *relaycommon.RelayInfo, int) error {
+		billing.needsRefund = false
+		return errors.New("funding already committed")
+	}
+	c, _ := newMidjourneyBillingContext("/mj/submit/imagine", `{"prompt":"billing test"}`, upstream.URL)
+	info := &relaycommon.RelayInfo{
+		UserId: 901, TokenId: 902, UsingGroup: "gpt-plus", OriginModelName: "mj_imagine",
+		RelayMode: relayconstant.RelayModeMidjourneyImagine, RequestId: "mj-funded-settle",
+		StartTime: time.Now(), IsPlayground: true,
+	}
+
+	mjErr := RelayMidjourneySubmit(c, info)
+
+	require.NotNil(t, mjErr)
+	require.Zero(t, billing.refunded)
+	var task model.Midjourney
+	require.NoError(t, db.Where("mj_id = ?", "mj-funded-settle").First(&task).Error)
+	require.Equal(t, "FAILURE", task.Status)
+	require.Equal(t, "100%", task.Progress)
+	require.True(t, task.BillingContext.BillingRefunded)
 }
 
 func TestPrepareMidjourneyBillingSkipsFreeOrNonChargeableRequests(t *testing.T) {

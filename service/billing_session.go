@@ -34,6 +34,7 @@ type BillingSession struct {
 	refunded                bool // Refund 已调用
 	subscriptionRatio       float64
 	subscriptionRatioSource string
+	billingUsingGroup       string
 	mu                      sync.Mutex
 }
 
@@ -43,6 +44,13 @@ func (s *BillingSession) subscriptionBillingRatioSnapshot() (float64, string, bo
 	}
 	ratio, source := normalizeFrozenSubscriptionBillingRatio(s.relayInfo, s.subscriptionRatio, s.subscriptionRatioSource)
 	return ratio, source, true
+}
+
+func (s *BillingSession) billingUsingGroupSnapshot() string {
+	if s == nil {
+		return ""
+	}
+	return s.billingUsingGroup
 }
 
 // Settle 根据实际消耗额度进行结算。
@@ -444,6 +452,11 @@ func (s *BillingSession) syncRelayInfo() {
 	info := s.relayInfo
 	info.FinalPreConsumedQuota = s.preConsumedQuota
 	info.BillingSource = s.funding.Source()
+	if s.billingUsingGroup != "" {
+		info.BillingUsingGroup = s.billingUsingGroup
+	} else if info.BillingUsingGroup == "" {
+		info.BillingUsingGroup = strings.TrimSpace(info.UsingGroup)
+	}
 
 	if sub, ok := s.funding.(*SubscriptionFunding); ok {
 		info.SubscriptionId = sub.subscriptionId
@@ -487,6 +500,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			},
 			subscriptionRatio:       ratio,
 			subscriptionRatioSource: source,
+			billingUsingGroup:       strings.TrimSpace(relayInfo.UsingGroup),
 		}
 		if apiErr := session.preConsume(c, subConsumeInt); apiErr != nil {
 			return nil, apiErr
@@ -529,8 +543,9 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		}
 
 		session := &BillingSession{
-			relayInfo: relayInfo,
-			funding:   &WalletFunding{userId: relayInfo.UserId},
+			relayInfo:         relayInfo,
+			funding:           &WalletFunding{userId: relayInfo.UserId},
+			billingUsingGroup: strings.TrimSpace(relayInfo.UsingGroup),
 		}
 		if apiErr := session.preConsume(c, walletConsume); apiErr != nil {
 			return nil, apiErr
@@ -555,6 +570,7 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 			},
 			subscriptionRatio:       ratio,
 			subscriptionRatioSource: source,
+			billingUsingGroup:       strings.TrimSpace(relayInfo.UsingGroup),
 		}
 		// 必须传 subConsumeInt，保证 SubscriptionFunding.amount、
 		// preConsume 参数和 FinalPreConsumedQuota 三者一致，避免订阅多扣费。

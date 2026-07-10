@@ -34,26 +34,19 @@ func UpdateMidjourneyTaskBulk() {
 		logger.LogInfo(ctx, fmt.Sprintf("检测到未完成的任务数有: %v", len(tasks)))
 		taskChannelM := make(map[int][]string)
 		taskM := make(map[string]*model.Midjourney)
-		nullTaskIds := make([]int, 0)
 		for _, task := range tasks {
 			if task.MjId == "" {
-				// 统计失败的未完成任务
-				nullTaskIds = append(nullTaskIds, task.Id)
+				preStatus := task.Status
+				task.Status = "FAILURE"
+				task.Progress = "100%"
+				task.FailReason = "empty upstream task id"
+				if _, err := commitMidjourneyTaskUpdate(ctx, task, preStatus, task.Quota != 0, task.FailReason); err != nil {
+					logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
+				}
 				continue
 			}
 			taskM[task.MjId] = task
 			taskChannelM[task.ChannelId] = append(taskChannelM[task.ChannelId], task.MjId)
-		}
-		if len(nullTaskIds) > 0 {
-			err := model.MjBulkUpdateByTaskIds(nullTaskIds, map[string]any{
-				"status":   "FAILURE",
-				"progress": "100%",
-			})
-			if err != nil {
-				logger.LogError(ctx, fmt.Sprintf("Fix null mj_id task error: %v", err))
-			} else {
-				logger.LogInfo(ctx, fmt.Sprintf("Fix null mj_id task success: %v", nullTaskIds))
-			}
 		}
 		if len(taskChannelM) == 0 {
 			continue
@@ -67,13 +60,15 @@ func UpdateMidjourneyTaskBulk() {
 			midjourneyChannel, err := model.CacheGetChannel(channelId)
 			if err != nil {
 				logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-				err := model.MjBulkUpdate(taskIds, map[string]any{
-					"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-					"status":      "FAILURE",
-					"progress":    "100%",
-				})
-				if err != nil {
-					logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
+				for _, taskID := range taskIds {
+					task := taskM[taskID]
+					preStatus := task.Status
+					task.FailReason = fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId)
+					task.Status = "FAILURE"
+					task.Progress = "100%"
+					if _, updateErr := commitMidjourneyTaskUpdate(ctx, task, preStatus, task.Quota != 0, task.FailReason); updateErr != nil {
+						logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", updateErr))
+					}
 				}
 				continue
 			}
@@ -173,30 +168,34 @@ func UpdateMidjourneyTaskBulk() {
 						shouldReturnQuota = true
 					}
 				}
-				won, err := task.UpdateWithStatus(preStatus)
+				won, err := commitMidjourneyTaskUpdate(ctx, task, preStatus, shouldReturnQuota, "构图失败")
 				if err != nil {
 					logger.LogError(ctx, "UpdateMidjourneyTask task error: "+err.Error())
-				} else if won && shouldReturnQuota {
-					err = model.IncreaseUserQuota(task.UserId, task.Quota, false)
-					if err != nil {
-						logger.LogError(ctx, "fail to increase user quota: "+err.Error())
-					}
-					model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
-						UserId:    task.UserId,
-						LogType:   model.LogTypeRefund,
-						Content:   "",
-						ChannelId: task.ChannelId,
-						ModelName: service.CovertMjpActionToModelName(task.Action),
-						Quota:     task.Quota,
-						Other: map[string]interface{}{
-							"task_id": task.MjId,
-							"reason":  "构图失败",
-						},
-					})
+				} else if !won {
+					logger.LogInfo(ctx, "UpdateMidjourneyTask skipped because another worker won: "+task.MjId)
 				}
 			}
 		}
 	}
+}
+
+func commitMidjourneyTaskUpdate(ctx context.Context, task *model.Midjourney, preStatus string, shouldRefund bool, reason string) (bool, error) {
+	targetProgress := task.Progress
+	if shouldRefund {
+		task.Progress = "REFUND_PENDING"
+	}
+	won, err := task.UpdateWithStatus(preStatus)
+	if err != nil || !won || !shouldRefund {
+		return won, err
+	}
+	if err := service.RefundMidjourneyQuota(ctx, task, reason); err != nil {
+		return true, err
+	}
+	task.Progress = targetProgress
+	if err := task.Update(); err != nil {
+		return true, err
+	}
+	return true, nil
 }
 
 func checkMjTaskNeedUpdate(oldTask *model.Midjourney, newTask dto.MidjourneyDto) bool {

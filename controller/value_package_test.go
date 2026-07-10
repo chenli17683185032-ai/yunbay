@@ -59,7 +59,8 @@ func TestFinalizeSuccessfulRelayTaskPersistsBillingContextOnSettleError(t *testi
 	billing := &failingTaskSettleBilling{}
 	relayInfo := &relaycommon.RelayInfo{
 		UserId:                   42,
-		UsingGroup:               "day-card",
+		UsingGroup:               "group-b",
+		BillingUsingGroup:        "group-a",
 		OriginModelName:          "video-test",
 		ChannelMeta:              &relaycommon.ChannelMeta{ChannelId: 3},
 		TaskRelayInfo:            &relaycommon.TaskRelayInfo{Action: "submit"},
@@ -101,6 +102,7 @@ func TestFinalizeSuccessfulRelayTaskPersistsBillingContextOnSettleError(t *testi
 	require.True(t, ok)
 	require.Equal(t, 0.45, billingContext["group_ratio"])
 	require.Equal(t, "month-card", billingContext["value_package_billing_group"])
+	require.Equal(t, "group-a", billingContext["billing_using_group"])
 	require.Equal(t, "configured", billingContext["subscription_ratio_source"])
 	var logCount int64
 	require.NoError(t, model.DB.Model(&model.Log{}).Count(&logCount).Error)

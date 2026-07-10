@@ -829,6 +829,7 @@ func TestRecalculateTaskQuotaByTokensUsesBillingContextGroupRatioSnapshot(t *tes
 			"subscription_ratio_applied":true,
 			"subscription_ratio_source":"configured",
 			"value_package_billing_group":"month-card",
+			"billing_using_group":"group-a",
 			"has_original_group_ratio":true,
 			"original_group_ratio":0.3
 		}
@@ -851,6 +852,7 @@ func TestRecalculateTaskQuotaByTokensUsesBillingContextGroupRatioSnapshot(t *tes
 	other, err := common.StrToMap(log.Other)
 	require.NoError(t, err)
 	assert.Equal(t, "month-card", other["value_package_billing_group"])
+	assert.Equal(t, "group-a", other["value_package_billing_using_group"])
 	assert.Equal(t, 0.45, other["value_package_effective_ratio"])
 	assert.Equal(t, SubscriptionRatioSourceConfigured, other["value_package_ratio_source"])
 }
@@ -956,7 +958,8 @@ func TestTaskBillingContextValueScanRoundTripPreservesValuePackageRatioAudit(t *
 			"has_group_ratio":true,
 			"group_ratio":0.45,
 			"subscription_ratio_source":"configured",
-			"value_package_billing_group":"month-card"
+			"value_package_billing_group":"month-card",
+			"billing_using_group":"group-a"
 		}
 	}`)))
 
@@ -972,6 +975,7 @@ func TestTaskBillingContextValueScanRoundTripPreservesValuePackageRatioAudit(t *
 	assert.Equal(t, 0.45, billingContext["group_ratio"])
 	assert.Equal(t, "configured", billingContext["subscription_ratio_source"])
 	assert.Equal(t, "month-card", billingContext["value_package_billing_group"])
+	assert.Equal(t, "group-a", billingContext["billing_using_group"])
 }
 
 func TestLogTaskConsumptionValuePackageRatioAudit(t *testing.T) {
@@ -997,7 +1001,8 @@ func TestLogTaskConsumptionValuePackageRatioAudit(t *testing.T) {
 
 	packageInfo := &relaycommon.RelayInfo{
 		UserId:                     userID,
-		UsingGroup:                 "default",
+		UsingGroup:                 "group-b",
+		BillingUsingGroup:          "group-a",
 		OriginModelName:            "test-model",
 		ChannelMeta:                &relaycommon.ChannelMeta{ChannelId: channelID},
 		TaskRelayInfo:              &relaycommon.TaskRelayInfo{Action: "submit"},
@@ -1017,8 +1022,10 @@ func TestLogTaskConsumptionValuePackageRatioAudit(t *testing.T) {
 	other, err := common.StrToMap(log.Other)
 	require.NoError(t, err)
 	assert.Equal(t, "month-card", other["value_package_billing_group"])
+	assert.Equal(t, "group-a", other["value_package_billing_using_group"])
 	assert.Equal(t, 0.45, other["value_package_effective_ratio"])
 	assert.Equal(t, SubscriptionRatioSourceConfigured, other["value_package_ratio_source"])
+	assert.Equal(t, "group-a", log.Group)
 
 	require.NoError(t, model.DB.Exec("DELETE FROM logs").Error)
 	regularInfo := &relaycommon.RelayInfo{

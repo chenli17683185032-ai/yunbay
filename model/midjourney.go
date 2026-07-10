@@ -1,5 +1,13 @@
 package model
 
+import (
+	"database/sql/driver"
+	"fmt"
+
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+)
+
 type Midjourney struct {
 	Id          int    `json:"id"`
 	Code        int    `json:"code"`
@@ -23,6 +31,238 @@ type Midjourney struct {
 	Quota       int    `json:"quota"`
 	Buttons     string `json:"buttons"`
 	Properties  string `json:"properties"`
+	// BillingContext is internal settlement/refund state and must not be exposed.
+	BillingContext MidjourneyBillingContext `json:"-" gorm:"column:billing_context;type:text"`
+}
+
+type MidjourneyBillingContext struct {
+	BillingSource              string  `json:"billing_source,omitempty"`
+	SubscriptionId             int     `json:"subscription_id,omitempty"`
+	RequestId                  string  `json:"request_id,omitempty"`
+	TokenId                    int     `json:"token_id,omitempty"`
+	ValuePackageSubscriptionId int     `json:"value_package_subscription_id,omitempty"`
+	ValuePackagePlanId         int     `json:"value_package_plan_id,omitempty"`
+	ValuePackageModelGroup     string  `json:"value_package_model_group,omitempty"`
+	ValuePackagePackageType    string  `json:"value_package_package_type,omitempty"`
+	ValuePackageBillingGroup   string  `json:"value_package_billing_group,omitempty"`
+	BillingUsingGroup          string  `json:"billing_using_group,omitempty"`
+	EffectiveGroupRatio        float64 `json:"effective_group_ratio,omitempty"`
+	SubscriptionRatioSource    string  `json:"subscription_ratio_source,omitempty"`
+	FundingRefunded            bool    `json:"funding_refunded,omitempty"`
+	TokenRefunded              bool    `json:"token_refunded,omitempty"`
+	BillingRefunded            bool    `json:"billing_refunded,omitempty"`
+}
+
+func (c *MidjourneyBillingContext) Scan(value any) error {
+	if value == nil {
+		*c = MidjourneyBillingContext{}
+		return nil
+	}
+	var data []byte
+	switch typed := value.(type) {
+	case []byte:
+		data = typed
+	case string:
+		data = []byte(typed)
+	default:
+		*c = MidjourneyBillingContext{}
+		return nil
+	}
+	if len(data) == 0 {
+		*c = MidjourneyBillingContext{}
+		return nil
+	}
+	return common.Unmarshal(data, c)
+}
+
+func (c MidjourneyBillingContext) Value() (driver.Value, error) {
+	if c == (MidjourneyBillingContext{}) {
+		return nil, nil
+	}
+	data, err := common.Marshal(c)
+	if err != nil {
+		return nil, err
+	}
+	return string(data), nil
+}
+
+func loadMidjourneyRefundTask(tx *gorm.DB, taskID int) (*Midjourney, error) {
+	var task Midjourney
+	if err := withUpdateLock(tx).Where("id = ?", taskID).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func completeMidjourneyFundingContext(context MidjourneyBillingContext) MidjourneyBillingContext {
+	context.FundingRefunded = true
+	if context.TokenId <= 0 {
+		context.TokenRefunded = true
+		context.BillingRefunded = true
+	}
+	return context
+}
+
+func RefundMidjourneyWalletFundingOnce(task *Midjourney) (bool, error) {
+	if task == nil || task.Id <= 0 || task.Quota <= 0 {
+		return false, fmt.Errorf("invalid midjourney wallet refund task")
+	}
+	var updated MidjourneyBillingContext
+	performed := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		stored, err := loadMidjourneyRefundTask(tx, task.Id)
+		if err != nil {
+			return err
+		}
+		if stored.BillingContext.FundingRefunded {
+			updated = stored.BillingContext
+			return nil
+		}
+		result := tx.Model(&User{}).Where("id = ?", stored.UserId).
+			Update("quota", gorm.Expr("quota + ?", stored.Quota))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		updated = completeMidjourneyFundingContext(stored.BillingContext)
+		if err := tx.Model(&Midjourney{}).Where("id = ?", stored.Id).
+			Update("billing_context", updated).Error; err != nil {
+			return err
+		}
+		performed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	task.BillingContext = updated
+	if performed && common.RedisEnabled {
+		if err := cacheIncrUserQuota(task.UserId, int64(task.Quota)); err != nil {
+			common.SysLog("failed to update user quota cache after midjourney refund: " + err.Error())
+		}
+	}
+	return performed, nil
+}
+
+func RefundMidjourneySubscriptionFundingOnce(task *Midjourney) (bool, error) {
+	if task == nil || task.Id <= 0 || task.Quota <= 0 || task.BillingContext.SubscriptionId <= 0 {
+		return false, fmt.Errorf("invalid midjourney subscription refund task")
+	}
+	var updated MidjourneyBillingContext
+	performed := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		stored, err := loadMidjourneyRefundTask(tx, task.Id)
+		if err != nil {
+			return err
+		}
+		if stored.BillingContext.FundingRefunded {
+			updated = stored.BillingContext
+			return nil
+		}
+		result := tx.Model(&UserSubscription{}).
+			Where("id = ?", stored.BillingContext.SubscriptionId).
+			Update("amount_used", gorm.Expr("amount_used - ?", stored.Quota))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		updated = completeMidjourneyFundingContext(stored.BillingContext)
+		if err := tx.Model(&Midjourney{}).Where("id = ?", stored.Id).
+			Update("billing_context", updated).Error; err != nil {
+			return err
+		}
+		performed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	task.BillingContext = updated
+	return performed, nil
+}
+
+func MarkMidjourneyFundingRefunded(task *Midjourney) (bool, error) {
+	if task == nil || task.Id <= 0 {
+		return false, fmt.Errorf("invalid midjourney refund task")
+	}
+	var updated MidjourneyBillingContext
+	performed := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		stored, err := loadMidjourneyRefundTask(tx, task.Id)
+		if err != nil {
+			return err
+		}
+		if stored.BillingContext.FundingRefunded {
+			updated = stored.BillingContext
+			return nil
+		}
+		updated = completeMidjourneyFundingContext(stored.BillingContext)
+		if err := tx.Model(&Midjourney{}).Where("id = ?", stored.Id).
+			Update("billing_context", updated).Error; err != nil {
+			return err
+		}
+		performed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	task.BillingContext = updated
+	return performed, nil
+}
+
+func RefundMidjourneyTokenQuotaOnce(task *Midjourney, tokenKey string) (bool, error) {
+	if task == nil || task.Id <= 0 || task.Quota <= 0 || task.BillingContext.TokenId <= 0 {
+		return false, fmt.Errorf("invalid midjourney token refund task")
+	}
+	var updated MidjourneyBillingContext
+	performed := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		stored, err := loadMidjourneyRefundTask(tx, task.Id)
+		if err != nil {
+			return err
+		}
+		if stored.BillingContext.TokenRefunded {
+			updated = stored.BillingContext
+			return nil
+		}
+		result := tx.Model(&Token{}).Where("id = ?", stored.BillingContext.TokenId).Updates(
+			map[string]interface{}{
+				"remain_quota":  gorm.Expr("remain_quota + ?", stored.Quota),
+				"used_quota":    gorm.Expr("used_quota - ?", stored.Quota),
+				"accessed_time": common.GetTimestamp(),
+			},
+		)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		updated = stored.BillingContext
+		updated.TokenRefunded = true
+		updated.BillingRefunded = updated.FundingRefunded
+		if err := tx.Model(&Midjourney{}).Where("id = ?", stored.Id).
+			Update("billing_context", updated).Error; err != nil {
+			return err
+		}
+		performed = true
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+	task.BillingContext = updated
+	if performed && common.RedisEnabled && tokenKey != "" {
+		if err := cacheDeleteToken(tokenKey); err != nil {
+			common.SysLog("failed to invalidate token cache after midjourney refund: " + err.Error())
+		}
+	}
+	return performed, nil
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段

@@ -1021,6 +1021,8 @@ func TestGenerateMjOtherInfoIncludesValuePackageBillingAudit(t *testing.T) {
 		ValuePackageBillingGroup:   "month-card",
 		ValuePackageModelGroup:     "month-card",
 		ValuePackagePackageType:    "month",
+		UsingGroup:                 "group-b",
+		BillingUsingGroup:          "group-a",
 	}
 	priceData := types.PriceData{
 		ModelPrice: 0.02,
@@ -1047,6 +1049,7 @@ func TestGenerateMjOtherInfoIncludesValuePackageBillingAudit(t *testing.T) {
 	assert.Equal(t, 123, other["value_package_subscription_id"])
 	assert.Equal(t, 456, other["value_package_plan_id"])
 	assert.Equal(t, "month-card", other["value_package_billing_group"])
+	assert.Equal(t, "group-a", other["value_package_billing_using_group"])
 	assert.Equal(t, "month-card", other["value_package_model_group"])
 	assert.Equal(t, "month", other["value_package_package_type"])
 	assert.Equal(t, 1.0, other["value_package_effective_ratio"])

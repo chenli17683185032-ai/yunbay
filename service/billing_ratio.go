@@ -72,7 +72,7 @@ func invalidSubscriptionBillingRatioKind(ratio float64) string {
 func warnInvalidValuePackageBillingRatio(info *relaycommon.RelayInfo, ratio float64) {
 	reason := invalidSubscriptionBillingRatioKind(ratio)
 	packageGroup := strings.TrimSpace(info.ValuePackageBillingGroup)
-	usingGroup := strings.TrimSpace(info.UsingGroup)
+	usingGroup := info.BillingGroup()
 	key := packageGroup + "\x00" + usingGroup + "\x00" + reason
 	if !invalidValuePackageBillingRatioWarnings.Allow(key, invalidValuePackageBillingRatioWarningNow()) {
 		return
@@ -264,6 +264,11 @@ func EnsureSubscriptionBillingRatio(relayInfo *relaycommon.RelayInfo) {
 		return
 	}
 	ratio, source, _ := resolveAuthoritativeSubscriptionBillingRatio(relayInfo)
+	if session, ok := relayInfo.Billing.(*BillingSession); ok {
+		if billingGroup := session.billingUsingGroupSnapshot(); billingGroup != "" {
+			relayInfo.BillingUsingGroup = billingGroup
+		}
+	}
 	preConsumedQuota := relayInfo.FinalPreConsumedQuota
 	if relayInfo.Billing != nil {
 		preConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
