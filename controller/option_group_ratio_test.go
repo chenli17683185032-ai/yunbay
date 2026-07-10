@@ -121,6 +121,17 @@ func performGroupRatioOptionsRequest(t *testing.T, method string, body any, hand
 	return recorder, response
 }
 
+func performRawGroupRatioOptionsRequest(t *testing.T, body string, handler gin.HandlerFunc) (*httptest.ResponseRecorder, groupRatioOptionsTestResponse) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPut, "/api/option/group-ratios", strings.NewReader(body))
+	handler(c)
+	var response groupRatioOptionsTestResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	return recorder, response
+}
+
 func readStoredGroupRatioOptions(t *testing.T) model.GroupRatioOptions {
 	t.Helper()
 	stored, err := model.GetGroupRatioOptions()
@@ -196,6 +207,42 @@ func TestUpdateGroupRatioOptionsRejectsInvalidPayloadWithoutChangingState(t *tes
 				"group_ratio":       tt.groupRatio,
 				"group_group_ratio": tt.groupGroupRatio,
 			}, UpdateGroupRatioOptions)
+
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.False(t, response.Success)
+			stored := readStoredGroupRatioOptions(t)
+			require.Equal(t, `{"old":1}`, stored.GroupRatio)
+			require.Equal(t, `{"old":{"old":1}}`, stored.GroupGroupRatio)
+			require.Equal(t, `{"old":1}`, ratio_setting.GroupRatio2JSONString())
+			require.Equal(t, `{"old":{"old":1}}`, ratio_setting.GroupGroupRatio2JSONString())
+			optionGroupRatio, optionGroupGroupRatio := readGroupRatioOptionMapForControllerTest()
+			require.Equal(t, `{"old":1}`, optionGroupRatio)
+			require.Equal(t, `{"old":{"old":1}}`, optionGroupGroupRatio)
+		})
+	}
+}
+
+func TestUpdateGroupRatioOptionsRejectsNonWhitelistedOrTrailingJSONWithoutChangingState(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "unknown field",
+			body: `{"group_ratio":"{\"new\":2}","group_group_ratio":"{\"new\":{\"child\":1.5}}","unexpected":true}`,
+		},
+		{
+			name: "trailing value",
+			body: `{"group_ratio":"{\"new\":2}","group_group_ratio":"{\"new\":{\"child\":1.5}}"} {}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := setupGroupRatioOptionsControllerTest(t)
+			seedGroupRatioOptionsState(t, db, `{"old":1}`, `{"old":{"old":1}}`)
+
+			recorder, response := performRawGroupRatioOptionsRequest(t, tt.body, UpdateGroupRatioOptions)
 
 			require.Equal(t, http.StatusBadRequest, recorder.Code)
 			require.False(t, response.Success)

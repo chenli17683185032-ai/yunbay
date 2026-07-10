@@ -1,10 +1,15 @@
 package service
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
@@ -17,8 +22,65 @@ const (
 	SubscriptionRatioSourceConfigured = "configured"
 )
 
+const invalidValuePackageBillingRatioWarningWindow = 5 * time.Minute
+
+type billingRatioWarningLimiter struct {
+	mu     sync.Mutex
+	window time.Duration
+	last   map[string]time.Time
+}
+
+func newBillingRatioWarningLimiter(window time.Duration) *billingRatioWarningLimiter {
+	return &billingRatioWarningLimiter{
+		window: window,
+		last:   make(map[string]time.Time),
+	}
+}
+
+func (l *billingRatioWarningLimiter) Allow(key string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if previous, ok := l.last[key]; ok && now.Sub(previous) < l.window {
+		return false
+	}
+	l.last[key] = now
+	return true
+}
+
+var invalidValuePackageBillingRatioWarnings = newBillingRatioWarningLimiter(invalidValuePackageBillingRatioWarningWindow)
+var invalidValuePackageBillingRatioWarningNow = time.Now
+
 func validSubscriptionBillingRatio(ratio float64) bool {
 	return !math.IsNaN(ratio) && !math.IsInf(ratio, 0) && ratio > 0
+}
+
+func invalidSubscriptionBillingRatioKind(ratio float64) string {
+	switch {
+	case math.IsNaN(ratio):
+		return "nan"
+	case math.IsInf(ratio, 1):
+		return "positive_infinity"
+	case math.IsInf(ratio, -1):
+		return "negative_infinity"
+	case ratio == 0:
+		return "zero"
+	default:
+		return "negative"
+	}
+}
+
+func warnInvalidValuePackageBillingRatio(info *relaycommon.RelayInfo, ratio float64) {
+	reason := invalidSubscriptionBillingRatioKind(ratio)
+	packageGroup := strings.TrimSpace(info.ValuePackageBillingGroup)
+	usingGroup := strings.TrimSpace(info.UsingGroup)
+	key := packageGroup + "\x00" + usingGroup + "\x00" + reason
+	if !invalidValuePackageBillingRatioWarnings.Allow(key, invalidValuePackageBillingRatioWarningNow()) {
+		return
+	}
+	logger.LogWarn(context.Background(), fmt.Sprintf(
+		"invalid value package billing ratio (package_group=%q, using_group=%q, reason=%s); falling back to default 1x",
+		packageGroup, usingGroup, reason,
+	))
 }
 
 func defaultSubscriptionBillingRatio(info *relaycommon.RelayInfo) (float64, string) {
@@ -55,6 +117,11 @@ func resolveSubscriptionBillingRatio(info *relaycommon.RelayInfo) (float64, stri
 		return defaultSubscriptionBillingRatio(nil)
 	}
 	if info.PriceData.SubscriptionRatioApplied {
+		if info.ValuePackageSubscriptionId > 0 &&
+			info.PriceData.SubscriptionRatioSource == SubscriptionRatioSourceConfigured &&
+			!validSubscriptionBillingRatio(info.PriceData.GroupRatioInfo.GroupRatio) {
+			warnInvalidValuePackageBillingRatio(info, info.PriceData.GroupRatioInfo.GroupRatio)
+		}
 		return normalizeFrozenSubscriptionBillingRatio(
 			info,
 			info.PriceData.GroupRatioInfo.GroupRatio,
@@ -75,6 +142,9 @@ func resolveSubscriptionBillingRatio(info *relaycommon.RelayInfo) (float64, stri
 	candidate := info.PriceData.GroupRatioInfo
 	if candidate.HasSpecialRatio && validSubscriptionBillingRatio(candidate.GroupSpecialRatio) {
 		return candidate.GroupSpecialRatio, SubscriptionRatioSourceConfigured
+	}
+	if candidate.HasSpecialRatio {
+		warnInvalidValuePackageBillingRatio(info, candidate.GroupSpecialRatio)
 	}
 	return 1, SubscriptionRatioSourceDefault
 }

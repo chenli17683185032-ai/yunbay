@@ -160,7 +160,7 @@ func UpdateGroupRatioOptions(c *gin.Context) {
 
 func updateGroupRatioOptionsWithRuntime(c *gin.Context, applier groupRatioRuntimeApplier) {
 	var request groupRatioOptionsUpdateRequest
-	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+	if err := common.DecodeJsonStrict(c.Request.Body, &request); err != nil {
 		respondGroupRatioOptionsError(c, http.StatusBadRequest, err)
 		return
 	}

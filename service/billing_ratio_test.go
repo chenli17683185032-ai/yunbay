@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"math"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +19,21 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func captureBillingRatioWarnings(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buffer := &bytes.Buffer{}
+	common.LogWriterMu.Lock()
+	original := gin.DefaultErrorWriter
+	gin.DefaultErrorWriter = buffer
+	common.LogWriterMu.Unlock()
+	t.Cleanup(func() {
+		common.LogWriterMu.Lock()
+		gin.DefaultErrorWriter = original
+		common.LogWriterMu.Unlock()
+	})
+	return buffer
+}
 
 type recordingRealtimeBilling struct {
 	deltas []int
@@ -264,6 +281,178 @@ func TestResolveSubscriptionBillingRatio(t *testing.T) {
 			require.Equal(t, tt.wantSource, source)
 		})
 	}
+}
+
+func TestResolveSubscriptionBillingRatioWarnsForInvalidConfiguredValuePackageRatio(t *testing.T) {
+	warnings := captureBillingRatioWarnings(t)
+	info := &relaycommon.RelayInfo{
+		ValuePackageSubscriptionId: 1,
+		ValuePackageBillingGroup:   "month-card",
+		BillingUserGroup:           "month-card",
+		UsingGroup:                 "gpt-plus",
+		PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			GroupRatio:        0,
+			GroupSpecialRatio: 0,
+			HasSpecialRatio:   true,
+		}},
+	}
+
+	ratio, source := resolveSubscriptionBillingRatio(info)
+
+	require.Equal(t, 1.0, ratio)
+	require.Equal(t, SubscriptionRatioSourceDefault, source)
+	require.Contains(t, warnings.String(), "[WARN]")
+	require.Contains(t, warnings.String(), "invalid value package billing ratio")
+	require.NotContains(t, warnings.String(), "userId")
+	require.NotContains(t, warnings.String(), "token")
+}
+
+func TestValuePackageBillingRatioWarningLimiterWindow(t *testing.T) {
+	limiter := newBillingRatioWarningLimiter(time.Minute)
+	start := time.Unix(1000, 0)
+
+	require.True(t, limiter.Allow("month-card\x00gpt-plus\x00zero", start))
+	require.False(t, limiter.Allow("month-card\x00gpt-plus\x00zero", start.Add(30*time.Second)))
+	require.True(t, limiter.Allow("month-card\x00gpt-plus\x00zero", start.Add(time.Minute)))
+}
+
+func TestValuePackageBillingRatioWarningLimiterConcurrentAccess(t *testing.T) {
+	limiter := newBillingRatioWarningLimiter(time.Minute)
+	start := time.Unix(1000, 0)
+	const workers = 32
+	var wg sync.WaitGroup
+	results := make(chan bool, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- limiter.Allow("month-card\x00gpt-plus\x00zero", start)
+		}()
+	}
+	wg.Wait()
+	close(results)
+	allowed := 0
+	for result := range results {
+		if result {
+			allowed++
+		}
+	}
+	require.Equal(t, 1, allowed)
+}
+
+func TestResolveSubscriptionBillingRatioRateLimitsInvalidConfiguredWarnings(t *testing.T) {
+	warnings := captureBillingRatioWarnings(t)
+	info := &relaycommon.RelayInfo{
+		ValuePackageSubscriptionId: 1,
+		ValuePackageBillingGroup:   "week-card-rate-limit",
+		BillingUserGroup:           "week-card-rate-limit",
+		UsingGroup:                 "gpt-plus",
+		PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			GroupSpecialRatio: -1,
+			HasSpecialRatio:   true,
+		}},
+	}
+
+	resolveSubscriptionBillingRatio(info)
+	resolveSubscriptionBillingRatio(info)
+
+	require.Equal(t, 1, bytes.Count(warnings.Bytes(), []byte("invalid value package billing ratio")))
+}
+
+func TestResolveSubscriptionBillingRatioWarningWindowRecovers(t *testing.T) {
+	warnings := captureBillingRatioWarnings(t)
+	now := time.Unix(2000, 0)
+	originalNow := invalidValuePackageBillingRatioWarningNow
+	invalidValuePackageBillingRatioWarningNow = func() time.Time { return now }
+	t.Cleanup(func() { invalidValuePackageBillingRatioWarningNow = originalNow })
+	info := &relaycommon.RelayInfo{
+		ValuePackageSubscriptionId: 1,
+		ValuePackageBillingGroup:   "window-recovery-card",
+		BillingUserGroup:           "window-recovery-card",
+		UsingGroup:                 "gpt-plus",
+		PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+			GroupSpecialRatio: math.NaN(),
+			HasSpecialRatio:   true,
+		}},
+	}
+
+	resolveSubscriptionBillingRatio(info)
+	now = now.Add(time.Minute)
+	resolveSubscriptionBillingRatio(info)
+	require.Equal(t, 1, bytes.Count(warnings.Bytes(), []byte("[WARN]")))
+
+	now = now.Add(4 * time.Minute)
+	resolveSubscriptionBillingRatio(info)
+	require.Equal(t, 2, bytes.Count(warnings.Bytes(), []byte("[WARN]")))
+}
+
+func TestResolveSubscriptionBillingRatioWarningProvenance(t *testing.T) {
+	t.Run("all invalid live ratio kinds warn", func(t *testing.T) {
+		warnings := captureBillingRatioWarnings(t)
+		invalidRatios := []float64{0, -1, math.NaN(), math.Inf(1), math.Inf(-1)}
+		for _, invalidRatio := range invalidRatios {
+			resolveSubscriptionBillingRatio(&relaycommon.RelayInfo{
+				ValuePackageSubscriptionId: 1,
+				ValuePackageBillingGroup:   "invalid-kinds-card",
+				BillingUserGroup:           "invalid-kinds-card",
+				UsingGroup:                 "gpt-plus",
+				PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+					GroupSpecialRatio: invalidRatio,
+					HasSpecialRatio:   true,
+				}},
+			})
+		}
+		for _, reason := range []string{"zero", "negative", "nan", "positive_infinity", "negative_infinity"} {
+			require.Contains(t, warnings.String(), "reason="+reason)
+		}
+	})
+
+	t.Run("frozen configured invalid ratio warns", func(t *testing.T) {
+		warnings := captureBillingRatioWarnings(t)
+		resolveSubscriptionBillingRatio(&relaycommon.RelayInfo{
+			ValuePackageSubscriptionId: 1,
+			ValuePackageBillingGroup:   "frozen-card",
+			UsingGroup:                 "gpt-plus",
+			PriceData: types.PriceData{
+				SubscriptionRatioApplied: true,
+				SubscriptionRatioSource:  SubscriptionRatioSourceConfigured,
+				GroupRatioInfo:           types.GroupRatioInfo{GroupRatio: math.Inf(1)},
+			},
+		})
+		require.Contains(t, warnings.String(), "reason=positive_infinity")
+	})
+
+	t.Run("non configured cases do not warn", func(t *testing.T) {
+		warnings := captureBillingRatioWarnings(t)
+		infos := []*relaycommon.RelayInfo{
+			{
+				ValuePackageSubscriptionId: 1,
+				ValuePackageBillingGroup:   "missing-card",
+				UsingGroup:                 "gpt-plus",
+			},
+			{
+				UsingGroup: "gpt-plus",
+				PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+					GroupSpecialRatio: 0,
+					HasSpecialRatio:   true,
+				}},
+			},
+			{
+				ValuePackageSubscriptionId: 1,
+				ValuePackageBillingGroup:   "conflict-card",
+				BillingUserGroup:           "other-card",
+				UsingGroup:                 "gpt-plus",
+				PriceData: types.PriceData{GroupRatioInfo: types.GroupRatioInfo{
+					GroupSpecialRatio: 0,
+					HasSpecialRatio:   true,
+				}},
+			},
+		}
+		for _, info := range infos {
+			resolveSubscriptionBillingRatio(info)
+		}
+		require.Empty(t, warnings.String())
+	})
 }
 
 func TestNewBillingSessionRegularSubscriptionBillingRatioIsOneX(t *testing.T) {
