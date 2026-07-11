@@ -61,9 +61,10 @@ class MonitorTests(unittest.TestCase):
             {2: {"utilization": 99}},
             {1: (True, 2.0), 2: (True, 1.0)},
         )
-        report = monitor.evaluate(client, now=NOW)
+        report = monitor.evaluate(client, now=NOW, capacity_weights={2: 200})
         self.assertFalse(report.alerting)
         self.assertEqual((1, 1), (report.relay_available, report.own_available))
+        self.assertEqual(99.0, report.total_quota_utilization)
 
     def test_self_hosted_exhausted_own_pool_uses_required_message(self):
         client = FakeClient(

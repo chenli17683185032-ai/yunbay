@@ -298,6 +298,24 @@ def evaluate(
         report.own_min_remaining = min(own_remaining_values)
         report.own_max_remaining = max(own_remaining_values)
 
+    configured_weights = capacity_weights or {}
+    missing_capacity_accounts = [
+        str(account.get("name") or account.get("id"))
+        for account, _ in usage_by_account
+        if float(configured_weights.get(int(account["id"]), 0)) <= 0
+    ]
+    if usage_by_account and not missing_capacity_accounts:
+        report.weighted_total_capacity = sum(
+            float(configured_weights[int(account["id"])]) for account, _ in usage_by_account
+        )
+        report.weighted_used_capacity = sum(
+            float(configured_weights[int(account["id"])]) * utilization / 100
+            for account, utilization in usage_by_account
+        )
+        report.total_quota_utilization = (
+            report.weighted_used_capacity / report.weighted_total_capacity * 100
+        )
+
     if report.mode == SELF_HOSTED_GROUP:
         relay_latencies: list[float] = []
         for account in relay_accounts:
@@ -333,27 +351,12 @@ def evaluate(
         if relay_accounts:
             report.emergencies.append("自建安全使用分组中出现了不应存在的中转站账号")
         if usage_by_account:
-            weights = capacity_weights or {}
-            missing = [
-                str(account.get("name") or account.get("id"))
-                for account, _ in usage_by_account
-                if float(weights.get(int(account["id"]), 0)) <= 0
-            ]
-            if missing:
+            if missing_capacity_accounts:
                 report.emergencies.append(
-                    "自建安全使用分组缺少额度总量配置：" + "、".join(missing)
+                    "自建安全使用分组缺少额度总量配置："
+                    + "、".join(missing_capacity_accounts)
                 )
                 return report
-            report.weighted_total_capacity = sum(
-                float(weights[int(account["id"])]) for account, _ in usage_by_account
-            )
-            report.weighted_used_capacity = sum(
-                float(weights[int(account["id"])]) * utilization / 100
-                for account, utilization in usage_by_account
-            )
-            report.total_quota_utilization = (
-                report.weighted_used_capacity / report.weighted_total_capacity * 100
-            )
             if report.total_quota_utilization >= threshold:
                 report.problems.append(
                     f"自建安全使用分组总用量达到 {report.total_quota_utilization:.1f}%"
@@ -424,7 +427,11 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
         heading = "Sub2API 分组监控正常"
 
     if report.total_quota_utilization is not None:
-        own_summary = f"加权总体剩余 {max(0.0, 100-report.total_quota_utilization):.1f}%"
+        own_summary = (
+            f"估算总体剩余 {max(0.0, 100-report.total_quota_utilization):.1f}%，"
+            f"约剩 {report.weighted_total_capacity-report.weighted_used_capacity:.1f}M / "
+            f"估算总量 {report.weighted_total_capacity:.1f}M"
+        )
     elif report.own_min_remaining is not None and report.own_max_remaining is not None:
         own_summary = (
             f"{report.own_available}/{report.own_total} 可用，单账号剩余范围 "
@@ -452,7 +459,7 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
         "",
         f"中转站账号测试：成功 {report.relay_available}，已测试 {report.relay_tested}",
         f"自有账号额度可用：{report.own_available}/{report.own_total}",
-        f"安全使用组总用量：{report.total_quota_utilization:.1f}%" if report.total_quota_utilization is not None else "安全使用组总用量：不适用",
+        f"自有账号估算总用量：{report.total_quota_utilization:.1f}%" if report.total_quota_utilization is not None else "自有账号估算总用量：暂不可用",
         (
             f"加权额度：已用约 {report.weighted_used_capacity:.1f}M / "
             f"总计 {report.weighted_total_capacity:.1f}M"
