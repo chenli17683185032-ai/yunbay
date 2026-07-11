@@ -320,7 +320,7 @@ func TestCompleteValuePackagePurchaseExtendsSameLevelWithoutChangingUserGroup(t 
 	require.NoError(t, err)
 	require.Equal(t, existing.Id, completed.Id)
 	require.Equal(t, originalEnd+30*valuePackageDaySeconds, completed.EndTime)
-	require.Equal(t, originalTotal+month.TotalAmount, completed.AmountTotal)
+	require.Equal(t, originalTotal, completed.AmountTotal)
 	require.Equal(t, originalUsed, completed.AmountUsed)
 	var reloadedSub UserSubscription
 	require.NoError(t, DB.First(&reloadedSub, existing.Id).Error)
@@ -348,6 +348,7 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 	require.NoError(t, DB.Save(&week).Error)
 	now := common.GetTimestamp()
 	existing := createActiveValuePackageSub(t, user.Id, week, now-100, now+3*valuePackageDaySeconds)
+	existing.AmountTotal = 4000
 	existing.AmountUsed = 700
 	require.NoError(t, DB.Save(&existing).Error)
 	originalEnd := existing.EndTime
@@ -369,7 +370,7 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 	require.NotNil(t, first)
 	require.Equal(t, existing.Id, first.Id)
 	require.Equal(t, originalEnd+7*valuePackageDaySeconds, first.EndTime)
-	require.Equal(t, originalTotal+week.TotalAmount, first.AmountTotal)
+	require.Equal(t, originalTotal, first.AmountTotal)
 	require.Equal(t, existing.AmountUsed, first.AmountUsed)
 
 	replay, err := CompleteValuePackageOrder(order.TradeNo, "payload-2", PaymentProviderLDXP, PaymentMethodLDXP, true)
@@ -390,7 +391,7 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 	require.Equal(t, existing.Id, reloadedOrder.UserSubscriptionId)
 }
 
-func TestCreateValuePackageSubscriptionFromPlanTxExtendsTimeAndTotalWithoutChangingUsed(t *testing.T) {
+func TestCreateValuePackageSubscriptionFromPlanTxExtendsTimeWithoutChangingQuota(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3007, UserGroupTiyan)
 	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
@@ -412,7 +413,7 @@ func TestCreateValuePackageSubscriptionFromPlanTxExtendsTimeAndTotalWithoutChang
 	require.NotNil(t, completed)
 	require.Equal(t, existing.Id, completed.Id)
 	require.Equal(t, existing.EndTime+7*valuePackageDaySeconds, completed.EndTime)
-	require.Equal(t, existing.AmountTotal+week.TotalAmount, completed.AmountTotal)
+	require.Equal(t, existing.AmountTotal, completed.AmountTotal)
 	require.Equal(t, existing.AmountUsed, completed.AmountUsed)
 	var reloaded UserSubscription
 	require.NoError(t, DB.First(&reloaded, existing.Id).Error)
@@ -761,12 +762,12 @@ func TestValuePackageExtendUsesMaxExistingEndAndNow(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, extended)
 			require.Equal(t, tt.wantEnd, extended.EndTime)
-			require.Equal(t, existing.AmountTotal+day.TotalAmount, extended.AmountTotal)
+			require.Equal(t, existing.AmountTotal, extended.AmountTotal)
 			require.Equal(t, existing.AmountUsed, extended.AmountUsed)
 			var reloaded UserSubscription
 			require.NoError(t, DB.First(&reloaded, existing.Id).Error)
 			require.Equal(t, tt.wantEnd, reloaded.EndTime)
-			require.Equal(t, existing.AmountTotal+day.TotalAmount, reloaded.AmountTotal)
+			require.Equal(t, existing.AmountTotal, reloaded.AmountTotal)
 			require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
 		})
 	}
@@ -784,13 +785,6 @@ func TestExtendValuePackageSubscriptionRejectsInt64OverflowWithoutWriting(t *tes
 			name:          "end time overflow",
 			existingEnd:   math.MaxInt64 - 5,
 			existingTotal: 100,
-			planTotal:     10,
-			duration:      10,
-		},
-		{
-			name:          "lifecycle quota overflow",
-			existingEnd:   2_000_000_100,
-			existingTotal: math.MaxInt64 - 5,
 			planTotal:     10,
 			duration:      10,
 		},
@@ -1437,7 +1431,7 @@ func TestConsumeValuePackageResetCountClampsFutureResetAtToNow(t *testing.T) {
 	require.GreaterOrEqual(t, reset.ResetAt, now)
 }
 
-func TestConsumeValuePackageResetCountResetsShortWindowsOnly(t *testing.T) {
+func TestConsumeValuePackageResetCountResetsAllUsageWithoutChangingSnapshot(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3012, UserGroupTiyan)
 	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
@@ -1465,7 +1459,7 @@ func TestConsumeValuePackageResetCountResetsShortWindowsOnly(t *testing.T) {
 	require.NotNil(t, state.Usage)
 	require.EqualValues(t, 0, state.Usage.Used5h)
 	require.EqualValues(t, 0, state.Usage.Used7d)
-	require.EqualValues(t, 300, state.Usage.TotalUsed)
+	require.EqualValues(t, 0, state.Usage.TotalUsed)
 
 	var pref UserValuePackagePreference
 	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
@@ -1490,7 +1484,8 @@ func TestConsumeValuePackageResetCountResetsShortWindowsOnly(t *testing.T) {
 	require.EqualValues(t, 2, usageRecordCount)
 	var reloadedSub UserSubscription
 	require.NoError(t, DB.First(&reloadedSub, sub.Id).Error)
-	require.EqualValues(t, 300, reloadedSub.AmountUsed)
+	require.EqualValues(t, 0, reloadedSub.AmountUsed)
+	require.EqualValues(t, 1, reloadedSub.QuotaEpoch)
 	require.EqualValues(t, day.TotalAmount, reloadedSub.AmountTotal)
 	require.EqualValues(t, sub.EndTime, reloadedSub.EndTime)
 }

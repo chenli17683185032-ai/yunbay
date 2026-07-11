@@ -33,7 +33,6 @@ import type {
   OrderManagementValuePackageManagementResponse,
   OrderManagementValuePackageResetCountAdjustment,
   OrderManagementValuePackageResetCountAdjustMode,
-  OrderManagementValuePackageUsageRow,
   PageData,
 } from './types'
 
@@ -98,13 +97,6 @@ export async function getOrderManagementOrders(
   const res = await api.get(
     `/api/order-management/admin/orders${withDefinedParams(params)}`
   )
-  return res.data
-}
-
-export async function getOrderManagementValuePackageUsage(): Promise<
-  ApiResponse<OrderManagementValuePackageUsageRow[]>
-> {
-  const res = await api.get('/api/order-management/admin/value-package-usage')
   return res.data
 }
 

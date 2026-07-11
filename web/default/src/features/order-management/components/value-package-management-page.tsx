@@ -140,16 +140,16 @@ function ResetCountDialog({
 }) {
   const { t } = useTranslation()
   const [mode, setMode] =
-    useState<OrderManagementValuePackageResetCountAdjustMode>('add')
-  const [value, setValue] = useState('1')
+    useState<OrderManagementValuePackageResetCountAdjustMode>('set')
+  const [value, setValue] = useState(String(row?.reset_count ?? 0))
   const [reason, setReason] = useState('')
 
   useEffect(() => {
     if (!open) return
-    setMode('add')
-    setValue('1')
+    setMode('set')
+    setValue(String(row?.reset_count ?? 0))
     setReason('')
-  }, [open, row?.user_id])
+  }, [open, row?.user_id, row?.reset_count])
 
   const submit = () => {
     if (!row) return

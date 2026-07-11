@@ -158,7 +158,7 @@ func TestLegacyValuePackageQuotaMigrationHashIgnoresNowAndUsageAndApplyUsesLocke
 	require.Equal(t, preview.ManifestHash, previewAfterUsage.ManifestHash)
 	require.Equal(t, preview.ManifestHash, previewAtDifferentNow.ManifestHash)
 
-	applied, err := ApplyLegacyValuePackageQuotaMigration(DB, now+60, preview.ManifestHash)
+	applied, err := applyLegacyValuePackageQuotaMigration(DB, now+60, preview.ManifestHash)
 	require.NoError(t, err)
 	require.Equal(t, 1, applied.Updated)
 	require.Len(t, applied.Rows, 1)
@@ -207,7 +207,7 @@ func TestLegacyValuePackageQuotaMigrationRejectsStaleAuthorization(t *testing.T)
 			require.NoError(t, err)
 			tt.mutate(t, target, plan, replacement, now)
 
-			report, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+			report, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 			require.Error(t, err)
 			require.Nil(t, report)
 			for _, id := range []int{target.Id, other.Id} {
@@ -230,7 +230,7 @@ func TestLegacyValuePackageQuotaMigrationApplyIsAtomicAndIdempotent(t *testing.T
 	preview, err := PreviewLegacyValuePackageQuotaMigration(DB, now)
 	require.NoError(t, err)
 
-	applied, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	applied, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 	require.NoError(t, err)
 	require.Equal(t, len(subs), applied.Updated)
 	require.Len(t, applied.Rows, len(subs))
@@ -253,7 +253,7 @@ func TestLegacyValuePackageQuotaMigrationApplyIsAtomicAndIdempotent(t *testing.T
 	require.Positive(t, receipt.AppliedAt)
 	require.Equal(t, len(subs), receipt.Updated)
 
-	replayed, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	replayed, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 	require.NoError(t, err)
 	require.Zero(t, replayed.Updated)
 	require.Empty(t, replayed.Rows)
@@ -285,7 +285,7 @@ func TestLegacyValuePackageQuotaMigrationSecondUpdateFailureRollsBackAll(t *test
 	}))
 	t.Cleanup(func() { require.NoError(t, DB.Callback().Update().Remove(callbackName)) })
 
-	report, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	report, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 	require.ErrorIs(t, err, forcedErr)
 	require.Nil(t, report)
 	for _, id := range []int{first.Id, second.Id} {
@@ -316,7 +316,7 @@ func TestLegacyValuePackageQuotaMigrationReceiptFailureRollsBackAllUpdates(t *te
 	}))
 	t.Cleanup(func() { require.NoError(t, DB.Callback().Create().Remove(callbackName)) })
 
-	report, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	report, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 
 	require.ErrorIs(t, err, forcedErr)
 	require.Nil(t, report)
@@ -337,12 +337,12 @@ func TestLegacyValuePackageQuotaMigrationReceiptDoesNotBlockRestoredTargets(t *t
 	target := seedLegacyValuePackageQuotaMigrationSub(t, plan.Id, UserSubscriptionStatusActive, now+1000, 0, 700)
 	preview, err := PreviewLegacyValuePackageQuotaMigration(DB, now)
 	require.NoError(t, err)
-	first, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	first, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 	require.NoError(t, err)
 	require.Equal(t, 1, first.Updated)
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", target.Id).Update("amount_total", 0).Error)
 
-	restored, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	restored, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 
 	require.NoError(t, err)
 	require.Equal(t, 1, restored.Updated)
@@ -363,7 +363,7 @@ func TestLegacyValuePackageQuotaMigrationConditionalMembershipChangeDoesNotParti
 	require.NoError(t, err)
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", changed.Id).Update("amount_total", 1).Error)
 
-	report, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	report, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 	require.Error(t, err)
 	require.Nil(t, report)
 	var changedAfter UserSubscription
@@ -384,7 +384,7 @@ func TestLegacyValuePackageQuotaMigrationRejectsStaleManifestWhenAllTargetsDisap
 	require.Len(t, preview.Rows, 1)
 	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", target.Id).Update("status", UserSubscriptionStatusExpired).Error)
 
-	report, err := ApplyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
+	report, err := applyLegacyValuePackageQuotaMigration(DB, now, preview.ManifestHash)
 
 	require.Error(t, err)
 	require.Nil(t, report)
@@ -396,7 +396,7 @@ func TestLegacyValuePackageQuotaMigrationRejectsStaleManifestWhenAllTargetsDisap
 func TestLegacyValuePackageQuotaMigrationRejectsArbitraryManifestForInitiallyEmptyTargets(t *testing.T) {
 	setupLegacyValuePackageQuotaMigrationTestDB(t)
 
-	report, err := ApplyLegacyValuePackageQuotaMigration(DB, legacyValuePackageQuotaMigrationTestNow, strings.Repeat("a", 64))
+	report, err := applyLegacyValuePackageQuotaMigration(DB, legacyValuePackageQuotaMigrationTestNow, strings.Repeat("a", 64))
 
 	require.Error(t, err)
 	require.Nil(t, report)
@@ -408,10 +408,19 @@ func TestLegacyValuePackageQuotaMigrationValidatesArguments(t *testing.T) {
 	require.Error(t, err)
 	_, err = PreviewLegacyValuePackageQuotaMigration(DB, 0)
 	require.Error(t, err)
-	_, err = ApplyLegacyValuePackageQuotaMigration(nil, legacyValuePackageQuotaMigrationTestNow, strings.Repeat("a", 64))
+	_, err = applyLegacyValuePackageQuotaMigration(nil, legacyValuePackageQuotaMigrationTestNow, strings.Repeat("a", 64))
 	require.Error(t, err)
-	_, err = ApplyLegacyValuePackageQuotaMigration(DB, 0, strings.Repeat("a", 64))
+	_, err = applyLegacyValuePackageQuotaMigration(DB, 0, strings.Repeat("a", 64))
 	require.Error(t, err)
-	_, err = ApplyLegacyValuePackageQuotaMigration(DB, legacyValuePackageQuotaMigrationTestNow, "")
+	_, err = applyLegacyValuePackageQuotaMigration(DB, legacyValuePackageQuotaMigrationTestNow, "")
 	require.Error(t, err)
+}
+
+func TestLegacyValuePackageQuotaMigrationExportedApplyIsRetired(t *testing.T) {
+	setupLegacyValuePackageQuotaMigrationTestDB(t)
+
+	report, err := ApplyLegacyValuePackageQuotaMigration(DB, legacyValuePackageQuotaMigrationTestNow, strings.Repeat("a", 64))
+
+	require.Nil(t, report)
+	require.ErrorContains(t, err, "apply is retired")
 }

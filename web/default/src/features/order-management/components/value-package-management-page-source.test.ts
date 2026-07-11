@@ -102,7 +102,12 @@ test('value package management page provides filters and reset-count adjustment 
   assert.match(source, /Reset count must be a non-negative number/)
   assert.match(
     source,
-    /useEffect\(\(\) => \{[\s\S]*setMode\('add'\)[\s\S]*setValue\('1'\)[\s\S]*setReason\(''\)[\s\S]*\}, \[open, row\?\.user_id\]\)/
+    /useState<OrderManagementValuePackageResetCountAdjustMode>\(\s*'set'\s*\)/
+  )
+  assert.match(source, /useState\(\s*String\(row\?\.reset_count \?\? 0\)\s*\)/)
+  assert.match(
+    source,
+    /useEffect\(\(\) => \{[\s\S]*setMode\('set'\)[\s\S]*setValue\(String\(row\?\.reset_count \?\? 0\)\)[\s\S]*setReason\(''\)[\s\S]*\}, \[open, row\?\.user_id, row\?\.reset_count\]\)/
   )
 })
 

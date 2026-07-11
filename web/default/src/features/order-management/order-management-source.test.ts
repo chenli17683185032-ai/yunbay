@@ -23,25 +23,20 @@ import test from 'node:test'
 const sourcePath = new URL('./index.tsx', import.meta.url)
 const apiSourcePath = new URL('./api.ts', import.meta.url)
 
-test('order management page mounts value package realtime usage table and refreshes it', async () => {
+test('order management page excludes value package realtime usage and polling', async () => {
   const source = await readFile(sourcePath, 'utf8')
 
-  assert.match(source, /ValuePackageUsageTable/)
-  assert.match(source, /getOrderManagementValuePackageUsage/)
-  assert.match(source, /orderManagementKeys\.valuePackageUsage/)
-  assert.match(source, /queryKey: orderManagementKeys\.valuePackageUsage\(\)/)
-  assert.match(source, /refetchInterval:\s*15_000/)
-  assert.match(
-    source,
-    /invalidateQueries\(\{\s*queryKey: orderManagementKeys\.valuePackageUsage\(\)/s
-  )
+  assert.doesNotMatch(source, /ValuePackageUsageTable/)
+  assert.doesNotMatch(source, /getOrderManagementValuePackageUsage/)
+  assert.doesNotMatch(source, /orderManagementKeys\.valuePackageUsage/)
+  assert.doesNotMatch(source, /valuePackageUsageQuery/)
 })
 
-test('order management API uses dedicated value package usage endpoint', async () => {
+test('order management API excludes the redundant value package usage endpoint', async () => {
   const source = await readFile(apiSourcePath, 'utf8')
 
-  assert.match(source, /getOrderManagementValuePackageUsage/)
-  assert.match(source, /\/api\/order-management\/admin\/value-package-usage/)
+  assert.doesNotMatch(source, /getOrderManagementValuePackageUsage/)
+  assert.doesNotMatch(source, /\/api\/order-management\/admin\/value-package-usage/)
 })
 
 test('order management index keeps standalone value package management page separate', async () => {

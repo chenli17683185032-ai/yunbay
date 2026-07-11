@@ -22,7 +22,7 @@ export const VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY = '7-day period limit'
 export const VALUE_PACKAGE_7D_PERIOD_LIMIT_DESCRIPTION_KEY =
   'Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.'
 export const VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY =
-  'This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.'
+  "This will consume 1 reset count and clear the current package's used quota. The total quota and expiration time will remain unchanged."
 
 const VALUE_PACKAGE_TOTAL_LIMIT_LABEL_KEYS: Record<ValuePackageType, string> = {
   day: '1-day total limit',

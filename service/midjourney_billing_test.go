@@ -125,7 +125,9 @@ func TestRefundMidjourneyQuotaValuePackageRevokesUsage(t *testing.T) {
 			seedUser(t, userID, 0)
 			seedToken(t, tokenID, userID, "mj-vp-token", 400)
 			seedChannel(t, channelID)
+			require.NoError(t, model.DB.Create(&model.SubscriptionPlan{Id: 65, Title: "month card", PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, DurationUnit: model.SubscriptionDurationDay, DurationValue: 30, TotalAmount: 10000, Enabled: true}).Error)
 			seedSubscription(t, subscriptionID, userID, 10000, quota)
+			require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("id = ?", subscriptionID).Update("plan_id", 65).Error)
 			seedMidjourneyPreConsumeRecord(t, requestID, userID, subscriptionID, quota)
 			require.NoError(t, model.DB.Create(&model.ValuePackageUsageRecord{
 				UserId: userID, UserSubscriptionId: subscriptionID, PlanId: 65,
@@ -286,7 +288,9 @@ func TestRefundMidjourneyQuotaRetriesValuePackageAfterStatePersistenceFails(t *t
 	const requestID = "mj-idempotent-value-package"
 	seedUser(t, userID, 0)
 	seedChannel(t, channelID)
+	require.NoError(t, model.DB.Create(&model.SubscriptionPlan{Id: planID, Title: "month card", PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, DurationUnit: model.SubscriptionDurationDay, DurationValue: 30, TotalAmount: 10000, Enabled: true}).Error)
 	seedSubscription(t, subscriptionID, userID, 10000, quota)
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("id = ?", subscriptionID).Update("plan_id", planID).Error)
 	seedMidjourneyPreConsumeRecord(t, requestID, userID, subscriptionID, quota)
 	require.NoError(t, model.DB.Create(&model.ValuePackageUsageRecord{
 		UserId: userID, UserSubscriptionId: subscriptionID, PlanId: planID,

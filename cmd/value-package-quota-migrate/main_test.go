@@ -109,7 +109,7 @@ func TestRunLegacyValuePackageQuotaMigrationPreviewDoesNotCreateReceiptTable(t *
 	require.False(t, db.Migrator().HasTable(&model.ValuePackageQuotaMigrationReceipt{}))
 }
 
-func TestRunLegacyValuePackageQuotaMigrationApplyCreatesOnlyReceiptSchemaOnFirstRun(t *testing.T) {
+func TestRunLegacyValuePackageQuotaMigrationApplyIsRetired(t *testing.T) {
 	db := setupQuotaMigrationCommandDB(t)
 	now := int64(2_000_000_000)
 	plan := model.SubscriptionPlan{
@@ -132,16 +132,10 @@ func TestRunLegacyValuePackageQuotaMigrationApplyCreatesOnlyReceiptSchemaOnFirst
 		Source:      "test",
 	}
 	require.NoError(t, db.Create(&sub).Error)
-	preview, err := runLegacyValuePackageQuotaMigration(db, now, false, "")
-	require.NoError(t, err)
+	_, err := runLegacyValuePackageQuotaMigration(db, now, true, "any-manifest")
+	require.ErrorContains(t, err, "apply is retired")
 	require.False(t, db.Migrator().HasTable(&model.ValuePackageQuotaMigrationReceipt{}))
-
-	applied, err := runLegacyValuePackageQuotaMigration(db, now, true, preview.ManifestHash)
-
-	require.NoError(t, err)
-	require.Equal(t, 1, applied.Updated)
-	require.True(t, db.Migrator().HasTable(&model.ValuePackageQuotaMigrationReceipt{}))
 	var reloaded model.UserSubscription
 	require.NoError(t, db.First(&reloaded, sub.Id).Error)
-	require.EqualValues(t, 2500, reloaded.AmountTotal)
+	require.Zero(t, reloaded.AmountTotal)
 }

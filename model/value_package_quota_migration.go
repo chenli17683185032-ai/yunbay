@@ -203,6 +203,10 @@ func deriveLegacyValuePackageQuotaMigrationManifestRow(sub *UserSubscription, pl
 }
 
 func ApplyLegacyValuePackageQuotaMigration(db *gorm.DB, now int64, manifestHash string) (*LegacyValuePackageQuotaMigrationReport, error) {
+	return nil, errors.New("legacy value package quota migration apply is retired")
+}
+
+func applyLegacyValuePackageQuotaMigration(db *gorm.DB, now int64, manifestHash string) (*LegacyValuePackageQuotaMigrationReport, error) {
 	if db == nil {
 		return nil, errors.New("legacy value package quota migration db is nil")
 	}

@@ -289,6 +289,40 @@ func TestValuePackageBillingSettleZeroActualQuotaClearsUsageReservation(t *testi
 	require.EqualValues(t, 0, used7d)
 }
 
+func TestValuePackageBillingSettleAfterResetDoesNotChangeNewEpochUsage(t *testing.T) {
+	for _, actualQuota := range []int{40, 160} {
+		t.Run(fmt.Sprintf("actual_%d", actualQuota), func(t *testing.T) {
+			setupValuePackageBillingSessionTestDB(t)
+			user := model.User{Username: fmt.Sprintf("vp-reset-settle-%d", actualQuota), Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 1000}
+			require.NoError(t, model.DB.Create(&user).Error)
+			plan := model.SubscriptionPlan{Title: "reset settle week", Enabled: true, PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeWeek, PackageLevel: model.ValuePackageLevelWeek, ModelGroup: "week-card", DurationUnit: model.SubscriptionDurationDay, DurationValue: 7, ConcurrencyLimit: 1, TotalAmount: 1000}
+			require.NoError(t, model.DB.Create(&plan).Error)
+			now := common.GetTimestamp()
+			sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: plan.TotalAmount, StartTime: now - 10, EndTime: now + 86400, Status: model.UserSubscriptionStatusActive}
+			require.NoError(t, model.DB.Create(&sub).Error)
+			require.NoError(t, model.DB.Create(&model.UserValuePackagePreference{UserId: user.Id, Enabled: true, ActiveUserSubscriptionId: sub.Id, ResetCount: 1}).Error)
+
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			relayInfo := &relaycommon.RelayInfo{UserId: user.Id, RequestId: fmt.Sprintf("vp-reset-settle-%d", actualQuota), OriginModelName: "gpt-test", IsPlayground: true, ValuePackageSubscriptionId: sub.Id, ValuePackagePlanId: plan.Id, ValuePackageModelGroup: plan.ModelGroup, ValuePackagePackageType: plan.PackageType}
+			session, apiErr := NewBillingSession(ctx, relayInfo, 100)
+			require.Nil(t, apiErr)
+			require.NotNil(t, session)
+			_, err := model.ConsumeValuePackageResetCount(user.Id, sub.Id, now, user.Id, "settle epoch test")
+			require.NoError(t, err)
+
+			require.NoError(t, session.Settle(actualQuota))
+			var reloaded model.UserSubscription
+			require.NoError(t, model.DB.First(&reloaded, sub.Id).Error)
+			require.Zero(t, reloaded.AmountUsed)
+			require.EqualValues(t, 1, reloaded.QuotaEpoch)
+			var usage model.ValuePackageUsageRecord
+			require.NoError(t, model.DB.Where("user_subscription_id = ? AND request_id = ?", sub.Id, relayInfo.RequestId).First(&usage).Error)
+			require.EqualValues(t, actualQuota, usage.Quota)
+			require.Zero(t, usage.QuotaEpoch)
+		})
+	}
+}
+
 func TestValuePackageBillingSettleReturnsUsageRecordError(t *testing.T) {
 	setupValuePackageBillingSessionTestDB(t)
 	session := &BillingSession{

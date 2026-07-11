@@ -105,7 +105,7 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
-		if funding, ok := s.funding.(*SubscriptionFunding); ok && funding.valuePackageSubscriptionId > 0 && delta > 0 {
+		if funding, ok := s.funding.(*SubscriptionFunding); ok && funding.valuePackageSubscriptionId > 0 {
 			if _, err := model.ReserveValuePackageUsageToTarget(funding.requestId, funding.userId, funding.valuePackageSubscriptionId, int64(actualQuota)); err != nil {
 				return err
 			}
@@ -195,13 +195,17 @@ func (s *BillingSession) Refund(c *gin.Context) {
 	extraReserved := s.extraReserved
 	subscriptionId := s.relayInfo.SubscriptionId
 	funding := s.funding
+	isValuePackage := false
+	if valueFunding, ok := funding.(*SubscriptionFunding); ok {
+		isValuePackage = valueFunding.valuePackageSubscriptionId > 0
+	}
 
 	gopool.Go(func() {
 		// 1) 退还资金来源
 		if err := funding.Refund(); err != nil {
 			common.SysLog("error refunding billing source: " + err.Error())
 		}
-		if extraReserved > 0 && funding.Source() == BillingSourceSubscription && subscriptionId > 0 {
+		if extraReserved > 0 && funding.Source() == BillingSourceSubscription && subscriptionId > 0 && !isValuePackage {
 			if err := model.PostConsumeUserSubscriptionDelta(subscriptionId, -int64(extraReserved)); err != nil {
 				common.SysLog("error refunding subscription extra reserved quota: " + err.Error())
 			}

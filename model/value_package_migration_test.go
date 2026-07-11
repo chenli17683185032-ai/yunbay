@@ -148,6 +148,7 @@ func TestEnsureUserSubscriptionTableSQLiteAddsCoveredColumns(t *testing.T) {
 
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_by_subscription_id"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_time"))
+	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "quota_epoch"))
 
 	var got struct {
 		Id                      int
@@ -155,6 +156,7 @@ func TestEnsureUserSubscriptionTableSQLiteAddsCoveredColumns(t *testing.T) {
 		PlanId                  int
 		CoveredBySubscriptionId int
 		CoveredTime             int64
+		QuotaEpoch              int64
 	}
 	require.NoError(t, DB.Table("user_subscriptions").Where("id = ?", 1).First(&got).Error)
 	require.Equal(t, 1, got.Id)
@@ -162,6 +164,60 @@ func TestEnsureUserSubscriptionTableSQLiteAddsCoveredColumns(t *testing.T) {
 	require.Equal(t, 200, got.PlanId)
 	require.Equal(t, 0, got.CoveredBySubscriptionId)
 	require.EqualValues(t, 0, got.CoveredTime)
+	require.EqualValues(t, 0, got.QuotaEpoch)
+}
+
+func TestEnsureValuePackageQuotaEpochTablesSQLiteAddsColumnsWithoutLosingRows(t *testing.T) {
+	setupValuePackageMigrationTestDB(t)
+	require.NoError(t, DB.Exec("CREATE TABLE `subscription_pre_consume_records` (`id` integer PRIMARY KEY, `request_id` varchar(64), `pre_consumed` bigint NOT NULL DEFAULT 0)").Error)
+	require.NoError(t, DB.Exec("CREATE TABLE `value_package_usage_records` (`id` integer PRIMARY KEY, `request_id` varchar(64), `quota` bigint NOT NULL DEFAULT 0)").Error)
+	require.NoError(t, DB.Exec("CREATE TABLE `value_package_quota_resets` (`id` integer PRIMARY KEY, `reset_at` bigint)").Error)
+	require.NoError(t, DB.Exec("INSERT INTO `subscription_pre_consume_records` (`id`, `request_id`, `pre_consumed`) VALUES (1, 'legacy-preconsume', 11)").Error)
+	require.NoError(t, DB.Exec("INSERT INTO `value_package_usage_records` (`id`, `request_id`, `quota`) VALUES (1, 'legacy-usage', 12)").Error)
+	require.NoError(t, DB.Exec("INSERT INTO `value_package_quota_resets` (`id`, `reset_at`) VALUES (1, 13)").Error)
+
+	require.NoError(t, ensureValuePackageQuotaEpochTablesSQLite())
+
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionPreConsumeRecord{}, "quota_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageUsageRecord{}, "quota_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageQuotaReset{}, "from_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageQuotaReset{}, "to_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageQuotaReset{}, "amount_used_before"))
+
+	var preConsume struct {
+		Id          int
+		RequestId   string
+		PreConsumed int64
+		QuotaEpoch  int64
+	}
+	require.NoError(t, DB.Table("subscription_pre_consume_records").First(&preConsume, 1).Error)
+	require.Equal(t, "legacy-preconsume", preConsume.RequestId)
+	require.EqualValues(t, 11, preConsume.PreConsumed)
+	require.Zero(t, preConsume.QuotaEpoch)
+
+	var usage struct {
+		Id         int
+		RequestId  string
+		Quota      int64
+		QuotaEpoch int64
+	}
+	require.NoError(t, DB.Table("value_package_usage_records").First(&usage, 1).Error)
+	require.Equal(t, "legacy-usage", usage.RequestId)
+	require.EqualValues(t, 12, usage.Quota)
+	require.Zero(t, usage.QuotaEpoch)
+
+	var reset struct {
+		Id               int
+		ResetAt          int64
+		FromEpoch        int64
+		ToEpoch          int64
+		AmountUsedBefore int64
+	}
+	require.NoError(t, DB.Table("value_package_quota_resets").First(&reset, 1).Error)
+	require.EqualValues(t, 13, reset.ResetAt)
+	require.Zero(t, reset.FromEpoch)
+	require.Zero(t, reset.ToEpoch)
+	require.Zero(t, reset.AmountUsedBefore)
 }
 
 func TestValuePackageResetCountMigrationAddsPreferenceColumnAndTables(t *testing.T) {
@@ -204,10 +260,16 @@ func TestValuePackageMigrateDBCreatesTablesAndColumns(t *testing.T) {
 	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "ldxp_session_ttl_seconds"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_by_subscription_id"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_time"))
+	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "quota_epoch"))
 	require.True(t, DB.Migrator().HasTable(&UserValuePackagePreference{}))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageUsageRecord{}))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageQuotaReset{}))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageResetCountLedger{}))
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionPreConsumeRecord{}, "quota_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageUsageRecord{}, "quota_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageQuotaReset{}, "from_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageQuotaReset{}, "to_epoch"))
+	require.True(t, DB.Migrator().HasColumn(&ValuePackageQuotaReset{}, "amount_used_before"))
 
 	var columns []struct {
 		Name         string `gorm:"column:name"`

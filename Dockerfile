@@ -39,7 +39,8 @@ COPY --from=builder-classic /build/web/classic/dist ./web/classic/dist
 RUN version="$(cat VERSION)" \
     && ldflags="-s -w -X github.com/QuantumNous/new-api/common.Version=${version}" \
     && go build -ldflags "$ldflags" -o new-api \
-    && go build -ldflags "$ldflags" -o value-package-quota-migrate ./cmd/value-package-quota-migrate
+    && go build -ldflags "$ldflags" -o value-package-quota-migrate ./cmd/value-package-quota-migrate \
+    && go build -ldflags "$ldflags" -o value-package-reset-reconcile ./cmd/value-package-reset-reconcile
 
 FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
 
@@ -50,6 +51,7 @@ RUN apt-get update \
 
 COPY --from=builder2 /build/new-api /
 COPY --from=builder2 /build/value-package-quota-migrate /
+COPY --from=builder2 /build/value-package-reset-reconcile /
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
 EXPOSE 3000
 WORKDIR /data

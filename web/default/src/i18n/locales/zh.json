@@ -5117,7 +5117,7 @@
     "Week cards can use this total quota from activation time until the 7-day expiration. The total quota must be greater than 0.": "周卡可从开通时刻起使用此总额度，直至 7 天有效期结束。总额度必须大于 0。",
     "Month cards can use this total quota from activation time until the 30-day expiration. The total quota must be greater than 0.": "月卡可从开通时刻起使用此总额度，直至 30 天有效期结束。总额度必须大于 0。",
     "Optional month-card period quota. It resets from activation time every fixed 7 days, and month-card reset can clear current 7-day period usage. 0 disables this period limit.": "可选的月卡阶段限额。从开通时刻开始每固定 7 天自动重置，月卡手动重置也可以清空当前 7 天阶段用量；0 表示不启用该阶段限额。",
-    "This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.": "本次会消耗 1 次重置次数。日卡和周卡只清空 5 小时短窗口用量；月卡会同时清空 5 小时短窗口用量和当前 7 天阶段用量。本次操作不会恢复总额度，也不会延长有效期。",
+    "This will consume 1 reset count and clear the current package's used quota. The total quota and expiration time will remain unchanged.": "本次会消耗 1 次重置次数，并清空当前套餐的已用额度。套餐总额度和到期时间保持不变。",
     "Realtime 5-hour remaining, month-card 7-day period remaining, and package total quota for active value package users.": "实时显示活跃超值套餐用户的 5 小时剩余额度、月卡 7 天阶段剩余额度和套餐总额度。",
     "Quota periods": "额度周期",
     "Current 7-day stage remaining": "当前 7 天阶段剩余",

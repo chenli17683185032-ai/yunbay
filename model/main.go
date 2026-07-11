@@ -332,6 +332,9 @@ func migrateDB() error {
 		if err := ensureUserValuePackagePreferenceTableSQLite(); err != nil {
 			return err
 		}
+		if err := ensureValuePackageQuotaEpochTablesSQLite(); err != nil {
+			return err
+		}
 		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
 			return err
 		}
@@ -421,6 +424,9 @@ func migrateDBFast() error {
 			return err
 		}
 		if err := ensureUserValuePackagePreferenceTableSQLite(); err != nil {
+			return err
+		}
+		if err := ensureValuePackageQuotaEpochTablesSQLite(); err != nil {
 			return err
 		}
 		if err := ensureSubscriptionOrderTableSQLite(); err != nil {
@@ -573,6 +579,7 @@ func ensureUserSubscriptionTableSQLite() error {
 	required := []sqliteColumnDef{
 		{Name: "covered_by_subscription_id", DDL: "`covered_by_subscription_id` integer DEFAULT 0"},
 		{Name: "covered_time", DDL: "`covered_time` bigint DEFAULT 0"},
+		{Name: "quota_epoch", DDL: "`quota_epoch` bigint NOT NULL DEFAULT 0"},
 	}
 	for _, col := range required {
 		if _, ok := existing[col.Name]; ok {
@@ -580,6 +587,61 @@ func ensureUserSubscriptionTableSQLite() error {
 		}
 		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + col.DDL).Error; err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func ensureValuePackageQuotaEpochTablesSQLite() error {
+	if !common.UsingSQLite {
+		return nil
+	}
+	tables := []struct {
+		Name    string
+		Columns []sqliteColumnDef
+	}{
+		{
+			Name: "subscription_pre_consume_records",
+			Columns: []sqliteColumnDef{
+				{Name: "quota_epoch", DDL: "`quota_epoch` bigint NOT NULL DEFAULT 0"},
+			},
+		},
+		{
+			Name: "value_package_usage_records",
+			Columns: []sqliteColumnDef{
+				{Name: "quota_epoch", DDL: "`quota_epoch` bigint NOT NULL DEFAULT 0"},
+			},
+		},
+		{
+			Name: "value_package_quota_resets",
+			Columns: []sqliteColumnDef{
+				{Name: "from_epoch", DDL: "`from_epoch` bigint NOT NULL DEFAULT 0"},
+				{Name: "to_epoch", DDL: "`to_epoch` bigint NOT NULL DEFAULT 0"},
+				{Name: "amount_used_before", DDL: "`amount_used_before` bigint NOT NULL DEFAULT 0"},
+			},
+		},
+	}
+	for _, table := range tables {
+		if !DB.Migrator().HasTable(table.Name) {
+			continue
+		}
+		var existingColumns []struct {
+			Name string `gorm:"column:name"`
+		}
+		if err := DB.Raw("PRAGMA table_info(`" + table.Name + "`)").Scan(&existingColumns).Error; err != nil {
+			return err
+		}
+		existing := make(map[string]struct{}, len(existingColumns))
+		for _, column := range existingColumns {
+			existing[column.Name] = struct{}{}
+		}
+		for _, column := range table.Columns {
+			if _, ok := existing[column.Name]; ok {
+				continue
+			}
+			if err := DB.Exec("ALTER TABLE `" + table.Name + "` ADD COLUMN " + column.DDL).Error; err != nil {
+				return err
+			}
 		}
 	}
 	return nil

@@ -70,6 +70,7 @@ const (
 const (
 	ValuePackageQuotaResetSourceUserConsumeCount = "user_consume_count"
 	ValuePackageQuotaResetSourceAdminManualReset = "admin_manual_reset"
+	ValuePackageQuotaResetSourceCycleRenewal     = "cycle_renewal"
 
 	ValuePackageResetCountLedgerSourceAdminSet      = "admin_set"
 	ValuePackageResetCountLedgerSourceAdminAdd      = "admin_add"
@@ -382,6 +383,7 @@ type UserSubscription struct {
 
 	AmountTotal int64 `json:"amount_total" gorm:"type:bigint;not null;default:0"`
 	AmountUsed  int64 `json:"amount_used" gorm:"type:bigint;not null;default:0"`
+	QuotaEpoch  int64 `json:"quota_epoch" gorm:"type:bigint;not null;default:0"`
 
 	StartTime int64  `json:"start_time" gorm:"bigint"`
 	EndTime   int64  `json:"end_time" gorm:"bigint;index;index:idx_user_sub_active,priority:3"`
@@ -445,6 +447,7 @@ type ValuePackageUsageRecord struct {
 	ModelGroup         string `json:"model_group" gorm:"type:varchar(64);index"`
 	RequestId          string `json:"request_id" gorm:"type:varchar(64);index;uniqueIndex:idx_vp_usage_sub_request,priority:2"`
 	Quota              int64  `json:"quota" gorm:"type:bigint;not null;default:0"`
+	QuotaEpoch         int64  `json:"quota_epoch" gorm:"type:bigint;not null;default:0"`
 	CreatedAt          int64  `json:"created_at" gorm:"bigint;index:idx_vp_usage_user_time,priority:2"`
 }
 
@@ -462,6 +465,9 @@ type ValuePackageQuotaReset struct {
 	PlanId             int    `json:"plan_id" gorm:"index"`
 	PackageType        string `json:"package_type" gorm:"type:varchar(16);index"`
 	ResetAt            int64  `json:"reset_at" gorm:"bigint;index:idx_vp_reset_user_time,priority:2"`
+	FromEpoch          int64  `json:"from_epoch" gorm:"type:bigint;not null;default:0"`
+	ToEpoch            int64  `json:"to_epoch" gorm:"type:bigint;not null;default:0"`
+	AmountUsedBefore   int64  `json:"amount_used_before" gorm:"type:bigint;not null;default:0"`
 	Source             string `json:"source" gorm:"type:varchar(32);index"`
 	CreatedByUserId    int    `json:"created_by_user_id" gorm:"index"`
 	Note               string `json:"note" gorm:"type:text"`
@@ -859,6 +865,7 @@ func CreateValuePackageSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Sub
 			CreatedAt:   common.GetTimestamp(),
 			UpdatedAt:   common.GetTimestamp(),
 		}
+		syncValuePackageCycleSchedule(sub, plan)
 		if err := tx.Create(sub).Error; err != nil {
 			return nil, err
 		}
@@ -909,11 +916,11 @@ func extendValuePackageSubscriptionTx(tx *gorm.DB, subscriptionID int, plan *Sub
 	if base > math.MaxInt64-duration {
 		return nil, errors.New("value package subscription end time overflow")
 	}
-	if existing.AmountTotal > math.MaxInt64-plan.TotalAmount {
-		return nil, errors.New("value package subscription total amount overflow")
-	}
 	existing.EndTime = base + duration
-	existing.AmountTotal += plan.TotalAmount
+	if err := maybeAdvanceValuePackageCycleTx(tx, &existing, plan, nowUnix); err != nil {
+		return nil, err
+	}
+	syncValuePackageCycleSchedule(&existing, plan)
 	existing.UpdatedAt = common.GetTimestamp()
 	if err := tx.Save(&existing).Error; err != nil {
 		return nil, err
@@ -1378,6 +1385,91 @@ func normalizeValuePackageFixedDurationFields(plan *SubscriptionPlan) {
 	}
 }
 
+func valuePackageCycleSeconds(plan *SubscriptionPlan) int64 {
+	if plan == nil || !plan.IsValuePackage() {
+		return 0
+	}
+	switch plan.PackageType {
+	case ValuePackageTypeDay:
+		return 24 * 60 * 60
+	case ValuePackageTypeWeek:
+		return 7 * 24 * 60 * 60
+	case ValuePackageTypeMonth:
+		return 30 * 24 * 60 * 60
+	default:
+		return 0
+	}
+}
+
+func syncValuePackageCycleSchedule(sub *UserSubscription, plan *SubscriptionPlan) {
+	if sub == nil {
+		return
+	}
+	cycleSeconds := valuePackageCycleSeconds(plan)
+	if cycleSeconds <= 0 || sub.StartTime <= 0 {
+		sub.LastResetTime = 0
+		sub.NextResetTime = 0
+		return
+	}
+	if sub.LastResetTime < sub.StartTime {
+		sub.LastResetTime = sub.StartTime
+	}
+	nextResetTime := sub.LastResetTime + cycleSeconds
+	if sub.EndTime > 0 && nextResetTime < sub.EndTime {
+		sub.NextResetTime = nextResetTime
+	} else {
+		sub.NextResetTime = 0
+	}
+}
+
+func maybeAdvanceValuePackageCycleTx(tx *gorm.DB, sub *UserSubscription, plan *SubscriptionPlan, now int64) error {
+	if tx == nil || sub == nil || plan == nil {
+		return errors.New("invalid value package cycle args")
+	}
+	cycleSeconds := valuePackageCycleSeconds(plan)
+	if cycleSeconds <= 0 || sub.StartTime <= 0 || now < sub.StartTime+cycleSeconds {
+		return nil
+	}
+	completedCycles := (now - sub.StartTime) / cycleSeconds
+	cycleStart := sub.StartTime + completedCycles*cycleSeconds
+	lastCycleStart := sub.LastResetTime
+	if lastCycleStart < sub.StartTime {
+		lastCycleStart = sub.StartTime
+	}
+	if cycleStart <= lastCycleStart {
+		return nil
+	}
+	if sub.QuotaEpoch == math.MaxInt64 {
+		return errors.New("value package quota epoch overflow")
+	}
+	fromEpoch := sub.QuotaEpoch
+	amountUsedBefore := sub.AmountUsed
+	sub.AmountUsed = 0
+	sub.QuotaEpoch++
+	sub.LastResetTime = cycleStart
+	nextCycleStart := cycleStart + cycleSeconds
+	if sub.EndTime > 0 && nextCycleStart >= sub.EndTime {
+		sub.NextResetTime = 0
+	} else {
+		sub.NextResetTime = nextCycleStart
+	}
+	if err := tx.Create(&ValuePackageQuotaReset{
+		UserId:             sub.UserId,
+		UserSubscriptionId: sub.Id,
+		PlanId:             sub.PlanId,
+		PackageType:        plan.PackageType,
+		ResetAt:            cycleStart,
+		FromEpoch:          fromEpoch,
+		ToEpoch:            sub.QuotaEpoch,
+		AmountUsedBefore:   amountUsedBefore,
+		Source:             ValuePackageQuotaResetSourceCycleRenewal,
+		Note:               "fixed package cycle renewal",
+	}).Error; err != nil {
+		return err
+	}
+	return tx.Save(sub).Error
+}
+
 func getActiveValuePackageSubscriptionsTx(tx *gorm.DB, userId int, now int64) ([]UserSubscription, error) {
 	if tx == nil {
 		tx = DB
@@ -1737,6 +1829,9 @@ func buildValuePackageWindowUsageDetailsFromRecords(sub *UserSubscription, plan 
 	}
 	fiveHourRecords := make([]ValuePackageUsageRecord, 0, len(records))
 	for _, record := range records {
+		if record.QuotaEpoch != sub.QuotaEpoch {
+			continue
+		}
 		if record.Quota <= 0 || record.CreatedAt <= 0 || record.CreatedAt > now {
 			continue
 		}
@@ -1770,6 +1865,9 @@ func buildValuePackageWindowUsageDetailsFromRecords(sub *UserSubscription, plan 
 		effective7dStart = effectiveLastResetAt
 	}
 	for _, record := range records {
+		if record.QuotaEpoch != sub.QuotaEpoch {
+			continue
+		}
 		if record.Quota <= 0 || record.CreatedAt <= 0 || record.CreatedAt > now {
 			continue
 		}
@@ -2367,6 +2465,7 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 			fallthrough
 		case ValuePackagePurchaseActionCreate:
 			sub := &UserSubscription{UserId: order.UserId, PlanId: plan.Id, AmountTotal: plan.TotalAmount, AmountUsed: 0, StartTime: nowUnix, EndTime: endUnix, Status: UserSubscriptionStatusActive, Source: "ldxp", CreatedAt: common.GetTimestamp(), UpdatedAt: common.GetTimestamp()}
+			syncValuePackageCycleSchedule(sub, plan)
 			if err := tx.Create(sub).Error; err != nil {
 				return err
 			}
@@ -2710,6 +2809,12 @@ func ConsumeValuePackageResetCount(userId int, userSubscriptionId int, resetAt i
 		if !plan.IsValuePackage() {
 			return errors.New("当前没有可重置的超值套餐")
 		}
+		if sub.QuotaEpoch == math.MaxInt64 {
+			return errors.New("value package quota epoch overflow")
+		}
+		fromEpoch := sub.QuotaEpoch
+		toEpoch := fromEpoch + 1
+		amountUsedBefore := sub.AmountUsed
 
 		oldCount := pref.ResetCount
 		newCount := oldCount - 1
@@ -2728,6 +2833,9 @@ func ConsumeValuePackageResetCount(userId int, userSubscriptionId int, resetAt i
 			PlanId:             plan.Id,
 			PackageType:        plan.PackageType,
 			ResetAt:            resetAt,
+			FromEpoch:          fromEpoch,
+			ToEpoch:            toEpoch,
+			AmountUsedBefore:   amountUsedBefore,
 			Source:             ValuePackageQuotaResetSourceUserConsumeCount,
 			CreatedByUserId:    actorUserId,
 			Note:               note,
@@ -2743,6 +2851,11 @@ func ConsumeValuePackageResetCount(userId int, userSubscriptionId int, resetAt i
 			CreatedByUserId: actorUserId,
 			Note:            note,
 		}).Error; err != nil {
+			return err
+		}
+		sub.AmountUsed = 0
+		sub.QuotaEpoch = toEpoch
+		if err := tx.Save(&sub).Error; err != nil {
 			return err
 		}
 
@@ -2847,6 +2960,22 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 		if !plan.IsValuePackage() {
 			return errors.New("subscription is not value package")
 		}
+		if err := maybeAdvanceValuePackageCycleTx(tx, &sub, plan, now); err != nil {
+			return err
+		}
+
+		requestEpoch := sub.QuotaEpoch
+		var preConsumeRecord SubscriptionPreConsumeRecord
+		preConsumeQuery := tx.Where("request_id = ?", requestId).Limit(1).Find(&preConsumeRecord)
+		if preConsumeQuery.Error != nil {
+			return preConsumeQuery.Error
+		}
+		if preConsumeQuery.RowsAffected > 0 {
+			if preConsumeRecord.UserId != userId || preConsumeRecord.UserSubscriptionId != userSubscriptionId {
+				return errors.New("subscription pre-consume request mismatch")
+			}
+			requestEpoch = preConsumeRecord.QuotaEpoch
+		}
 
 		var existing ValuePackageUsageRecord
 		currentQuota := int64(0)
@@ -2858,6 +2987,10 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 		if query.RowsAffected > 0 {
 			currentQuota = existing.Quota
 			currentCreatedAt = existing.CreatedAt
+			requestEpoch = existing.QuotaEpoch
+			if preConsumeQuery.RowsAffected > 0 && preConsumeRecord.QuotaEpoch != existing.QuotaEpoch {
+				return errors.New("value package usage epoch mismatch")
+			}
 		}
 
 		usedBefore := sub.AmountUsed
@@ -2868,6 +3001,30 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 			returnValue.AmountTotal = sub.AmountTotal
 			returnValue.AmountUsedBefore = usedBefore
 			returnValue.AmountUsedAfter = sub.AmountUsed
+			returnValue.QuotaEpoch = requestEpoch
+			return nil
+		}
+
+		if sub.QuotaEpoch != requestEpoch {
+			if err := recordValuePackageUsageTx(tx, &ValuePackageUsageRecord{
+				UserId:             userId,
+				UserSubscriptionId: sub.Id,
+				PlanId:             plan.Id,
+				PackageType:        plan.PackageType,
+				ModelGroup:         plan.ModelGroup,
+				RequestId:          requestId,
+				Quota:              targetQuota,
+				QuotaEpoch:         requestEpoch,
+				CreatedAt:          now,
+			}); err != nil {
+				return err
+			}
+			returnValue.UserSubscriptionId = sub.Id
+			returnValue.PreConsumed = targetQuota
+			returnValue.AmountTotal = sub.AmountTotal
+			returnValue.AmountUsedBefore = usedBefore
+			returnValue.AmountUsedAfter = sub.AmountUsed
+			returnValue.QuotaEpoch = requestEpoch
 			return nil
 		}
 
@@ -2884,7 +3041,7 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 				lowerBound = now - valuePackage7dWindowSeconds
 			}
 			var usageRecords []ValuePackageUsageRecord
-			if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND (quota > ? OR request_id = ?)", userId, sub.Id, lowerBound, now, 0, requestId).
+			if err := tx.Where("user_id = ? AND user_subscription_id = ? AND quota_epoch = ? AND created_at >= ? AND created_at <= ? AND (quota > ? OR request_id = ?)", userId, sub.Id, requestEpoch, lowerBound, now, 0, requestId).
 				Order("created_at asc, id asc").
 				Find(&usageRecords).Error; err != nil {
 				return err
@@ -2907,6 +3064,7 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 					ModelGroup:         plan.ModelGroup,
 					RequestId:          requestId,
 					Quota:              targetQuota,
+					QuotaEpoch:         requestEpoch,
 					CreatedAt:          now,
 				})
 			}
@@ -2927,6 +3085,7 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 			ModelGroup:         plan.ModelGroup,
 			RequestId:          requestId,
 			Quota:              targetQuota,
+			QuotaEpoch:         requestEpoch,
 			CreatedAt:          now,
 		}); err != nil {
 			return err
@@ -2943,6 +3102,7 @@ func ReserveValuePackageUsageToTarget(requestId string, userId int, userSubscrip
 		returnValue.AmountTotal = sub.AmountTotal
 		returnValue.AmountUsedBefore = usedBefore
 		returnValue.AmountUsedAfter = sub.AmountUsed
+		returnValue.QuotaEpoch = requestEpoch
 		return nil
 	})
 	if err != nil {
@@ -3072,7 +3232,7 @@ func getValuePackageWindowUsageDetailsTx(tx *gorm.DB, userId int, userSubscripti
 	}
 
 	var usageRecords []ValuePackageUsageRecord
-	if err := tx.Where("user_id = ? AND user_subscription_id = ? AND created_at >= ? AND created_at <= ? AND quota > ?", userId, userSubscriptionId, lowerBound, now, 0).
+	if err := tx.Where("user_id = ? AND user_subscription_id = ? AND quota_epoch = ? AND created_at >= ? AND created_at <= ? AND quota > ?", userId, userSubscriptionId, sub.QuotaEpoch, lowerBound, now, 0).
 		Order("created_at asc, id asc").
 		Find(&usageRecords).Error; err != nil {
 		return nil, err
@@ -3172,6 +3332,7 @@ type SubscriptionPreConsumeResult struct {
 	AmountTotal        int64
 	AmountUsedBefore   int64
 	AmountUsedAfter    int64
+	QuotaEpoch         int64
 }
 
 // ExpireDueSubscriptions marks expired subscriptions and handles group downgrade.
@@ -3268,6 +3429,7 @@ type SubscriptionPreConsumeRecord struct {
 	UserId             int    `json:"user_id" gorm:"index"`
 	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index"`
 	PreConsumed        int64  `json:"pre_consumed" gorm:"type:bigint;not null;default:0"`
+	QuotaEpoch         int64  `json:"quota_epoch" gorm:"type:bigint;not null;default:0"`
 	Status             string `json:"status" gorm:"type:varchar(32);index"` // consumed/refunded
 	CreatedAt          int64  `json:"created_at" gorm:"bigint"`
 	UpdatedAt          int64  `json:"updated_at" gorm:"bigint;index"`
@@ -3355,6 +3517,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 			returnValue.AmountTotal = sub.AmountTotal
 			returnValue.AmountUsedBefore = sub.AmountUsed
 			returnValue.AmountUsedAfter = sub.AmountUsed
+			returnValue.QuotaEpoch = existing.QuotaEpoch
 			return nil
 		}
 
@@ -3406,6 +3569,7 @@ func PreConsumeUserSubscription(requestId string, userId int, modelName string, 
 					returnValue.AmountTotal = sub.AmountTotal
 					returnValue.AmountUsedBefore = sub.AmountUsed
 					returnValue.AmountUsedAfter = sub.AmountUsed
+					returnValue.QuotaEpoch = existing.QuotaEpoch
 					return nil
 				}
 				return err
@@ -3467,6 +3631,7 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 			returnValue.AmountTotal = sub.AmountTotal
 			returnValue.AmountUsedBefore = sub.AmountUsed
 			returnValue.AmountUsedAfter = sub.AmountUsed
+			returnValue.QuotaEpoch = existing.QuotaEpoch
 			return nil
 		}
 
@@ -3486,6 +3651,9 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 		normalizeValuePackagePlan(plan)
 		if !plan.IsValuePackage() {
 			return errors.New("subscription is not value package")
+		}
+		if err := maybeAdvanceValuePackageCycleTx(tx, &sub, plan, now); err != nil {
+			return err
 		}
 		usedBefore := sub.AmountUsed
 		if sub.AmountTotal > 0 && sub.AmountTotal-usedBefore < amount {
@@ -3507,6 +3675,7 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 			UserId:             userId,
 			UserSubscriptionId: sub.Id,
 			PreConsumed:        amount,
+			QuotaEpoch:         sub.QuotaEpoch,
 			Status:             "consumed",
 		}
 		createPreConsume := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "request_id"}}, DoNothing: true}).Create(record)
@@ -3529,6 +3698,7 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 			returnValue.AmountTotal = sub.AmountTotal
 			returnValue.AmountUsedBefore = sub.AmountUsed
 			returnValue.AmountUsedAfter = sub.AmountUsed
+			returnValue.QuotaEpoch = dup.QuotaEpoch
 			return nil
 		}
 		if err := recordValuePackageUsageTx(tx, &ValuePackageUsageRecord{
@@ -3539,6 +3709,7 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 			ModelGroup:         plan.ModelGroup,
 			RequestId:          requestId,
 			Quota:              amount,
+			QuotaEpoch:         sub.QuotaEpoch,
 			CreatedAt:          now,
 		}); err != nil {
 			return err
@@ -3552,6 +3723,7 @@ func PreConsumeValuePackageSubscription(requestId string, userId int, userSubscr
 		returnValue.AmountTotal = sub.AmountTotal
 		returnValue.AmountUsedBefore = usedBefore
 		returnValue.AmountUsedAfter = sub.AmountUsed
+		returnValue.QuotaEpoch = sub.QuotaEpoch
 		return nil
 	})
 	if err != nil {
@@ -3574,8 +3746,43 @@ func RefundSubscriptionPreConsume(requestId string) error {
 		if record.Status == "refunded" {
 			return revokeValuePackageUsageReservationTx(tx, record.UserSubscriptionId, record.RequestId)
 		}
-		if record.PreConsumed > 0 {
-			if err := postConsumeUserSubscriptionDeltaTx(tx, record.UserSubscriptionId, -record.PreConsumed); err != nil {
+		var sub UserSubscription
+		if err := withUpdateLock(tx).Where("id = ?", record.UserSubscriptionId).First(&sub).Error; err != nil {
+			return err
+		}
+		plan, err := getSubscriptionPlanByIdTx(tx, sub.PlanId)
+		if err != nil {
+			return err
+		}
+		normalizeValuePackagePlan(plan)
+		if plan.IsValuePackage() {
+			refundQuota := record.PreConsumed
+			var usage ValuePackageUsageRecord
+			usageQuery := tx.Where("user_subscription_id = ? AND request_id = ?", record.UserSubscriptionId, record.RequestId).Limit(1).Find(&usage)
+			if usageQuery.Error != nil {
+				return usageQuery.Error
+			}
+			if usageQuery.RowsAffected > 0 {
+				if usage.QuotaEpoch != record.QuotaEpoch {
+					return errors.New("value package usage epoch mismatch")
+				}
+				refundQuota = usage.Quota
+			}
+			if sub.QuotaEpoch == record.QuotaEpoch && refundQuota > 0 {
+				sub.AmountUsed -= refundQuota
+				if sub.AmountUsed < 0 {
+					sub.AmountUsed = 0
+				}
+				if err := tx.Save(&sub).Error; err != nil {
+					return err
+				}
+			}
+		} else if record.PreConsumed > 0 {
+			sub.AmountUsed -= record.PreConsumed
+			if sub.AmountUsed < 0 {
+				sub.AmountUsed = 0
+			}
+			if err := tx.Save(&sub).Error; err != nil {
 				return err
 			}
 		}
@@ -3624,13 +3831,25 @@ func ResetDueSubscriptions(limit int) (int, error) {
 		}
 		err = DB.Transaction(func(tx *gorm.DB) error {
 			var locked UserSubscription
-			if err := tx.Set("gorm:query_option", "FOR UPDATE").
+			if err := withUpdateLock(tx).
 				Where("id = ? AND next_reset_time > 0 AND next_reset_time <= ?", subCopy.Id, now).
 				First(&locked).Error; err != nil {
 				return nil
 			}
-			if err := maybeResetUserSubscriptionWithPlanTx(tx, &locked, plan, now); err != nil {
-				return err
+			previousEpoch := locked.QuotaEpoch
+			previousResetTime := locked.NextResetTime
+			normalizeValuePackagePlan(plan)
+			if plan.IsValuePackage() {
+				if err := maybeAdvanceValuePackageCycleTx(tx, &locked, plan, now); err != nil {
+					return err
+				}
+			} else {
+				if err := maybeResetUserSubscriptionWithPlanTx(tx, &locked, plan, now); err != nil {
+					return err
+				}
+			}
+			if locked.QuotaEpoch == previousEpoch && locked.NextResetTime == previousResetTime {
+				return nil
 			}
 			resetCount++
 			return nil

@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -76,12 +75,5 @@ func runLegacyValuePackageQuotaMigration(db *gorm.DB, now int64, apply bool, man
 	if !apply {
 		return model.PreviewLegacyValuePackageQuotaMigration(db, now)
 	}
-	authorizedManifest := strings.TrimSpace(manifestHash)
-	if authorizedManifest == "" {
-		return nil, fmt.Errorf("--manifest is required with --apply")
-	}
-	if err := db.AutoMigrate(&model.ValuePackageQuotaMigrationReceipt{}); err != nil {
-		return nil, fmt.Errorf("prepare migration receipt schema: %w", err)
-	}
-	return model.ApplyLegacyValuePackageQuotaMigration(db, now, authorizedManifest)
+	return nil, fmt.Errorf("legacy value package quota migration apply is retired; use value-package-reset-reconcile with the recorded B2 report")
 }

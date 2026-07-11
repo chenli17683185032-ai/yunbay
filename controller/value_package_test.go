@@ -985,7 +985,12 @@ func TestResetValuePackageQuotaSelfConsumesResetCount(t *testing.T) {
 	require.NotNil(t, resp.Data.Usage)
 	require.EqualValues(t, 0, resp.Data.Usage.Used5h)
 	require.EqualValues(t, 0, resp.Data.Usage.Used7d)
-	require.EqualValues(t, 300, resp.Data.Usage.TotalUsed)
+	require.Zero(t, resp.Data.Usage.TotalUsed)
+	var reloaded model.UserSubscription
+	require.NoError(t, model.DB.First(&reloaded, sub.Id).Error)
+	require.Zero(t, reloaded.AmountUsed)
+	require.EqualValues(t, 1, reloaded.QuotaEpoch)
+	require.EqualValues(t, plan.TotalAmount, reloaded.AmountTotal)
 }
 
 func TestResetValuePackageQuotaSelfRejectsWithoutCount(t *testing.T) {

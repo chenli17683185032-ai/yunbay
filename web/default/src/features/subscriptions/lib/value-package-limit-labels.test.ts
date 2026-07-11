@@ -29,6 +29,8 @@ import {
 
 const localeDir = join(import.meta.dirname, '../../../i18n/locales')
 const localeNames = ['en', 'zh', 'fr', 'ru', 'ja', 'vi'] as const
+const expectedResetConfirmMessageKey =
+  "This will consume 1 reset count and clear the current package's used quota. The total quota and expiration time will remain unchanged."
 const staleLocaleKeys = [
   'Day cards can use this total quota from activation time until the 1-day expiration. 0 means unlimited total quota.',
   'Week cards can use this total quota from activation time until the 7-day expiration. 0 means unlimited total quota.',
@@ -38,6 +40,7 @@ const staleLocaleKeys = [
     "'s ",
     '5-hour and 7-day usage windows. It will not restore total quota or extend expiration.',
   ].join(''),
+  'This will consume 1 reset count. Day and week cards clear only the 5-hour usage window. Month cards clear both the 5-hour usage window and the current 7-day period usage. This will not restore total quota or extend expiration.',
   [
     '7-day limit',
     ' in displayed dollars; converted to quota units when saved.',
@@ -76,6 +79,24 @@ test('only month cards expose the optional fixed 7-day period limit', () => {
   assert.equal(shouldExposeValuePackage7dPeriodLimit('day'), false)
   assert.equal(shouldExposeValuePackage7dPeriodLimit('week'), false)
   assert.equal(shouldExposeValuePackage7dPeriodLimit('month'), true)
+})
+
+test('value package reset confirmation describes clearing current used quota only', () => {
+  assert.equal(
+    VALUE_PACKAGE_RESET_CONFIRM_MESSAGE_KEY,
+    expectedResetConfirmMessageKey
+  )
+
+  for (const localeName of localeNames) {
+    const localePath = join(localeDir, `${localeName}.json`)
+    const translation = JSON.parse(readFileSync(localePath, 'utf8'))
+      .translation as Record<string, string>
+
+    assert.ok(
+      translation[expectedResetConfirmMessageKey],
+      `${localeName}: ${expectedResetConfirmMessageKey}`
+    )
+  }
 })
 
 test('value package limit locales do not keep stale rolling-window-era copy', () => {

@@ -18,9 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type {
   PlanRecord,
-  SubscriptionPlan,
   SubscriptionPlanStats,
-  UserSubscription,
 } from '@/features/subscriptions/types'
 import type { ValuePackageUsageSummary } from '@/features/value-packages/types'
 
@@ -188,14 +186,6 @@ export interface AffiliateStatsResponse {
 }
 
 export type OrderManagementValuePackageUsageSummary = ValuePackageUsageSummary
-
-export interface OrderManagementValuePackageUsageRow {
-  user_id: number
-  username: string
-  subscription: UserSubscription
-  plan: SubscriptionPlan
-  usage: OrderManagementValuePackageUsageSummary | null
-}
 
 export interface OrderManagementValuePackageManagementRow {
   user_id: number
