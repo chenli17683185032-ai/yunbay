@@ -16,35 +16,21 @@ import (
 	gormlogger "gorm.io/gorm/logger"
 )
 
+var (
+	applyReconcile = flag.Bool("apply", false, "apply the authorized value package reset reconciliation")
+	prepareSchema  = flag.Bool("prepare-schema", false, "prepare required quota epoch schema without reconciling data")
+	manifestHash   = flag.String("manifest", "", "authorized preview manifest hash required with --apply")
+	b2ReportPath   = flag.String("b2-report", "", "path to the applied B2 migration JSON report")
+)
+
 func main() {
-	apply, prepare, manifest, reportPath, err := parseValuePackageResetReconcileFlags(os.Args[1:])
-	if err != nil {
-		log.Print(err)
-		os.Exit(1)
-	}
-	if err := runValuePackageResetReconcileCLI(os.Stdout, os.Stderr, apply, prepare, manifest, reportPath); err != nil {
+	if err := runValuePackageResetReconcileCLI(os.Stdout, os.Stderr, applyReconcile, prepareSchema, manifestHash, b2ReportPath); err != nil {
 		log.Print(err)
 		os.Exit(1)
 	}
 }
 
-func parseValuePackageResetReconcileFlags(args []string) (bool, bool, string, string, error) {
-	flags := flag.NewFlagSet("value-package-reset-reconcile", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	apply := flags.Bool("apply", false, "apply the authorized value package reset reconciliation")
-	prepare := flags.Bool("prepare-schema", false, "prepare required quota epoch schema without reconciling data")
-	manifest := flags.String("manifest", "", "authorized preview manifest hash required with --apply")
-	reportPath := flags.String("b2-report", "", "path to the applied B2 migration JSON report")
-	if err := flags.Parse(args); err != nil {
-		return false, false, "", "", err
-	}
-	return *apply, *prepare, *manifest, *reportPath, nil
-}
-
-func runValuePackageResetReconcileCLI(stdout io.Writer, stderr io.Writer, apply bool, prepare bool, manifest string, reportPath string) (err error) {
-	if prepare && apply {
-		return fmt.Errorf("--prepare-schema and --apply cannot be used together")
-	}
+func runValuePackageResetReconcileCLI(stdout io.Writer, stderr io.Writer, applyFlag *bool, prepareFlag *bool, manifestFlag *string, reportPathFlag *string) (err error) {
 	common.LogWriterMu.Lock()
 	previousWriter := gin.DefaultWriter
 	previousErrorWriter := gin.DefaultErrorWriter
@@ -57,14 +43,6 @@ func runValuePackageResetReconcileCLI(stdout io.Writer, stderr io.Writer, apply 
 		gin.DefaultErrorWriter = previousErrorWriter
 		common.LogWriterMu.Unlock()
 	}()
-	var report *model.LegacyValuePackageQuotaMigrationReport
-	if !prepare {
-		report, err = readAppliedB2Report(reportPath)
-		if err != nil {
-			return err
-		}
-	}
-
 	maintenanceLogger := gormlogger.New(log.New(stderr, "\r\n", log.LstdFlags), gormlogger.Config{
 		SlowThreshold:             200 * time.Millisecond,
 		LogLevel:                  gormlogger.Warn,
@@ -72,6 +50,20 @@ func runValuePackageResetReconcileCLI(stdout io.Writer, stderr io.Writer, apply 
 		Colorful:                  false,
 	})
 	common.InitEnv()
+	apply := *applyFlag
+	prepare := *prepareFlag
+	manifest := *manifestFlag
+	reportPath := *reportPathFlag
+	if prepare && apply {
+		return fmt.Errorf("--prepare-schema and --apply cannot be used together")
+	}
+	var report *model.LegacyValuePackageQuotaMigrationReport
+	if !prepare {
+		report, err = readAppliedB2Report(reportPath)
+		if err != nil {
+			return err
+		}
+	}
 	if err = model.InitDBWithoutMigrationsWithLogger(maintenanceLogger); err != nil {
 		return fmt.Errorf("database initialization failed: %w", err)
 	}
