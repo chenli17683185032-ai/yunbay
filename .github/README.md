@@ -1,6 +1,6 @@
 # GitHub 项目脉络与维护台账
 
-> 快照时间：2026-07-11 19:15 +0800（Asia/Shanghai）
+> 快照时间：2026-07-12（Asia/Shanghai）
 >
 > 数据来源：本地 `git fetch --all --prune --tags` 后的引用、`git worktree list`、GitHub CLI 的仓库 / PR / issue / workflow 实时数据。
 >
@@ -14,8 +14,8 @@
 | 可见性 | Private |
 | 默认分支 | `main` |
 | 当前本地工作分支 | `main` |
-| 本轮代码 / 生产发布基线 SHA | `1bd746f5774847f539c47b54e69faf88fbc757a3` |
-| 台账采集时 `main` / `origin/main` SHA | `1bd746f5774847f539c47b54e69faf88fbc757a3`（本台账提交前快照） |
+| 本轮代码 / 生产发布基线 SHA | `04f4c32c21819a7acc6bdf5fddbbdcf74dda03bc` |
+| 台账采集时 `main` / `origin/main` SHA | `04f4c32c21819a7acc6bdf5fddbbdcf74dda03bc`（本台账提交前快照） |
 | GitHub issue | `0` 个开放 issue |
 | GitHub PR | `5` 个开放 PR，均为 Dependabot、非 Draft、当前可合并 |
 | 仓库 workflow 文件 | `8` 个 |
@@ -28,9 +28,9 @@
 
 | 指标 | 数量 / 状态 |
 |------|-------------|
-| 全引用可达提交数 | `6366` |
-| 台账提交前 `HEAD` 提交数 | `6195` |
-| 台账提交前 `origin/main` 提交数 | `6195` |
+| 全引用可达提交数 | `6372` |
+| 台账提交前 `HEAD` 提交数 | `6201` |
+| 台账提交前 `origin/main` 提交数 | `6201` |
 | 台账提交前 `HEAD` 相对 `origin/main` | 领先 `0`，落后 `0` |
 | 本地分支 | `46` 个 |
 | 远端 head | `12` 个，不含 `origin/HEAD` 符号引用 |
@@ -38,7 +38,7 @@
 | 仅本地存在的分支 | `40` 个 |
 | 仅远端存在的分支 | `6` 个 |
 | Git worktree | `40` 个，其中 `3` 个为 detached 验证 worktree |
-| tracked 文件 | `4792` 个 |
+| tracked 文件 | `4798` 个 |
 
 当前根工作区只有 `1` 个预先存在且受保护的未跟踪文件：
 
@@ -61,9 +61,15 @@ docs/superpowers/specs/2026-07-08-sub2api-force-priority-server-design.md
 
 ### 2.3 本轮 GitHub 与生产同步
 
-本轮 GPT-5.6、生产修复与 sub2api 构建工具链工作已经直接进入并推送 `main`：
+本轮 GPT-5.6、超值套餐修复、生产部署安全修正与 sub2api 发布工作已经直接进入并推送 `main`：
 
 ```text
+04f4c32c fix pin sub2api release image
+143a83d9 test subscription refund fixtures
+24899171 fix reconcile binary flags
+be4686e3 fix reconcile CLI flag parsing
+fb0d450b fix value package quota reset semantics
+798b2021 docs: refresh GitHub work inventory
 1bd746f5 fix: align sub2api image Go toolchain
 0ebd4cee fix: align sub2api image pnpm toolchain
 a812be65 fix: constrain sub2api verifier cleanup target
@@ -79,14 +85,18 @@ dd75a825 fix: restrict gpt-5.6 completion ratios
 9f2b5abb feat: add gpt-5.6 pricing defaults
 ```
 
-远端事实：
+本轮最新代码与生产事实：
 
-- `refs/heads/main` → `1bd746f5774847f539c47b54e69faf88fbc757a3`
-- `refs/heads/codex/sub2api-pnpm-build-fix` → 同一 SHA
+- `refs/heads/main` → `04f4c32c21819a7acc6bdf5fddbbdcf74dda03bc`
 - `refs/heads/codex/yunbay-production-remediation` → `a812be65db14d51939687333160a57e85d6a9ceb`
-- 生产部署标记 → `1bd746f5774847f539c47b54e69faf88fbc757a3`
+- new-api 生产部署标记 → `04f4c32c21819a7acc6bdf5fddbbdcf74dda03bc`
+- sub2api 生产版本 → `0.1.151`，后台模式已启用
+- sub2api 固定镜像 → `weishaw/sub2api@sha256:2ca591c2af97eb0e2797cfc7fb7bd587194d94cebdac76f73d677eeab1d4d6c8`
+- 最新主线 CI → run `29156729212`，结论 `success`
 
-上述 SHA 与提交数量是本台账提交前的代码 / 生产发布快照。本台账所在的文档提交会使 GitHub `main` 再前进 1 个提交，但不会改变生产部署标记；不要把文档维护提交误当成新的生产发布 SHA。
+`fb0d450b` 至 `04f4c32c` 完成了超值套餐额度语义、reconciliation CLI、退款测试夹具与 sub2api 防回退固定。生产 reconciliation 已将现有 19 条套餐统一进入新额度周期：14 条周卡固定 `$90`，5 条月卡固定 `$440`，且不存在已用额度超过总额度的记录。订单管理页不再展示重复的“超值套餐实时用量”，该信息只保留在独立“超值套餐管理”页面。
+
+上述 SHA 与提交数量是本台账提交前的代码 / 生产发布快照。本台账所在的文档提交会使 GitHub `main` 再前进 1 个提交，但不会改变生产部署标记；不要把文档维护提交误当成新的生产发布 SHA。生产切换采用服务器端独立 watchdog 和有界自动回滚，实际公网中断约 15 秒；禁止恢复无限等待连接排空的部署方式。
 
 独立仓库 `bayma888/sub2api-bmai` 本轮未同步，当前 `main` 仍是 `4d676dddd1af9571bbc79f0a7aff7aea077baf19`；当前 GitHub 登录对该仓库只有 `READ` 权限。生产 sub2api 来自本仓库 `infra/sub2api` overlay 对 pinned upstream 的构建，不依赖该 fork。
 
