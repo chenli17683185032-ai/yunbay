@@ -8,6 +8,9 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
+// Tests use this hook to pause a worker after its funding transaction commits.
+var midjourneyRefundAfterFundingHook func(task *model.Midjourney)
+
 func refundMidjourneyFunding(task *model.Midjourney) (bool, error) {
 	billingContext := task.BillingContext
 	if task.FundingRefundQuota() <= 0 {
@@ -73,16 +76,19 @@ func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason s
 	if task.BillingContext.Version < model.MidjourneyBillingContextVersion && task.Quota <= 0 {
 		return nil
 	}
-	fundingPerformed, err := refundMidjourneyFunding(task)
+	completionOwned, err := refundMidjourneyFunding(task)
 	if err != nil {
 		return err
 	}
-	tokenPerformed, err := refundMidjourneyToken(ctx, task)
+	if midjourneyRefundAfterFundingHook != nil {
+		midjourneyRefundAfterFundingHook(task)
+	}
+	tokenCompletionOwned, err := refundMidjourneyToken(ctx, task)
 	if err != nil {
 		return err
 	}
-	if (!fundingPerformed || task.FundingRefundQuota() <= 0) &&
-		(!tokenPerformed || task.TokenRefundQuota() <= 0) {
+	completionOwned = completionOwned || tokenCompletionOwned
+	if !completionOwned || !task.HasRefundableQuota() {
 		return nil
 	}
 	logQuota := task.FundingRefundQuota()

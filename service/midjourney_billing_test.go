@@ -420,3 +420,153 @@ func TestStaleMidjourneyCASCannotReopenCompletedRefundLegs(t *testing.T) {
 		require.Zero(t, getSubscriptionUsed(t, subscriptionID))
 	})
 }
+
+func TestConcurrentMidjourneyRefundRecordsOneCompletionLog(t *testing.T) {
+	const userID, tokenID, channelID, subscriptionID, planID, quota = 161, 162, 163, 164, 165, 500
+
+	tests := []struct {
+		name           string
+		hasToken       bool
+		billingContext model.MidjourneyBillingContext
+		seedFunding    func(t *testing.T)
+		assertFunding  func(t *testing.T)
+	}{
+		{
+			name: "wallet without token",
+			billingContext: model.MidjourneyBillingContext{
+				BillingSource: BillingSourceWallet,
+			},
+			seedFunding: func(t *testing.T) {
+				seedUser(t, userID, 100)
+			},
+			assertFunding: func(t *testing.T) {
+				require.Equal(t, 600, getUserQuota(t, userID))
+			},
+		},
+		{
+			name:     "wallet and token",
+			hasToken: true,
+			billingContext: model.MidjourneyBillingContext{
+				BillingSource: BillingSourceWallet, TokenId: tokenID,
+			},
+			seedFunding: func(t *testing.T) {
+				seedUser(t, userID, 100)
+			},
+			assertFunding: func(t *testing.T) {
+				require.Equal(t, 600, getUserQuota(t, userID))
+			},
+		},
+		{
+			name:     "regular subscription request and token",
+			hasToken: true,
+			billingContext: model.MidjourneyBillingContext{
+				BillingSource: BillingSourceSubscription, SubscriptionId: subscriptionID,
+				RequestId: "mj-concurrent-regular", TokenId: tokenID,
+			},
+			seedFunding: func(t *testing.T) {
+				seedUser(t, userID, 0)
+				seedSubscription(t, subscriptionID, userID, 10000, quota)
+				seedMidjourneyPreConsumeRecord(t, "mj-concurrent-regular", userID, subscriptionID, quota)
+			},
+			assertFunding: func(t *testing.T) {
+				require.Zero(t, getSubscriptionUsed(t, subscriptionID))
+			},
+		},
+		{
+			name:     "direct subscription and token",
+			hasToken: true,
+			billingContext: model.MidjourneyBillingContext{
+				BillingSource: BillingSourceSubscription, SubscriptionId: subscriptionID,
+				TokenId: tokenID,
+			},
+			seedFunding: func(t *testing.T) {
+				seedUser(t, userID, 0)
+				seedSubscription(t, subscriptionID, userID, 10000, quota)
+			},
+			assertFunding: func(t *testing.T) {
+				require.Zero(t, getSubscriptionUsed(t, subscriptionID))
+			},
+		},
+		{
+			name:     "request id value package and token",
+			hasToken: true,
+			billingContext: model.MidjourneyBillingContext{
+				BillingSource: BillingSourceSubscription, SubscriptionId: subscriptionID,
+				RequestId: "mj-concurrent-value-package", TokenId: tokenID,
+				ValuePackageSubscriptionId: subscriptionID, ValuePackagePlanId: planID,
+				ValuePackageBillingGroup: "month-card",
+			},
+			seedFunding: func(t *testing.T) {
+				seedUser(t, userID, 0)
+				seedSubscription(t, subscriptionID, userID, 10000, quota)
+				seedMidjourneyPreConsumeRecord(t, "mj-concurrent-value-package", userID, subscriptionID, quota)
+				require.NoError(t, model.DB.Create(&model.ValuePackageUsageRecord{
+					UserId: userID, UserSubscriptionId: subscriptionID, PlanId: planID,
+					PackageType: model.ValuePackageTypeMonth, ModelGroup: "month-card",
+					RequestId: "mj-concurrent-value-package", Quota: quota,
+				}).Error)
+			},
+			assertFunding: func(t *testing.T) {
+				require.Zero(t, getSubscriptionUsed(t, subscriptionID))
+				var usage model.ValuePackageUsageRecord
+				require.NoError(t, model.DB.Where(
+					"user_subscription_id = ? AND request_id = ?",
+					subscriptionID, "mj-concurrent-value-package",
+				).First(&usage).Error)
+				require.Zero(t, usage.Quota)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupMidjourneyRefundTest(t)
+			tt.seedFunding(t)
+			if tt.hasToken {
+				seedToken(t, tokenID, userID, "mj-concurrent-token", 200)
+			}
+			seedChannel(t, channelID)
+			workerATask := makeMidjourneyRefundTask(userID, channelID, quota, tt.billingContext)
+			persistMidjourneyRefundTask(t, workerATask)
+
+			fundingDone := make(chan struct{})
+			resumeWorkerA := make(chan struct{})
+			midjourneyRefundAfterFundingHook = func(task *model.Midjourney) {
+				if task != workerATask {
+					return
+				}
+				close(fundingDone)
+				<-resumeWorkerA
+			}
+			t.Cleanup(func() { midjourneyRefundAfterFundingHook = nil })
+
+			workerAResult := make(chan error, 1)
+			go func() {
+				workerAResult <- RefundMidjourneyQuota(context.Background(), workerATask, "worker A")
+			}()
+			<-fundingDone
+
+			var workerBTask model.Midjourney
+			loadWorkerBErr := model.DB.First(&workerBTask, workerATask.Id).Error
+			var workerBErr error
+			if loadWorkerBErr == nil {
+				workerBErr = RefundMidjourneyQuota(context.Background(), &workerBTask, "worker B")
+			}
+			close(resumeWorkerA)
+			workerAErr := <-workerAResult
+			require.NoError(t, loadWorkerBErr)
+			require.NoError(t, workerBErr)
+			require.NoError(t, workerAErr)
+
+			tt.assertFunding(t)
+			if tt.hasToken {
+				require.Equal(t, 700, getTokenRemainQuota(t, tokenID))
+				require.Equal(t, -quota, getTokenUsedQuota(t, tokenID))
+			}
+			var refundLogs int64
+			require.NoError(t, model.DB.Model(&model.Log{}).
+				Where("type = ?", model.LogTypeRefund).Count(&refundLogs).Error)
+			require.Equal(t, int64(1), refundLogs)
+		})
+	}
+}

@@ -132,6 +132,8 @@ func completeMidjourneyFundingContext(context MidjourneyBillingContext, tokenQuo
 	return context
 }
 
+// RefundMidjourneyWalletFundingOnce reports whether this transaction changed
+// BillingRefunded from false to true.
 func RefundMidjourneyWalletFundingOnce(task *Midjourney) (bool, error) {
 	if task == nil || task.Id <= 0 || task.FundingRefundQuota() <= 0 {
 		return false, fmt.Errorf("invalid midjourney wallet refund task")
@@ -139,6 +141,7 @@ func RefundMidjourneyWalletFundingOnce(task *Midjourney) (bool, error) {
 	var updated MidjourneyBillingContext
 	refundQuota := 0
 	performed := false
+	completed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		stored, err := loadMidjourneyRefundTask(tx, task.Id)
 		if err != nil {
@@ -166,6 +169,7 @@ func RefundMidjourneyWalletFundingOnce(task *Midjourney) (bool, error) {
 			return err
 		}
 		performed = true
+		completed = !stored.BillingContext.BillingRefunded && updated.BillingRefunded
 		return nil
 	})
 	if err != nil {
@@ -177,15 +181,17 @@ func RefundMidjourneyWalletFundingOnce(task *Midjourney) (bool, error) {
 			common.SysLog("failed to update user quota cache after midjourney refund: " + err.Error())
 		}
 	}
-	return performed, nil
+	return completed, nil
 }
 
+// RefundMidjourneySubscriptionFundingOnce reports whether this transaction
+// changed BillingRefunded from false to true.
 func RefundMidjourneySubscriptionFundingOnce(task *Midjourney) (bool, error) {
 	if task == nil || task.Id <= 0 || task.FundingRefundQuota() <= 0 || task.BillingContext.SubscriptionId <= 0 {
 		return false, fmt.Errorf("invalid midjourney subscription refund task")
 	}
 	var updated MidjourneyBillingContext
-	performed := false
+	completed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		stored, err := loadMidjourneyRefundTask(tx, task.Id)
 		if err != nil {
@@ -213,22 +219,24 @@ func RefundMidjourneySubscriptionFundingOnce(task *Midjourney) (bool, error) {
 			Update("billing_context", updated).Error; err != nil {
 			return err
 		}
-		performed = true
+		completed = !stored.BillingContext.BillingRefunded && updated.BillingRefunded
 		return nil
 	})
 	if err != nil {
 		return false, err
 	}
 	task.BillingContext = updated
-	return performed, nil
+	return completed, nil
 }
 
+// MarkMidjourneyFundingRefunded reports whether this transaction changed
+// BillingRefunded from false to true.
 func MarkMidjourneyFundingRefunded(task *Midjourney) (bool, error) {
 	if task == nil || task.Id <= 0 {
 		return false, fmt.Errorf("invalid midjourney refund task")
 	}
 	var updated MidjourneyBillingContext
-	performed := false
+	completed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		stored, err := loadMidjourneyRefundTask(tx, task.Id)
 		if err != nil {
@@ -243,22 +251,25 @@ func MarkMidjourneyFundingRefunded(task *Midjourney) (bool, error) {
 			Update("billing_context", updated).Error; err != nil {
 			return err
 		}
-		performed = true
+		completed = !stored.BillingContext.BillingRefunded && updated.BillingRefunded
 		return nil
 	})
 	if err != nil {
 		return false, err
 	}
 	task.BillingContext = updated
-	return performed, nil
+	return completed, nil
 }
 
+// RefundMidjourneyTokenQuotaOnce reports whether this transaction changed
+// BillingRefunded from false to true.
 func RefundMidjourneyTokenQuotaOnce(task *Midjourney, tokenKey string) (bool, error) {
 	if task == nil || task.Id <= 0 || task.TokenRefundQuota() <= 0 || task.BillingContext.TokenId <= 0 {
 		return false, fmt.Errorf("invalid midjourney token refund task")
 	}
 	var updated MidjourneyBillingContext
 	performed := false
+	completed := false
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		stored, err := loadMidjourneyRefundTask(tx, task.Id)
 		if err != nil {
@@ -293,6 +304,7 @@ func RefundMidjourneyTokenQuotaOnce(task *Midjourney, tokenKey string) (bool, er
 			return err
 		}
 		performed = true
+		completed = !stored.BillingContext.BillingRefunded && updated.BillingRefunded
 		return nil
 	})
 	if err != nil {
@@ -304,7 +316,7 @@ func RefundMidjourneyTokenQuotaOnce(task *Midjourney, tokenKey string) (bool, er
 			common.SysLog("failed to invalidate token cache after midjourney refund: " + err.Error())
 		}
 	}
-	return performed, nil
+	return completed, nil
 }
 
 // TaskQueryParams 用于包含所有搜索条件的结构体，可以根据需求添加更多字段
