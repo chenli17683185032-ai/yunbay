@@ -51,6 +51,33 @@ var (
 		Mode:                    "chat",
 		SupportsPromptCaching:   true,
 	}
+	openAIGPT56SolFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:           5e-6,
+		OutputCostPerToken:          30e-6,
+		CacheCreationInputTokenCost: 6.25e-6,
+		CacheReadInputTokenCost:     0.5e-6,
+		LiteLLMProvider:             "openai",
+		Mode:                        "chat",
+		SupportsPromptCaching:       true,
+	}
+	openAIGPT56TerraFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:           2.5e-6,
+		OutputCostPerToken:          15e-6,
+		CacheCreationInputTokenCost: 3.125e-6,
+		CacheReadInputTokenCost:     0.25e-6,
+		LiteLLMProvider:             "openai",
+		Mode:                        "chat",
+		SupportsPromptCaching:       true,
+	}
+	openAIGPT56LunaFallbackPricing = &LiteLLMModelPricing{
+		InputCostPerToken:           1e-6,
+		OutputCostPerToken:          6e-6,
+		CacheCreationInputTokenCost: 1.25e-6,
+		CacheReadInputTokenCost:     0.1e-6,
+		LiteLLMProvider:             "openai",
+		Mode:                        "chat",
+		SupportsPromptCaching:       true,
+	}
 )
 
 // LiteLLMModelPricing LiteLLM价格数据结构
@@ -534,6 +561,9 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	// 标准化模型名称（同时兼容 "models/xxx"、VertexAI 资源名等前缀）
 	modelLower := strings.ToLower(strings.TrimSpace(modelName))
 	lookupCandidates := s.buildModelLookupCandidates(modelLower)
+	if pricing, isGPT56 := matchOpenAIGPT56FallbackPricing(lookupCandidates[0]); isGPT56 && pricing == nil {
+		return nil
+	}
 
 	// 1. 精确匹配
 	for _, candidate := range lookupCandidates {
@@ -770,6 +800,14 @@ func (s *PricingService) matchByModelFamily(model string) *LiteLLMModelPricing {
 // 5. gpt-5.4* -> 业务静态兜底价
 // 6. 最终回退到 DefaultTestModel (gpt-5.1-codex)
 func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
+	if pricing, isGPT56 := matchOpenAIGPT56FallbackPricing(model); isGPT56 {
+		if pricing != nil {
+			logger.With(zap.String("component", "service.pricing")).
+				Info(fmt.Sprintf("[Pricing] OpenAI fallback matched %s -> %s", model, "gpt-5.6(static)"))
+		}
+		return pricing
+	}
+
 	if strings.HasPrefix(model, "gpt-5.3-codex-spark") {
 		if pricing, ok := s.pricingData["gpt-5.1-codex"]; ok {
 			logger.LegacyPrintf("service.pricing", "[Pricing][SparkBilling] %s -> %s billing", model, "gpt-5.1-codex")
@@ -841,6 +879,20 @@ func (s *PricingService) matchOpenAIModel(model string) *LiteLLMModelPricing {
 	}
 
 	return nil
+}
+
+func matchOpenAIGPT56FallbackPricing(model string) (*LiteLLMModelPricing, bool) {
+	canonical := canonicalizeOpenAIModelAliasSpelling(model)
+	switch canonical {
+	case "gpt-5.6", "gpt-5.6-sol":
+		return openAIGPT56SolFallbackPricing, true
+	case "gpt-5.6-terra":
+		return openAIGPT56TerraFallbackPricing, true
+	case "gpt-5.6-luna":
+		return openAIGPT56LunaFallbackPricing, true
+	default:
+		return nil, strings.HasPrefix(canonical, "gpt-5.6")
+	}
 }
 
 // generateOpenAIModelVariants 生成 OpenAI 模型的回退变体列表

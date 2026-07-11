@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -111,6 +112,112 @@ func TestGetModelPricing_OpenAICompactAliasUsesStaticFallback(t *testing.T) {
 	require.NotNil(t, got)
 	require.InDelta(t, 2.5e-6, got.InputCostPerToken, 1e-12)
 	require.InDelta(t, 1.5e-5, got.OutputCostPerToken, 1e-12)
+}
+
+func TestGetModelPricing_Gpt56ExactStaticFallbacks(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gpt-5.1-codex": {InputCostPerToken: 1.25e-6},
+		},
+	}
+
+	tests := []struct {
+		model         string
+		inputPrice    float64
+		outputPrice   float64
+		cacheRead     float64
+		cacheCreation float64
+	}{
+		{model: "gpt-5.6", inputPrice: 5e-6, outputPrice: 30e-6, cacheRead: 0.5e-6, cacheCreation: 6.25e-6},
+		{model: "gpt-5.6-sol", inputPrice: 5e-6, outputPrice: 30e-6, cacheRead: 0.5e-6, cacheCreation: 6.25e-6},
+		{model: "gpt-5.6-terra", inputPrice: 2.5e-6, outputPrice: 15e-6, cacheRead: 0.25e-6, cacheCreation: 3.125e-6},
+		{model: "gpt-5.6-luna", inputPrice: 1e-6, outputPrice: 6e-6, cacheRead: 0.1e-6, cacheCreation: 1.25e-6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing := svc.GetModelPricing(tt.model)
+			require.NotNil(t, pricing)
+			require.InDelta(t, tt.inputPrice, pricing.InputCostPerToken, 1e-15)
+			require.InDelta(t, tt.outputPrice, pricing.OutputCostPerToken, 1e-15)
+			require.InDelta(t, tt.cacheRead, pricing.CacheReadInputTokenCost, 1e-15)
+			require.InDelta(t, tt.cacheCreation, pricing.CacheCreationInputTokenCost, 1e-15)
+			require.Equal(t, "openai", pricing.LiteLLMProvider)
+			require.Equal(t, "chat", pricing.Mode)
+			require.True(t, pricing.SupportsPromptCaching)
+			require.Zero(t, pricing.LongContextInputTokenThreshold)
+			require.Zero(t, pricing.LongContextInputCostMultiplier)
+			require.Zero(t, pricing.LongContextOutputCostMultiplier)
+		})
+	}
+}
+
+func TestGetModelPricing_Gpt56UnknownVariantsReturnNil(t *testing.T) {
+	svc := &PricingService{
+		pricingData: map[string]*LiteLLMModelPricing{
+			"gpt-5.1-codex": {InputCostPerToken: 1.25e-6},
+		},
+	}
+
+	for _, model := range []string{"gpt-5.6-pro", "gpt-5.6-unknown", "gpt-5.6-preview", "gpt-5.60"} {
+		t.Run(model, func(t *testing.T) {
+			require.Nil(t, svc.GetModelPricing(model))
+		})
+	}
+}
+
+func TestBundledPricing_Gpt56HasExactEntriesAndAbsolutePrices(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "resources", "model-pricing", "model_prices_and_context_window.json"))
+	require.NoError(t, err)
+
+	var rawEntries map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &rawEntries))
+
+	var gpt56Keys []string
+	for model := range rawEntries {
+		if strings.HasPrefix(model, "gpt-5.6") {
+			gpt56Keys = append(gpt56Keys, model)
+		}
+	}
+	require.ElementsMatch(t, []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}, gpt56Keys)
+	require.JSONEq(t, string(rawEntries["gpt-5.6-sol"]), string(rawEntries["gpt-5.6"]))
+
+	svc := &PricingService{}
+	pricingData, err := svc.parsePricingData(data)
+	require.NoError(t, err)
+
+	tests := []struct {
+		model         string
+		inputPrice    float64
+		outputPrice   float64
+		cacheRead     float64
+		cacheCreation float64
+	}{
+		{model: "gpt-5.6", inputPrice: 5e-6, outputPrice: 30e-6, cacheRead: 0.5e-6, cacheCreation: 6.25e-6},
+		{model: "gpt-5.6-sol", inputPrice: 5e-6, outputPrice: 30e-6, cacheRead: 0.5e-6, cacheCreation: 6.25e-6},
+		{model: "gpt-5.6-terra", inputPrice: 2.5e-6, outputPrice: 15e-6, cacheRead: 0.25e-6, cacheCreation: 3.125e-6},
+		{model: "gpt-5.6-luna", inputPrice: 1e-6, outputPrice: 6e-6, cacheRead: 0.1e-6, cacheCreation: 1.25e-6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing := pricingData[tt.model]
+			require.NotNil(t, pricing)
+			require.InDelta(t, tt.inputPrice, pricing.InputCostPerToken, 1e-15)
+			require.InDelta(t, tt.outputPrice, pricing.OutputCostPerToken, 1e-15)
+			require.InDelta(t, tt.cacheRead, pricing.CacheReadInputTokenCost, 1e-15)
+			require.InDelta(t, tt.cacheCreation, pricing.CacheCreationInputTokenCost, 1e-15)
+			require.Equal(t, "openai", pricing.LiteLLMProvider)
+			require.Equal(t, "chat", pricing.Mode)
+			require.True(t, pricing.SupportsPromptCaching)
+		})
+	}
+
+	require.NotEqual(t, pricingData["gpt-5.6-sol"].InputCostPerToken, pricingData["gpt-5.6-terra"].InputCostPerToken)
+	require.NotEqual(t, pricingData["gpt-5.6-sol"].InputCostPerToken, pricingData["gpt-5.6-luna"].InputCostPerToken)
+	for _, unsupported := range []string{"gpt-5.6-pro", "gpt-5.6-unknown", "gpt-5.6-preview"} {
+		require.NotContains(t, pricingData, unsupported)
+	}
 }
 
 func TestDefaultPricingIncludesCodexAutoReview(t *testing.T) {

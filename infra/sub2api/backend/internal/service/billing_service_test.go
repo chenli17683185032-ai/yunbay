@@ -123,6 +123,51 @@ func TestGetModelPricing_UnknownOpenAIModelReturnsError(t *testing.T) {
 	require.Contains(t, err.Error(), "pricing not found")
 }
 
+func TestGetModelPricing_OpenAIGPT56ExactFallbacks(t *testing.T) {
+	svc := newTestBillingService()
+
+	tests := []struct {
+		model         string
+		inputPrice    float64
+		outputPrice   float64
+		cacheRead     float64
+		cacheCreation float64
+	}{
+		{model: "gpt-5.6", inputPrice: 5e-6, outputPrice: 30e-6, cacheRead: 0.5e-6, cacheCreation: 6.25e-6},
+		{model: "gpt-5.6-sol", inputPrice: 5e-6, outputPrice: 30e-6, cacheRead: 0.5e-6, cacheCreation: 6.25e-6},
+		{model: "gpt-5.6-terra", inputPrice: 2.5e-6, outputPrice: 15e-6, cacheRead: 0.25e-6, cacheCreation: 3.125e-6},
+		{model: "gpt-5.6-luna", inputPrice: 1e-6, outputPrice: 6e-6, cacheRead: 0.1e-6, cacheCreation: 1.25e-6},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(tt.model)
+			require.NoError(t, err)
+			require.NotNil(t, pricing)
+			require.InDelta(t, tt.inputPrice, pricing.InputPricePerToken, 1e-15)
+			require.InDelta(t, tt.outputPrice, pricing.OutputPricePerToken, 1e-15)
+			require.InDelta(t, tt.cacheRead, pricing.CacheReadPricePerToken, 1e-15)
+			require.InDelta(t, tt.cacheCreation, pricing.CacheCreationPricePerToken, 1e-15)
+			require.False(t, pricing.SupportsCacheBreakdown)
+			require.Zero(t, pricing.LongContextInputThreshold)
+			require.Zero(t, pricing.LongContextInputMultiplier)
+			require.Zero(t, pricing.LongContextOutputMultiplier)
+		})
+	}
+}
+
+func TestGetModelPricing_OpenAIGPT56UnknownVariantsReturnError(t *testing.T) {
+	svc := newTestBillingService()
+
+	for _, model := range []string{"gpt-5.6-pro", "gpt-5.6-unknown", "gpt-5.6-preview", "gpt-5.60"} {
+		t.Run(model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(model)
+			require.ErrorIs(t, err, ErrModelPricingUnavailable)
+			require.Nil(t, pricing)
+		})
+	}
+}
+
 func TestGetModelPricing_OpenAIGPT54Fallback(t *testing.T) {
 	svc := newTestBillingService()
 
