@@ -32,7 +32,7 @@ class FakeClient:
         return value
 
     def test_account(self, account_id):
-        value = self._relay_results[account_id]
+        value = self._relay_results.get(account_id, (True, 1.0))
         if isinstance(value, Exception):
             raise value
         return value
@@ -59,7 +59,7 @@ class MonitorTests(unittest.TestCase):
             monitor.SELF_HOSTED_GROUP,
             [account(1, "apikey"), account(2)],
             {2: {"utilization": 99}},
-            {1: True},
+            {1: (True, 2.0), 2: (True, 1.0)},
         )
         report = monitor.evaluate(client, now=NOW)
         self.assertFalse(report.alerting)
@@ -70,22 +70,47 @@ class MonitorTests(unittest.TestCase):
             monitor.SELF_HOSTED_GROUP,
             [account(1, "apikey"), account(2), account(3)],
             {2: {"utilization": 100}, 3: {"utilization": 100}},
-            {1: True},
+            {1: (True, 2.0), 2: (True, 1.0), 3: (True, 1.0)},
         )
         report = monitor.evaluate(client, now=NOW)
         self.assertIn(
             "现在正常的文字模型还能用，但是图片模型已经不能用了。", report.problems
         )
 
-    def test_self_hosted_stops_relay_testing_after_first_success(self):
+    def test_self_hosted_tests_all_relays_for_latency(self):
         client = FakeClient(
             monitor.SELF_HOSTED_GROUP,
             [account(1, "apikey"), account(2, "apikey"), account(3)],
             {3: {"utilization": 10}},
-            {1: True, 2: False},
+            {1: (True, 2.0), 2: (False, 1.0), 3: (True, 1.0)},
         )
         report = monitor.evaluate(client, now=NOW)
-        self.assertEqual(1, report.relay_tested)
+        self.assertEqual(2, report.relay_tested)
+
+    def test_self_hosted_marks_all_live_relays_slow(self):
+        client = FakeClient(
+            monitor.SELF_HOSTED_GROUP,
+            [account(1, "apikey"), account(2, "apikey"), account(3)],
+            {3: {"utilization": 10}},
+            {1: (True, 16.0), 2: (True, 20.0), 3: (True, 1.0)},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertTrue(report.relay_all_slow)
+        self.assertEqual(2, monitor.apply_relay_latency_stability(report, 1))
+        self.assertFalse(report.problems)
+        self.assertEqual(3, monitor.apply_relay_latency_stability(report, 2))
+        self.assertTrue(any("连续 3 次检测" in item for item in report.problems))
+
+    def test_self_hosted_does_not_alert_when_one_relay_is_fast(self):
+        client = FakeClient(
+            monitor.SELF_HOSTED_GROUP,
+            [account(1, "apikey"), account(2, "apikey"), account(3)],
+            {3: {"utilization": 10}},
+            {1: (True, 16.0), 2: (True, 14.9), 3: (True, 1.0)},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertFalse(report.relay_all_slow)
+        self.assertEqual(0, monitor.apply_relay_latency_stability(report, 2))
 
     def test_safe_group_uses_weighted_total_usage(self):
         accounts = [account(1, group_id=9), account(2, group_id=9)]
@@ -133,7 +158,7 @@ class MonitorTests(unittest.TestCase):
             monitor.SELF_HOSTED_GROUP,
             [account(1, "apikey"), account(2)],
             {2: monitor.MonitorError("failed")},
-            {1: True},
+            {1: (True, 2.0), 2: (True, 1.0)},
         )
         report = monitor.evaluate(client, now=NOW)
         self.assertTrue(any("额度查询均失败" in item for item in report.emergencies))

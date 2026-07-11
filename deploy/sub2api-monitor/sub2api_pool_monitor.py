@@ -13,6 +13,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ PRIMARY_API_KEY_ID = 1
 SELF_HOSTED_GROUP = "自建池"
 SAFE_GROUP = "自建安全使用"
 CAPACITY_ENV = "ACCOUNT_CAPACITY_WEIGHTS_JSON"
+RELAY_LATENCY_ALERT_SECONDS = 15.0
+RELAY_SLOW_STREAK_REQUIRED = 3
 
 
 class MonitorError(RuntimeError):
@@ -174,8 +177,10 @@ class Sub2APIClient:
             self.request(f"/admin/accounts/{account_id}/usage?source=active&force=false")
         )
 
-    def test_account(self, account_id: int) -> bool:
+    def test_account(self, account_id: int) -> tuple[bool, float]:
+        started = time.monotonic()
         raw = self.request_raw(f"/admin/accounts/{account_id}/test", "POST", {})
+        latency = time.monotonic() - started
         for line in raw.decode("utf-8", errors="replace").splitlines():
             if not line.startswith("data: "):
                 continue
@@ -184,8 +189,8 @@ class Sub2APIClient:
             except json.JSONDecodeError:
                 continue
             if event.get("type") == "test_complete":
-                return event.get("success") is True
-        return False
+                return event.get("success") is True, latency
+        return False, latency
 
 
 @dataclass
@@ -195,6 +200,8 @@ class Report:
     primary_key_name: str = ""
     relay_available: int = 0
     relay_tested: int = 0
+    relay_low_latency: int = 0
+    relay_all_slow: bool = False
     own_available: int = 0
     own_total: int = 0
     total_quota_utilization: float | None = None
@@ -254,7 +261,12 @@ def evaluate(
     report.own_total = len(own_accounts)
 
     usage_by_account: list[tuple[dict[str, Any], float]] = []
+    own_liveness: dict[int, tuple[bool, float | None]] = {}
     for account in own_accounts:
+        try:
+            own_liveness[int(account["id"])] = client.test_account(int(account["id"]))
+        except MonitorError:
+            own_liveness[int(account["id"])] = (False, None)
         try:
             values = collect_utilizations(client.account_usage(int(account["id"])))
         except MonitorError:
@@ -266,10 +278,13 @@ def evaluate(
         report.quota_checks_ok += 1
         account_max = max(values)
         usage_by_account.append((account, account_max))
-        if account_max < 100:
+        alive, latency = own_liveness[int(account["id"])]
+        if account_max < 100 and alive:
             report.own_available += 1
         report.account_details.append(
-            f"自有账号 {account.get('name')}: 使用率 {account_max:.1f}%"
+            f"自有账号 {account.get('name')}: 剩余 {max(0.0, 100-account_max):.1f}%，"
+            f"测活 {'成功' if alive else '失败'}"
+            + (f"，延迟 {latency:.2f} 秒" if latency is not None else "")
         )
 
     if own_accounts and report.quota_checks_ok == 0:
@@ -279,19 +294,23 @@ def evaluate(
         for account in relay_accounts:
             report.relay_tested += 1
             try:
-                usable = client.test_account(int(account["id"]))
+                usable, latency = client.test_account(int(account["id"]))
             except MonitorError:
-                usable = False
+                usable, latency = False, None
             report.account_details.append(
                 f"中转站账号 {account.get('name')}: {'可用' if usable else '不可用'}"
+                + (f"，延迟 {latency:.2f} 秒" if latency is not None else "")
             )
             if usable:
                 report.relay_available += 1
-                break
+                if latency is not None and latency <= RELAY_LATENCY_ALERT_SECONDS:
+                    report.relay_low_latency += 1
         if not relay_accounts:
             report.emergencies.append("自建池中没有可测试的中转站账号")
         elif report.relay_available == 0:
             report.problems.append("自建池中转站账号测试失败，正常文字模型可能不可用")
+        elif report.relay_low_latency == 0:
+            report.relay_all_slow = True
         if own_accounts and report.own_available == 0 and report.quota_checks_ok > 0:
             if report.relay_available > 0:
                 report.problems.append("现在正常的文字模型还能用，但是图片模型已经不能用了。")
@@ -500,6 +519,15 @@ def load_capacity_weights() -> dict[int, float]:
     return weights
 
 
+def apply_relay_latency_stability(report: Report, previous_streak: int) -> int:
+    streak = previous_streak + 1 if report.relay_all_slow else 0
+    if streak >= RELAY_SLOW_STREAK_REQUIRED:
+        report.problems.append(
+            "所有可用中转站连续 3 次检测延迟均高于 15 秒，且没有其他可用的低延迟渠道"
+        )
+    return streak
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--recipient", default=os.environ.get("ALERT_EMAIL_TO", ""))
@@ -540,6 +568,10 @@ def main() -> int:
         except Exception as exc:  # keep the scheduled job alive and alert on unexpected failures
             report = Report(checked_at=utc_now(), emergencies=[str(exc)])
 
+        relay_slow_streak = apply_relay_latency_stability(
+            report, int(previous.get("relay_slow_streak", 0) or 0)
+        )
+
         recovered = previous.get("alerting") is True and not report.alerting
         subject, text, body = render_report(report, recovered=recovered)
         print(text)
@@ -554,6 +586,7 @@ def main() -> int:
                     "checked_at": report.checked_at.isoformat(),
                     "problems": report.problems,
                     "emergencies": report.emergencies,
+                    "relay_slow_streak": relay_slow_streak,
                 },
             )
         return 1 if report.alerting else 0
