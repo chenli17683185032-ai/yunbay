@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -502,7 +504,9 @@ func TestConcurrentMidjourneyRefundRecordsOneCompletionLog(t *testing.T) {
 			},
 			seedFunding: func(t *testing.T) {
 				seedUser(t, userID, 0)
+				require.NoError(t, model.DB.Create(&model.SubscriptionPlan{Id: planID, Title: "month card", PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, DurationUnit: model.SubscriptionDurationDay, DurationValue: 30, TotalAmount: 10000, Enabled: true}).Error)
 				seedSubscription(t, subscriptionID, userID, 10000, quota)
+				require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("id = ?", subscriptionID).Update("plan_id", planID).Error)
 				seedMidjourneyPreConsumeRecord(t, "mj-concurrent-value-package", userID, subscriptionID, quota)
 				require.NoError(t, model.DB.Create(&model.ValuePackageUsageRecord{
 					UserId: userID, UserSubscriptionId: subscriptionID, PlanId: planID,
@@ -535,6 +539,11 @@ func TestConcurrentMidjourneyRefundRecordsOneCompletionLog(t *testing.T) {
 
 			fundingDone := make(chan struct{})
 			resumeWorkerA := make(chan struct{})
+			var resumeWorkerAOnce sync.Once
+			resumeWorkerAFn := func() {
+				resumeWorkerAOnce.Do(func() { close(resumeWorkerA) })
+			}
+			t.Cleanup(resumeWorkerAFn)
 			midjourneyRefundAfterFundingHook = func(task *model.Midjourney) {
 				if task != workerATask {
 					return
@@ -548,7 +557,14 @@ func TestConcurrentMidjourneyRefundRecordsOneCompletionLog(t *testing.T) {
 			go func() {
 				workerAResult <- RefundMidjourneyQuota(context.Background(), workerATask, "worker A")
 			}()
-			<-fundingDone
+			select {
+			case <-fundingDone:
+			case workerAErr := <-workerAResult:
+				require.NoError(t, workerAErr)
+				t.Fatal("worker A returned before reaching the post-funding hook")
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for worker A to finish funding refund")
+			}
 
 			var workerBTask model.Midjourney
 			loadWorkerBErr := model.DB.First(&workerBTask, workerATask.Id).Error
@@ -556,7 +572,7 @@ func TestConcurrentMidjourneyRefundRecordsOneCompletionLog(t *testing.T) {
 			if loadWorkerBErr == nil {
 				workerBErr = RefundMidjourneyQuota(context.Background(), &workerBTask, "worker B")
 			}
-			close(resumeWorkerA)
+			resumeWorkerAFn()
 			workerAErr := <-workerAResult
 			require.NoError(t, loadWorkerBErr)
 			require.NoError(t, workerBErr)
