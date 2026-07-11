@@ -35,10 +35,20 @@ func TestGPT56DefaultRatios(t *testing.T) {
 			require.Contains(t, defaultModelRatio, tt.model)
 			require.Equal(t, tt.modelRatio, defaultModelRatio[tt.model])
 			require.Equal(t, 6.0, GetCompletionRatio(tt.model))
+			require.Equal(t, CompletionRatioInfo{Ratio: 6.0, Locked: true}, GetCompletionRatioInfo(tt.model))
 			require.Contains(t, defaultCacheRatio, tt.model)
 			require.Equal(t, 0.1, defaultCacheRatio[tt.model])
 			require.Contains(t, defaultCreateCacheRatio, tt.model)
 			require.Equal(t, 1.25, defaultCreateCacheRatio[tt.model])
+		})
+	}
+}
+
+func TestGPT56UnsupportedVariantsUseGeneralGPT5CompletionRatio(t *testing.T) {
+	for _, model := range []string{"gpt-5.6-pro", "gpt-5.6-unknown", "gpt-5.60"} {
+		t.Run(model, func(t *testing.T) {
+			require.Equal(t, 8.0, GetCompletionRatio(model))
+			require.Equal(t, CompletionRatioInfo{Ratio: 8.0, Locked: true}, GetCompletionRatioInfo(model))
 		})
 	}
 }
