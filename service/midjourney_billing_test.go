@@ -324,3 +324,99 @@ func TestRefundMidjourneyQuotaRetriesValuePackageAfterStatePersistenceFails(t *t
 	require.True(t, completed.BillingContext.FundingRefunded)
 	require.True(t, completed.BillingContext.BillingRefunded)
 }
+
+func TestCommitMidjourneyTaskUpdateContinuesPersistedPendingOnLateSuccess(t *testing.T) {
+	setupMidjourneyRefundTest(t)
+	const userID, tokenID, channelID, quota = 131, 132, 133, 500
+	seedUser(t, userID, 100)
+	seedToken(t, tokenID, userID, "mj-late-success-token", 200)
+	seedChannel(t, channelID)
+	task := makeMidjourneyRefundTask(userID, channelID, quota, model.MidjourneyBillingContext{
+		BillingSource: BillingSourceWallet, TokenId: tokenID,
+	})
+	task.Status = "IN_PROGRESS"
+	task.Progress = "50%"
+	persistMidjourneyRefundTask(t, task)
+	require.NoError(t, model.DB.Unscoped().Delete(&model.Token{}, tokenID).Error)
+	failure := *task
+	failure.Status = "FAILURE"
+	failure.Progress = "100%"
+	won, err := CommitMidjourneyTaskUpdate(context.Background(), &failure, "IN_PROGRESS", true, "terminal failure")
+	require.Error(t, err)
+	require.True(t, won)
+	require.NoError(t, model.DB.Create(&model.Token{
+		Id: tokenID, UserId: userID, Key: "mj-late-success-token", Name: "mj-late-success-token",
+		Status: common.TokenStatusEnabled, RemainQuota: 200,
+	}).Error)
+	var late model.Midjourney
+	require.NoError(t, model.DB.First(&late, task.Id).Error)
+	require.Equal(t, "REFUND_PENDING", late.Progress)
+	late.Status = "SUCCESS"
+	late.Progress = "100%"
+
+	won, err = CommitMidjourneyTaskUpdate(context.Background(), &late, "FAILURE", false, "late success")
+
+	require.NoError(t, err)
+	require.True(t, won)
+	var completed model.Midjourney
+	require.NoError(t, model.DB.First(&completed, task.Id).Error)
+	require.Equal(t, "FAILURE", completed.Status)
+	require.Equal(t, "100%", completed.Progress)
+	require.True(t, completed.BillingContext.BillingRefunded)
+	require.Equal(t, 700, getTokenRemainQuota(t, tokenID))
+	require.Equal(t, 600, getUserQuota(t, userID))
+}
+
+func TestStaleMidjourneyCASCannotReopenCompletedRefundLegs(t *testing.T) {
+	t.Run("wallet and token", func(t *testing.T) {
+		setupMidjourneyRefundTest(t)
+		const userID, tokenID, channelID, quota = 141, 142, 143, 500
+		seedUser(t, userID, 100)
+		seedToken(t, tokenID, userID, "mj-stale-wallet-token", 200)
+		seedChannel(t, channelID)
+		task := makeMidjourneyRefundTask(userID, channelID, quota, model.MidjourneyBillingContext{
+			BillingSource: BillingSourceWallet, TokenId: tokenID,
+		})
+		task.Status = "FAILURE"
+		task.Progress = "REFUND_PENDING"
+		persistMidjourneyRefundTask(t, task)
+		var stale model.Midjourney
+		require.NoError(t, model.DB.First(&stale, task.Id).Error)
+
+		require.NoError(t, RefundMidjourneyQuota(context.Background(), task, "worker A"))
+		_, err := stale.UpdateWithStatus("FAILURE")
+		require.NoError(t, err)
+		var afterStale model.Midjourney
+		require.NoError(t, model.DB.First(&afterStale, task.Id).Error)
+		require.True(t, afterStale.BillingContext.FundingRefunded)
+		require.True(t, afterStale.BillingContext.TokenRefunded)
+		require.NoError(t, RefundMidjourneyQuota(context.Background(), &afterStale, "worker B"))
+		require.Equal(t, 600, getUserQuota(t, userID))
+		require.Equal(t, 700, getTokenRemainQuota(t, tokenID))
+	})
+
+	t.Run("direct subscription", func(t *testing.T) {
+		setupMidjourneyRefundTest(t)
+		const userID, channelID, subscriptionID, quota = 151, 152, 153, 500
+		seedUser(t, userID, 0)
+		seedChannel(t, channelID)
+		seedSubscription(t, subscriptionID, userID, 10000, quota)
+		task := makeMidjourneyRefundTask(userID, channelID, quota, model.MidjourneyBillingContext{
+			BillingSource: BillingSourceSubscription, SubscriptionId: subscriptionID,
+		})
+		task.Status = "FAILURE"
+		task.Progress = "REFUND_PENDING"
+		persistMidjourneyRefundTask(t, task)
+		var stale model.Midjourney
+		require.NoError(t, model.DB.First(&stale, task.Id).Error)
+
+		require.NoError(t, RefundMidjourneyQuota(context.Background(), task, "worker A"))
+		_, err := stale.UpdateWithStatus("FAILURE")
+		require.NoError(t, err)
+		var afterStale model.Midjourney
+		require.NoError(t, model.DB.First(&afterStale, task.Id).Error)
+		require.True(t, afterStale.BillingContext.BillingRefunded)
+		require.NoError(t, RefundMidjourneyQuota(context.Background(), &afterStale, "worker B"))
+		require.Zero(t, getSubscriptionUsed(t, subscriptionID))
+	})
+}

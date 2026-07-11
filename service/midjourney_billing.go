@@ -105,23 +105,61 @@ func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason s
 // CommitMidjourneyTaskUpdate applies a CAS state transition and synchronously
 // completes persisted refund legs before exposing the requested final progress.
 func CommitMidjourneyTaskUpdate(ctx context.Context, task *model.Midjourney, preStatus string, shouldRefund bool, reason string) (bool, error) {
-	if task == nil {
+	if task == nil || task.Id <= 0 {
 		return false, fmt.Errorf("midjourney task is nil")
 	}
+	stored, err := model.GetMidjourneyById(task.Id)
+	if err != nil {
+		return false, err
+	}
+	if stored.Progress == "REFUND_PENDING" {
+		if stored.FailReason != "" {
+			reason = stored.FailReason
+		}
+		if err := RefundMidjourneyQuota(ctx, stored, reason); err != nil {
+			*task = *stored
+			return true, err
+		}
+		completed, err := model.CompleteMidjourneyRefundProgress(stored.Id, "100%")
+		if err != nil {
+			*task = *stored
+			return true, err
+		}
+		latest, loadErr := model.GetMidjourneyById(stored.Id)
+		if loadErr != nil {
+			return completed, loadErr
+		}
+		*task = *latest
+		return completed || latest.Progress == "100%", nil
+	}
+	if stored.Progress == "100%" {
+		*task = *stored
+		return false, nil
+	}
+	if stored.Status != preStatus {
+		*task = *stored
+		return false, nil
+	}
+
 	targetProgress := task.Progress
+	fromProgress := stored.Progress
+	task.BillingContext = stored.BillingContext
 	if shouldRefund {
 		task.Progress = "REFUND_PENDING"
 	}
-	won, err := task.UpdateWithStatus(preStatus)
+	won, err := task.UpdateWithStatusAndProgress(preStatus, fromProgress)
 	if err != nil || !won || !shouldRefund {
 		return won, err
 	}
 	if err := RefundMidjourneyQuota(ctx, task, reason); err != nil {
 		return true, err
 	}
-	task.Progress = targetProgress
-	if err := task.Update(); err != nil {
+	completed, err := model.CompleteMidjourneyRefundProgress(task.Id, targetProgress)
+	if err != nil {
 		return true, err
 	}
-	return true, nil
+	if completed {
+		task.Progress = targetProgress
+	}
+	return completed, nil
 }

@@ -177,16 +177,6 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 		}
 	}
 	preStatus := midjourneyTask.Status
-	if midjourneyTask.Progress == "REFUND_PENDING" {
-		midjourneyTask.Progress = "100%"
-		if _, err = service.CommitMidjourneyTaskUpdate(c, midjourneyTask, preStatus, midjourneyTask.HasRefundableQuota(), midjourneyTask.FailReason); err != nil {
-			return &dto.MidjourneyResponse{Code: 4, Description: "update_midjourney_task_failed"}
-		}
-		return nil
-	}
-	if midjourneyTask.Progress == "100%" {
-		return nil
-	}
 	midjourneyTask.Progress = midjRequest.Progress
 	midjourneyTask.PromptEn = midjRequest.PromptEn
 	midjourneyTask.State = midjRequest.State

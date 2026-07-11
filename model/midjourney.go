@@ -423,6 +423,14 @@ func GetMjByuId(id int) *Midjourney {
 	return mj
 }
 
+func GetMidjourneyById(id int) (*Midjourney, error) {
+	var task Midjourney
+	if err := DB.Where("id = ?", id).First(&task).Error; err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 func UpdateProgress(id int, progress string) error {
 	return DB.Model(&Midjourney{}).Where("id = ?", id).Update("progress", progress).Error
 }
@@ -434,18 +442,38 @@ func (midjourney *Midjourney) Insert() error {
 }
 
 func (midjourney *Midjourney) Update() error {
-	var err error
-	err = DB.Save(midjourney).Error
-	return err
+	return DB.Model(&Midjourney{}).
+		Where("id = ?", midjourney.Id).
+		Select("*").Omit("billing_context").Updates(midjourney).Error
 }
 
-// UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
-// Returns (true, nil) if this caller won the update, (false, nil) if
-// another process already moved the task out of fromStatus.
-// UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
-// Uses Model().Select("*").Updates() to avoid GORM Save()'s INSERT fallback.
+// UpdateWithStatus performs a status-guarded update for legacy callers.
+// BillingContext is excluded because refund flags are owned by row-locked
+// refund transactions and must never move backwards through a stale snapshot.
 func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) {
-	result := DB.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
+	result := DB.Model(&Midjourney{}).
+		Where("id = ? AND status = ?", midjourney.Id, fromStatus).
+		Select("*").Omit("billing_context").Updates(midjourney)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func (midjourney *Midjourney) UpdateWithStatusAndProgress(fromStatus string, fromProgress string) (bool, error) {
+	result := DB.Model(&Midjourney{}).
+		Where("id = ? AND status = ? AND progress = ?", midjourney.Id, fromStatus, fromProgress).
+		Select("*").Omit("billing_context").Updates(midjourney)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func CompleteMidjourneyRefundProgress(id int, targetProgress string) (bool, error) {
+	result := DB.Model(&Midjourney{}).
+		Where("id = ? AND progress = ?", id, "REFUND_PENDING").
+		Update("progress", targetProgress)
 	if result.Error != nil {
 		return false, result.Error
 	}
