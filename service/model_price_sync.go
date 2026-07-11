@@ -67,8 +67,9 @@ type ModelPriceMatch struct {
 }
 
 type ModelPriceSyncRequest struct {
-	OpenRouterChannelID int      `json:"openrouter_channel_id"`
-	Models              []string `json:"models"`
+	OpenRouterChannelID int                            `json:"openrouter_channel_id"`
+	Models              []string                       `json:"models"`
+	Overrides           map[string]CanonicalModelPrice `json:"overrides,omitempty"`
 }
 
 type ModelPriceSyncItem struct {
@@ -748,6 +749,9 @@ func ApplySelectedModelPriceSync(ctx context.Context, req ModelPriceSyncRequest)
 	if err != nil {
 		return ModelPriceSyncResult{}, err
 	}
+	if err := applyModelPriceSyncOverrides(&preview, req.Overrides); err != nil {
+		return ModelPriceSyncResult{}, err
+	}
 	if err := ApplyModelPriceSyncPreview(preview); err != nil {
 		return ModelPriceSyncResult{}, err
 	}
@@ -758,6 +762,31 @@ func ApplySelectedModelPriceSync(ctx context.Context, req ModelPriceSyncRequest)
 		}
 	}
 	return preview, nil
+}
+
+func applyModelPriceSyncOverrides(preview *ModelPriceSyncResult, overrides map[string]CanonicalModelPrice) error {
+	if len(overrides) == 0 {
+		return nil
+	}
+	preview.Syncable, preview.SkippedCount = 0, 0
+	for i := range preview.Items {
+		item := &preview.Items[i]
+		if price, ok := overrides[item.ModelName]; ok {
+			expr, err := BuildBillingExprFromPrice(price)
+			if err != nil {
+				return fmt.Errorf("%s: %w", item.ModelName, err)
+			}
+			item.Final, item.BillingExpr = price, expr
+			item.Status, item.Reason, item.WouldApply = "ready", "", true
+			item.Changed = !CanonicalPricesEqual(item.Current, price)
+		}
+		if item.WouldApply {
+			preview.Syncable++
+		} else {
+			preview.SkippedCount++
+		}
+	}
+	return nil
 }
 
 func ApplyModelPriceSyncPreview(preview ModelPriceSyncResult) error {
