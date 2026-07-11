@@ -10,10 +10,35 @@ repo_root="$(cd -- "${script_dir}/../../.." && pwd -P)"
 overlay_root="${repo_root}/infra/sub2api"
 target="${1:-/tmp/yunbay-sub2api-verify}"
 
-if [[ $# -gt 1 || -z "${target}" || "${target}" == "/" ]]; then
+if [[ $# -gt 1 || -z "${target}" ]]; then
   echo "usage: $0 [target-directory]" >&2
   exit 2
 fi
+
+target_parent="$(dirname -- "${target}")"
+target_name="$(basename -- "${target}")"
+if ! target_parent="$(cd -- "${target_parent}" 2>/dev/null && pwd -P)"; then
+  echo "target parent must already exist: ${target}" >&2
+  exit 2
+fi
+
+target_is_disposable=false
+for temp_root in /tmp "${TMPDIR:-/tmp}"; do
+  if [[ -d "${temp_root}" ]]; then
+    temp_root="$(cd -- "${temp_root}" && pwd -P)"
+    if [[ "${target_parent}" == "${temp_root}" ]]; then
+      target_is_disposable=true
+      break
+    fi
+  fi
+done
+
+if [[ "${target_is_disposable}" != true || "${target_name}" != yunbay-sub2api-* ]]; then
+  echo "target must be a direct temporary-directory child named yunbay-sub2api-*: ${target}" >&2
+  exit 2
+fi
+
+target="${target_parent}/${target_name}"
 
 rm -rf -- "${target}"
 git clone --filter=blob:none --no-checkout "${UPSTREAM_URL}" "${target}"
