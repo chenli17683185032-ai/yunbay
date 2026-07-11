@@ -4,6 +4,7 @@ package service
 
 import (
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -165,6 +166,94 @@ func TestGetModelPricing_OpenAIGPT56UnknownVariantsReturnError(t *testing.T) {
 			require.ErrorIs(t, err, ErrModelPricingUnavailable)
 			require.Nil(t, pricing)
 		})
+	}
+}
+
+func TestGetModelPricingWithChannel_GPT56OverridesDoNotMutateFallbacks(t *testing.T) {
+	officialPrices := map[string][4]float64{
+		"gpt-5.6":       {5e-6, 30e-6, 0.5e-6, 6.25e-6},
+		"gpt-5.6-sol":   {5e-6, 30e-6, 0.5e-6, 6.25e-6},
+		"gpt-5.6-terra": {2.5e-6, 15e-6, 0.25e-6, 3.125e-6},
+		"gpt-5.6-luna":  {1e-6, 6e-6, 0.1e-6, 1.25e-6},
+	}
+	tests := []struct {
+		overrideModel string
+		checkModels   []string
+	}{
+		{overrideModel: "gpt-5.6", checkModels: []string{"gpt-5.6", "gpt-5.6-sol"}},
+		{overrideModel: "gpt-5.6-sol", checkModels: []string{"gpt-5.6", "gpt-5.6-sol"}},
+		{overrideModel: "gpt-5.6-terra", checkModels: []string{"gpt-5.6-terra"}},
+		{overrideModel: "gpt-5.6-luna", checkModels: []string{"gpt-5.6-luna"}},
+	}
+
+	channelPricing := &ChannelModelPricing{
+		InputPrice:      testPtrFloat64(91e-6),
+		OutputPrice:     testPtrFloat64(92e-6),
+		CacheWritePrice: testPtrFloat64(93e-6),
+		CacheReadPrice:  testPtrFloat64(94e-6),
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.overrideModel, func(t *testing.T) {
+			svc := newTestBillingService()
+			overridden, err := svc.GetModelPricingWithChannel(tt.overrideModel, channelPricing)
+			require.NoError(t, err)
+			require.InDelta(t, 91e-6, overridden.InputPricePerToken, 1e-15)
+			require.InDelta(t, 92e-6, overridden.OutputPricePerToken, 1e-15)
+			require.InDelta(t, 93e-6, overridden.CacheCreationPricePerToken, 1e-15)
+			require.InDelta(t, 94e-6, overridden.CacheReadPricePerToken, 1e-15)
+
+			for _, model := range tt.checkModels {
+				pricing, err := svc.GetModelPricing(model)
+				require.NoError(t, err)
+				expected := officialPrices[model]
+				require.InDelta(t, expected[0], pricing.InputPricePerToken, 1e-15)
+				require.InDelta(t, expected[1], pricing.OutputPricePerToken, 1e-15)
+				require.InDelta(t, expected[2], pricing.CacheReadPricePerToken, 1e-15)
+				require.InDelta(t, expected[3], pricing.CacheCreationPricePerToken, 1e-15)
+			}
+		})
+	}
+}
+
+func TestGetModelPricingWithChannel_GPT56ConcurrentOverridesDoNotRace(t *testing.T) {
+	svc := newTestBillingService()
+	channelPricing := &ChannelModelPricing{
+		InputPrice:      testPtrFloat64(91e-6),
+		OutputPrice:     testPtrFloat64(92e-6),
+		CacheWritePrice: testPtrFloat64(93e-6),
+		CacheReadPrice:  testPtrFloat64(94e-6),
+	}
+	models := []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}
+
+	start := make(chan struct{})
+	errs := make(chan error, len(models)*8)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		for _, model := range models {
+			wg.Add(1)
+			go func(model string) {
+				defer wg.Done()
+				<-start
+				_, err := svc.GetModelPricingWithChannel(model, channelPricing)
+				errs <- err
+			}(model)
+		}
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	for _, model := range models {
+		pricing, err := svc.GetModelPricing(model)
+		require.NoError(t, err)
+		require.NotEqual(t, 91e-6, pricing.InputPricePerToken)
+		require.NotEqual(t, 92e-6, pricing.OutputPricePerToken)
+		require.NotEqual(t, 93e-6, pricing.CacheCreationPricePerToken)
+		require.NotEqual(t, 94e-6, pricing.CacheReadPricePerToken)
 	}
 }
 
