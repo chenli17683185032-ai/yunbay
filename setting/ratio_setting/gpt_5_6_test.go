@@ -1,10 +1,23 @@
 package ratio_setting
 
 import (
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func collectGPT56Keys(ratios map[string]float64) []string {
+	keys := make([]string, 0)
+	for key := range ratios {
+		if strings.HasPrefix(key, "gpt-5.6") {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 func TestGPT56DefaultRatios(t *testing.T) {
 	tests := []struct {
@@ -46,6 +59,21 @@ func TestGPT56UnsupportedVariantsHaveNoDefaultPricing(t *testing.T) {
 			require.NotContains(t, defaultModelRatio, model)
 			require.NotContains(t, defaultCacheRatio, model)
 			require.NotContains(t, defaultCreateCacheRatio, model)
+			require.NotContains(t, defaultModelPrice, model)
 		})
 	}
+}
+
+func TestGPT56DefaultPricingContainsOnlySupportedKeys(t *testing.T) {
+	expected := []string{
+		"gpt-5.6",
+		"gpt-5.6-luna",
+		"gpt-5.6-sol",
+		"gpt-5.6-terra",
+	}
+
+	require.Equal(t, expected, collectGPT56Keys(defaultModelRatio))
+	require.Equal(t, expected, collectGPT56Keys(defaultCacheRatio))
+	require.Equal(t, expected, collectGPT56Keys(defaultCreateCacheRatio))
+	require.Empty(t, collectGPT56Keys(defaultModelPrice))
 }
