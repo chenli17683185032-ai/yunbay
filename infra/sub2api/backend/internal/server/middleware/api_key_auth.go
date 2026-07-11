@@ -83,8 +83,12 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		// ── 3. 基础鉴权（始终执行） ─────────────────────────────────
 
-		// disabled / expired / quota exhausted / 未知状态 → 无条件拦截
-		if !apiKey.IsActive() {
+		// quota_exhausted 是 billing 状态，不影响 relay key validity。
+		if apiKey.Status == service.StatusAPIKeyExpired || apiKey.IsExpired() {
+			AbortWithError(c, 401, "API_KEY_EXPIRED", "API key has expired")
+			return
+		}
+		if !isRelayValidAPIKeyStatus(apiKey.Status) {
 			AbortWithError(c, 401, "API_KEY_DISABLED", "API key is disabled")
 			return
 		}
@@ -144,7 +148,11 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		var subscription *service.UserSubscription
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
 
-		if isSubscriptionType && subscriptionService != nil {
+		if isSubscriptionType {
+			if subscriptionService == nil {
+				AbortWithError(c, 403, "SUBSCRIPTION_UNAVAILABLE", "Current subscription is unavailable")
+				return
+			}
 			sub, subErr := subscriptionService.GetActiveSubscription(
 				c.Request.Context(),
 				apiKey.User.ID,
@@ -177,6 +185,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 
 		c.Next()
 	}
+}
+
+func isRelayValidAPIKeyStatus(status string) bool {
+	return status == service.StatusAPIKeyActive || status == service.StatusAPIKeyQuotaExhausted
 }
 
 // GetAPIKeyFromContext 从上下文中获取API key

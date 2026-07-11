@@ -351,6 +351,61 @@ func TestAPIKeyAuthWithSubscription_RejectsMissingOrExpiredSubscription(t *testi
 	})
 }
 
+func TestAPIKeyAuthValidityGuards(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	newRouter := func(apiKey *service.APIKey, subscriptionService *service.SubscriptionService) *gin.Engine {
+		cfg := &config.Config{RunMode: config.RunModeStandard}
+		apiKeyService := service.NewAPIKeyService(&stubApiKeyRepo{
+			getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+				clone := *apiKey
+				return &clone, nil
+			},
+		}, nil, nil, nil, nil, nil, cfg)
+		return newAuthTestRouter(apiKeyService, subscriptionService, cfg)
+	}
+
+	newAPIKey := func() *service.APIKey {
+		user := &service.User{ID: 31, Role: service.RoleUser, Status: service.StatusActive}
+		return &service.APIKey{ID: 903, UserID: user.ID, Key: "validity-key", Status: service.StatusActive, User: user}
+	}
+
+	t.Run("quota exhausted status remains relay-valid", func(t *testing.T) {
+		apiKey := newAPIKey()
+		apiKey.Status = service.StatusAPIKeyQuotaExhausted
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("x-api-key", apiKey.Key)
+		newRouter(apiKey, nil).ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code)
+	})
+
+	t.Run("active status with runtime expiry is rejected", func(t *testing.T) {
+		apiKey := newAPIKey()
+		expiredAt := time.Now().Add(-time.Hour)
+		apiKey.ExpiresAt = &expiredAt
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("x-api-key", apiKey.Key)
+		newRouter(apiKey, nil).ServeHTTP(w, req)
+		require.Equal(t, http.StatusUnauthorized, w.Code)
+		requireAPIKeyAuthError(t, w, "API_KEY_EXPIRED", "API key has expired")
+	})
+
+	t.Run("subscription group without service fails closed", func(t *testing.T) {
+		apiKey := newAPIKey()
+		group := &service.Group{ID: 904, Name: "subscription", Status: service.StatusActive, Hydrated: true, SubscriptionType: service.SubscriptionTypeSubscription}
+		apiKey.Group = group
+		apiKey.GroupID = &group.ID
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/t", nil)
+		req.Header.Set("x-api-key", apiKey.Key)
+		newRouter(apiKey, nil).ServeHTTP(w, req)
+		require.Equal(t, http.StatusForbidden, w.Code)
+		requireAPIKeyAuthError(t, w, "SUBSCRIPTION_UNAVAILABLE", "Current subscription is unavailable")
+	})
+}
+
 func TestAPIKeyAuthSetsGroupContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

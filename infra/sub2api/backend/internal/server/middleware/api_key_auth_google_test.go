@@ -198,6 +198,16 @@ type googleErrorResponse struct {
 	} `json:"error"`
 }
 
+func requireGoogleAuthError(t *testing.T, rec *httptest.ResponseRecorder, code int, message, status string) {
+	t.Helper()
+	require.Equal(t, code, rec.Code)
+	var resp googleErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, code, resp.Error.Code)
+	require.Equal(t, message, resp.Error.Message)
+	require.Equal(t, status, resp.Error.Status)
+}
+
 func newTestAPIKeyService(repo service.APIKeyRepository) *service.APIKeyService {
 	return service.NewAPIKeyService(
 		repo,
@@ -494,6 +504,116 @@ func TestApiKeyAuthWithSubscriptionGoogle_DisabledKey(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, resp.Error.Code)
 	require.Equal(t, "API key is disabled", resp.Error.Message)
 	require.Equal(t, "UNAUTHENTICATED", resp.Error.Status)
+}
+
+func TestApiKeyAuthWithSubscriptionGoogle_ValidityGuards(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	newAPIKey := func() *service.APIKey {
+		user := &service.User{ID: 321, Role: service.RoleUser, Status: service.StatusActive}
+		return &service.APIKey{ID: 654, UserID: user.ID, Key: "google-validity-key", Status: service.StatusActive, User: user}
+	}
+	serve := func(apiKey *service.APIKey, subscriptionService *service.SubscriptionService, cfg *config.Config) *httptest.ResponseRecorder {
+		apiKeyService := newTestAPIKeyService(fakeAPIKeyRepo{getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			clone := *apiKey
+			return &clone, nil
+		}})
+		r := gin.New()
+		r.Use(APIKeyAuthWithSubscriptionGoogle(apiKeyService, subscriptionService, cfg))
+		r.GET("/v1beta/test", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+		req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+		req.Header.Set("x-goog-api-key", apiKey.Key)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("quota exhausted status remains relay-valid", func(t *testing.T) {
+		apiKey := newAPIKey()
+		apiKey.Status = service.StatusAPIKeyQuotaExhausted
+		rec := serve(apiKey, nil, &config.Config{RunMode: config.RunModeStandard})
+		require.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("active status with runtime expiry is rejected", func(t *testing.T) {
+		apiKey := newAPIKey()
+		expiredAt := time.Now().Add(-time.Hour)
+		apiKey.ExpiresAt = &expiredAt
+		rec := serve(apiKey, nil, &config.Config{RunMode: config.RunModeStandard})
+		requireGoogleAuthError(t, rec, http.StatusUnauthorized, "API key has expired", "UNAUTHENTICATED")
+	})
+
+	t.Run("subscription group without service fails closed", func(t *testing.T) {
+		apiKey := newAPIKey()
+		group := &service.Group{ID: 655, Name: "gemini-subscription", Status: service.StatusActive, Platform: service.PlatformGemini, Hydrated: true, SubscriptionType: service.SubscriptionTypeSubscription}
+		apiKey.Group = group
+		apiKey.GroupID = &group.ID
+		rec := serve(apiKey, nil, &config.Config{RunMode: config.RunModeStandard})
+		requireGoogleAuthError(t, rec, http.StatusForbidden, "No active subscription found for this group", "PERMISSION_DENIED")
+	})
+}
+
+func TestApiKeyAuthWithSubscriptionGoogle_EnforcesIPAndGroupValidity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	serve := func(t *testing.T, apiKey *service.APIKey, cfg *config.Config, remoteAddr string, forwardedIP string) *httptest.ResponseRecorder {
+		t.Helper()
+		apiKeyService := newTestAPIKeyService(fakeAPIKeyRepo{getByKey: func(ctx context.Context, key string) (*service.APIKey, error) {
+			clone := *apiKey
+			return &clone, nil
+		}})
+		r := gin.New()
+		require.NoError(t, r.SetTrustedProxies(nil))
+		r.Use(APIKeyAuthWithSubscriptionGoogle(apiKeyService, nil, cfg))
+		r.GET("/v1beta/test", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
+		req := httptest.NewRequest(http.MethodGet, "/v1beta/test", nil)
+		req.RemoteAddr = remoteAddr
+		req.Header.Set("x-goog-api-key", apiKey.Key)
+		if forwardedIP != "" {
+			req.Header.Set("X-Forwarded-For", forwardedIP)
+			req.Header.Set("X-Real-IP", forwardedIP)
+			req.Header.Set("CF-Connecting-IP", forwardedIP)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+	newAPIKey := func() *service.APIKey {
+		user := &service.User{ID: 700, Role: service.RoleUser, Status: service.StatusActive}
+		return &service.APIKey{ID: 701, UserID: user.ID, Key: "google-acl-key", Status: service.StatusActive, User: user}
+	}
+
+	t.Run("whitelist rejects trusted socket IP", func(t *testing.T) {
+		apiKey := newAPIKey()
+		apiKey.IPWhitelist = []string{"1.2.3.4"}
+		rec := serve(t, apiKey, &config.Config{RunMode: config.RunModeSimple}, "9.9.9.9:12345", "1.2.3.4")
+		requireGoogleAuthError(t, rec, http.StatusForbidden, "Access denied. Your IP is 9.9.9.9", "PERMISSION_DENIED")
+	})
+
+	t.Run("blacklist rejects client IP", func(t *testing.T) {
+		apiKey := newAPIKey()
+		apiKey.IPBlacklist = []string{"9.9.9.9"}
+		rec := serve(t, apiKey, &config.Config{RunMode: config.RunModeSimple}, "9.9.9.9:12345", "")
+		requireGoogleAuthError(t, rec, http.StatusForbidden, "Access denied. Your IP is 9.9.9.9", "PERMISSION_DENIED")
+	})
+
+	t.Run("configured forwarded IP satisfies whitelist", func(t *testing.T) {
+		apiKey := newAPIKey()
+		apiKey.IPWhitelist = []string{"1.2.3.4"}
+		cfg := &config.Config{RunMode: config.RunModeSimple}
+		cfg.SetTrustForwardedIPForAPIKeyACL(true)
+		rec := serve(t, apiKey, cfg, "9.9.9.9:12345", "1.2.3.4")
+		require.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("exclusive group rejects user without assignment", func(t *testing.T) {
+		apiKey := newAPIKey()
+		group := &service.Group{ID: 702, Name: "exclusive", Status: service.StatusActive, Hydrated: true, IsExclusive: true}
+		apiKey.Group = group
+		apiKey.GroupID = &group.ID
+		rec := serve(t, apiKey, &config.Config{RunMode: config.RunModeSimple}, "9.9.9.9:12345", "")
+		requireGoogleAuthError(t, rec, http.StatusForbidden, "API Key 所属专属分组不再允许当前用户使用", "PERMISSION_DENIED")
+	})
 }
 
 func TestApiKeyAuthWithSubscriptionGoogle_StandardModeAllowsZeroBalance(t *testing.T) {
