@@ -1190,37 +1190,23 @@ qr=called / qr=not_called
 ```
 
 不要因为支付宝页显示 `10.30` 就把正式商品配置改成 `money=10.3`；那会污染充值金额、VIP 判断和推荐奖励基数。
-## 2026-07-12 Sub2API 号池与模型可用性邮件监控
+## 2026-07-12 Sub2API 分组感知号池邮件监控
 
-生产服务器已安装独立监控脚本：
+生产监控脚本：
 
 ```text
 /opt/new-api/monitor/sub2api-pool-monitor/sub2api_pool_monitor.py
 ```
 
-运行方式：deploy 用户 crontab 每 5 分钟执行一次。配置文件位于：
+脚本只监控 new-api 使用的第一个 Sub2API API Key（ID=1）当前绑定分组，不再使用错误的全局账号/全局渠道可用率口径。
 
-```text
-/home/deploy/.config/yunbay/sub2api-monitor.env
-```
+- `自建池`：`apikey` 账号视为中转站账号，调用 Sub2API 自带账号测试，任一成功即认为正常文字模型可用；`oauth/setup-token` 账号视为自有账号，读取额度。所有自有账号达到 100% 且中转站仍可用时，邮件明确提示“现在正常的文字模型还能用，但是图片模型已经不能用了。”
+- `自建安全使用`：预期只有自有账号，以各账号最大额度窗口使用率的平均值作为组总用量，达到 80% 时告警；不会因单个账号超过 80% 而在总池仍充足时误报。
+- Key 被切到其他未定义分组、所有额度查询失败或安全组混入中转账号时，发送配置/监控异常邮件。
 
-配置文件权限为 `0600`，只保存收件地址、状态文件和锁文件路径。Sub2API 管理凭据从运行容器环境动态读取；SMTP 配置从 new-api PostgreSQL `options` 表动态读取，不在脚本、仓库或日志中复制 SMTP Token。
+运行方式：deploy 用户 crontab 每 5 分钟执行。配置文件 `/home/deploy/.config/yunbay/sub2api-monitor.env` 权限为 `0600`；Sub2API 管理凭据从容器环境动态读取，SMTP 配置从 new-api PostgreSQL `options` 表动态读取，不复制 secret。
 
-监控口径：
-
-- 号池可用率只统计 `active && schedulable` 的账号；
-- 账号可用状态读取 `/api/v1/admin/ops/account-availability`；
-- 模型可用状态复用 `/api/v1/admin/channel-monitors` 的渠道监测结果；
-- OAuth / setup-token 账号额度读取主动 usage 接口；
-- 号池或模型可用率低于 80%、任一额度窗口使用率达到 80%，或监控接口/数据出现突发异常时发送邮件；
-- 异常持续期间每 5 分钟重复发送，全部恢复后发送一次恢复邮件。
-
-部署验证：
-
-- `--dry-run` 成功读取生产实时数据；
-- `--test-email` 已通过现有 Resend SMTP 链路发送测试邮件；
-- 首次正式检查已发送告警邮件；
-- 安装后 `yunbay-new-api`、`yunbay-sub2api`、Caddy、PostgreSQL、Redis 与 CLI Proxy 均保持 healthy，未重启业务容器。
+修正后的生产 dry-run 基线：Key `上游渠道1` 当前属于 `自建池`；中转站账号首次测试成功；4 个自有账号额度使用率分别约为 1%、3%、0%、54%，图片账号池仍可用，因此当前报告正常，不应发送全局渠道低可用率告警。修正部署前已暂停旧 cron，验证通过后再恢复。
 
 常用命令：
 
@@ -1228,18 +1214,7 @@ qr=called / qr=not_called
 set -a
 . /home/deploy/.config/yunbay/sub2api-monitor.env
 set +a
-
-# 手动检查并按规则发信
-/opt/new-api/monitor/sub2api-pool-monitor/sub2api_pool_monitor.py
-
-# 只查看报告，不发信、不改状态
 /opt/new-api/monitor/sub2api-pool-monitor/sub2api_pool_monitor.py --dry-run
-
-# 查看定时日志
 tail -n 200 /opt/new-api/monitor/sub2api-pool-monitor/monitor.log
-
-# 查看定时配置
 crontab -l
 ```
-
-回滚时只删除 crontab 中 `BEGIN/END YUNBAY SUB2API POOL MONITOR` 标记区块，并删除 `/opt/new-api/monitor/sub2api-pool-monitor/`；不需要重启任何业务服务。

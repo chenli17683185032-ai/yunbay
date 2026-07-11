@@ -24,6 +24,9 @@ from typing import Any
 
 DEFAULT_THRESHOLD = 80.0
 DEFAULT_TIMEOUT_SECONDS = 60
+PRIMARY_API_KEY_ID = 1
+SELF_HOSTED_GROUP = "自建池"
+SAFE_GROUP = "自建安全使用"
 
 
 class MonitorError(RuntimeError):
@@ -33,14 +36,6 @@ class MonitorError(RuntimeError):
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
-
-def parse_time(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 def collect_utilizations(value: Any) -> list[float]:
@@ -115,6 +110,13 @@ class Sub2APIClient:
         self.token = ""
 
     def request(self, path: str, method: str = "GET", body: Any = None) -> Any:
+        raw = self.request_raw(path, method, body)
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise MonitorError(f"Sub2API returned invalid JSON: {path}") from exc
+
+    def request_raw(self, path: str, method: str = "GET", body: Any = None) -> bytes:
         data = None if body is None else json.dumps(body).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.token:
@@ -124,11 +126,11 @@ class Sub2APIClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return json.loads(response.read())
+                return response.read()
         except urllib.error.HTTPError as exc:
             exc.read()
             raise MonitorError(f"Sub2API HTTP {exc.code}: {path}") from exc
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except (urllib.error.URLError, TimeoutError) as exc:
             raise MonitorError(f"Sub2API request failed: {path}") from exc
 
     def login(self) -> None:
@@ -151,17 +153,19 @@ class Sub2APIClient:
             raise MonitorError("Sub2API account list has unexpected shape")
         return items
 
-    def availability(self) -> dict[str, Any]:
-        payload = unwrap(self.request("/admin/ops/account-availability"))
-        if not isinstance(payload, dict) or not isinstance(payload.get("account"), dict):
-            raise MonitorError("Sub2API availability response has unexpected shape")
+    def groups(self) -> list[dict[str, Any]]:
+        payload = unwrap(self.request("/admin/groups/all"))
+        if not isinstance(payload, list):
+            raise MonitorError("Sub2API group list has unexpected shape")
         return payload
 
-    def channel_monitors(self) -> list[dict[str, Any]]:
-        payload = unwrap(self.request("/admin/channel-monitors?page=1&page_size=100"))
+    def group_api_keys(self, group_id: int) -> list[dict[str, Any]]:
+        payload = unwrap(
+            self.request(f"/admin/groups/{group_id}/api-keys?page=1&page_size=100")
+        )
         items = payload.get("items") if isinstance(payload, dict) else None
         if not isinstance(items, list):
-            raise MonitorError("Sub2API channel monitor list has unexpected shape")
+            raise MonitorError("Sub2API API key list has unexpected shape")
         return items
 
     def account_usage(self, account_id: int) -> Any:
@@ -169,29 +173,35 @@ class Sub2APIClient:
             self.request(f"/admin/accounts/{account_id}/usage?source=active&force=false")
         )
 
+    def test_account(self, account_id: int) -> bool:
+        raw = self.request_raw(f"/admin/accounts/{account_id}/test", "POST", {})
+        for line in raw.decode("utf-8", errors="replace").splitlines():
+            if not line.startswith("data: "):
+                continue
+            try:
+                event = json.loads(line[6:])
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "test_complete":
+                return event.get("success") is True
+        return False
+
 
 @dataclass
 class Report:
     checked_at: datetime
-    pool_available: int = 0
-    pool_total: int = 0
-    model_operational: int = 0
-    model_total: int = 0
-    max_quota_utilization: float | None = None
-    quota_account_name: str = ""
+    mode: str = ""
+    primary_key_name: str = ""
+    relay_available: int = 0
+    relay_tested: int = 0
+    own_available: int = 0
+    own_total: int = 0
+    total_quota_utilization: float | None = None
     quota_checks_ok: int = 0
     quota_checks_failed: int = 0
-    channel_details: list[str] = field(default_factory=list)
+    account_details: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     emergencies: list[str] = field(default_factory=list)
-
-    @property
-    def pool_percentage(self) -> float:
-        return 100.0 if self.pool_total == 0 else self.pool_available / self.pool_total * 100
-
-    @property
-    def model_percentage(self) -> float:
-        return 100.0 if self.model_total == 0 else self.model_operational / self.model_total * 100
 
     @property
     def alerting(self) -> bool:
@@ -207,61 +217,40 @@ def evaluate(
     report = Report(checked_at=current)
 
     accounts = client.accounts()
-    availability = client.availability().get("account", {})
-    eligible = [
+    groups = client.groups()
+    group_by_id = {int(group["id"]): group for group in groups}
+    primary_key = None
+    primary_group = None
+    for group in groups:
+        for api_key in client.group_api_keys(int(group["id"])):
+            if int(api_key.get("id", 0)) == PRIMARY_API_KEY_ID:
+                primary_key = api_key
+                primary_group = group
+                break
+        if primary_key:
+            break
+    if not primary_key or not primary_group:
+        report.emergencies.append("找不到供 new-api 使用的第一个 Sub2API API Key")
+        return report
+
+    report.primary_key_name = str(primary_key.get("name") or PRIMARY_API_KEY_ID)
+    report.mode = str(primary_group.get("name") or "")
+    group_id = int(primary_group["id"])
+    members = [
         account
         for account in accounts
-        if account.get("status") == "active" and account.get("schedulable") is True
+        if group_id in (account.get("group_ids") or [])
+        and account.get("status") == "active"
+        and account.get("schedulable") is True
     ]
-    report.pool_total = len(eligible)
-    report.pool_available = sum(
-        1
-        for account in eligible
-        if availability.get(str(account.get("id")), {}).get("is_available") is True
-    )
-    if report.pool_total == 0:
-        report.emergencies.append("没有找到 active 且 schedulable 的账号")
-    elif report.pool_percentage < threshold:
-        report.problems.append(
-            f"号池可用性 {report.pool_percentage:.1f}% 低于 {threshold:.0f}%"
-        )
-
-    monitors = [item for item in client.channel_monitors() if item.get("enabled") is True]
-    if not monitors:
-        report.emergencies.append("没有启用的 Sub2API 渠道监测")
-    for monitor in monitors:
-        name = str(monitor.get("name") or f"monitor-{monitor.get('id')}")
-        last_checked = parse_time(monitor.get("last_checked_at"))
-        interval = max(int(monitor.get("interval_seconds") or 300), 15)
-        stale_after = max(interval * 3, 900)
-        if last_checked is None or (current - last_checked).total_seconds() > stale_after:
-            report.emergencies.append(f"渠道监测数据过期：{name}")
-
-        primary_status = str(monitor.get("primary_status") or "unknown")
-        report.model_total += 1
-        if primary_status == "operational":
-            report.model_operational += 1
-        report.channel_details.append(
-            f"{name} / {monitor.get('primary_model')}: {primary_status}"
-        )
-        for extra in monitor.get("extra_models_status") or []:
-            status = str(extra.get("status") or "unknown")
-            report.model_total += 1
-            if status == "operational":
-                report.model_operational += 1
-            report.channel_details.append(f"{name} / {extra.get('model')}: {status}")
-
-    if report.model_total and report.model_percentage < threshold:
-        report.problems.append(
-            f"模型当前可用性 {report.model_percentage:.1f}% 低于 {threshold:.0f}%"
-        )
-
-    quota_candidates = [
-        account
-        for account in eligible
-        if account.get("type") in {"oauth", "setup-token"}
+    relay_accounts = [account for account in members if account.get("type") == "apikey"]
+    own_accounts = [
+        account for account in members if account.get("type") in {"oauth", "setup-token"}
     ]
-    for account in quota_candidates:
+    report.own_total = len(own_accounts)
+
+    usage_by_account: list[tuple[dict[str, Any], float]] = []
+    for account in own_accounts:
         try:
             values = collect_utilizations(client.account_usage(int(account["id"])))
         except MonitorError:
@@ -272,16 +261,55 @@ def evaluate(
             continue
         report.quota_checks_ok += 1
         account_max = max(values)
-        if report.max_quota_utilization is None or account_max > report.max_quota_utilization:
-            report.max_quota_utilization = account_max
-            report.quota_account_name = str(account.get("name") or account.get("id"))
+        usage_by_account.append((account, account_max))
+        if account_max < 100:
+            report.own_available += 1
+        report.account_details.append(
+            f"自有账号 {account.get('name')}: 使用率 {account_max:.1f}%"
+        )
 
-    if quota_candidates and report.quota_checks_ok == 0:
-        report.emergencies.append("所有可监控账号的额度查询均失败")
-    if report.max_quota_utilization is not None and report.max_quota_utilization >= threshold:
-        report.problems.append(
-            f"账号 {report.quota_account_name} 的额度使用率达到 "
-            f"{report.max_quota_utilization:.1f}%"
+    if own_accounts and report.quota_checks_ok == 0:
+        report.emergencies.append("该分组内所有自有账号的额度查询均失败")
+
+    if report.mode == SELF_HOSTED_GROUP:
+        for account in relay_accounts:
+            report.relay_tested += 1
+            try:
+                usable = client.test_account(int(account["id"]))
+            except MonitorError:
+                usable = False
+            report.account_details.append(
+                f"中转站账号 {account.get('name')}: {'可用' if usable else '不可用'}"
+            )
+            if usable:
+                report.relay_available += 1
+                break
+        if not relay_accounts:
+            report.emergencies.append("自建池中没有可测试的中转站账号")
+        elif report.relay_available == 0:
+            report.problems.append("自建池中转站账号测试失败，正常文字模型可能不可用")
+        if own_accounts and report.own_available == 0 and report.quota_checks_ok > 0:
+            if report.relay_available > 0:
+                report.problems.append("现在正常的文字模型还能用，但是图片模型已经不能用了。")
+            else:
+                report.problems.append("自有账号额度已经用完，图片模型已经不能用了。")
+    elif report.mode == SAFE_GROUP:
+        if relay_accounts:
+            report.emergencies.append("自建安全使用分组中出现了不应存在的中转站账号")
+        if usage_by_account:
+            report.total_quota_utilization = sum(value for _, value in usage_by_account) / len(
+                usage_by_account
+            )
+            if report.total_quota_utilization >= threshold:
+                report.problems.append(
+                    f"自建安全使用分组总用量达到 {report.total_quota_utilization:.1f}%"
+                )
+    else:
+        known = ", ".join(
+            group.get("name", "") for group in group_by_id.values() if group.get("name")
+        )
+        report.emergencies.append(
+            f"new-api 使用的 Key 当前属于未配置监控逻辑的分组：{report.mode}（现有分组：{known}）"
         )
     return report
 
@@ -334,30 +362,30 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
     elif report.emergencies:
         subject = "[紧急] 云贝 Sub2API 监控异常"
         heading = "Sub2API 监控发现突发问题"
-    else:
+    elif report.problems:
         subject = "[告警] 云贝 Sub2API 号池需要处理"
-        heading = "Sub2API 号池或模型可用性告警"
+        heading = "Sub2API 分组监控告警"
+    else:
+        subject = "[正常] 云贝 Sub2API 分组监控"
+        heading = "Sub2API 分组监控正常"
 
-    quota = (
-        "暂不可用"
-        if report.max_quota_utilization is None
-        else f"{report.max_quota_utilization:.1f}%（{report.quota_account_name}）"
-    )
     lines = [
         heading,
         "",
         f"检查时间：{report.checked_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}",
-        f"号池可用性：{report.pool_available}/{report.pool_total}（{report.pool_percentage:.1f}%）",
-        f"模型可用性：{report.model_operational}/{report.model_total}（{report.model_percentage:.1f}%）",
-        f"最大额度使用率：{quota}",
+        f"new-api 使用的 Key：{report.primary_key_name or '未知'}",
+        f"当前分组模式：{report.mode or '未知'}",
+        f"中转站账号测试：成功 {report.relay_available}，已测试 {report.relay_tested}",
+        f"自有账号额度可用：{report.own_available}/{report.own_total}",
+        f"安全使用组总用量：{report.total_quota_utilization:.1f}%" if report.total_quota_utilization is not None else "安全使用组总用量：不适用",
         f"额度查询：成功 {report.quota_checks_ok}，失败 {report.quota_checks_failed}",
     ]
     if report.problems:
         lines.extend(["", "告警原因：", *[f"- {item}" for item in report.problems]])
     if report.emergencies:
         lines.extend(["", "突发问题：", *[f"- {item}" for item in report.emergencies]])
-    if report.channel_details:
-        lines.extend(["", "渠道模型状态：", *[f"- {item}" for item in report.channel_details]])
+    if report.account_details:
+        lines.extend(["", "账号检测明细：", *[f"- {item}" for item in report.account_details]])
     if report.alerting:
         lines.extend(["", "异常未解除时，本邮件约每 5 分钟发送一次。"])
     text = "\n".join(lines)

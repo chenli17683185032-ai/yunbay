@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import sub2api_pool_monitor as monitor
@@ -10,20 +10,20 @@ NOW = datetime(2026, 7, 12, tzinfo=timezone.utc)
 
 
 class FakeClient:
-    def __init__(self, accounts, availability, monitors, usage=None):
+    def __init__(self, group_name, accounts, usage=None, relay_results=None):
+        self.group = {"id": 6 if group_name == monitor.SELF_HOSTED_GROUP else 9, "name": group_name}
         self._accounts = accounts
-        self._availability = availability
-        self._monitors = monitors
         self._usage = usage or {}
+        self._relay_results = relay_results or {}
 
     def accounts(self):
         return self._accounts
 
-    def availability(self):
-        return {"account": self._availability}
+    def groups(self):
+        return [self.group]
 
-    def channel_monitors(self):
-        return self._monitors
+    def group_api_keys(self, group_id):
+        return [{"id": monitor.PRIMARY_API_KEY_ID, "name": "new-api-upstream"}]
 
     def account_usage(self, account_id):
         value = self._usage[account_id]
@@ -31,27 +31,21 @@ class FakeClient:
             raise value
         return value
 
+    def test_account(self, account_id):
+        value = self._relay_results[account_id]
+        if isinstance(value, Exception):
+            raise value
+        return value
 
-def account(account_id, *, schedulable=True, account_type="oauth"):
+
+def account(account_id, account_type="oauth", group_id=6):
     return {
         "id": account_id,
         "name": f"account-{account_id}",
         "status": "active",
-        "schedulable": schedulable,
+        "schedulable": True,
         "type": account_type,
-    }
-
-
-def channel(status="operational", checked_at=NOW, extra=None):
-    return {
-        "id": 1,
-        "name": "channel-1",
-        "enabled": True,
-        "interval_seconds": 300,
-        "last_checked_at": checked_at.isoformat(),
-        "primary_model": "gpt-test",
-        "primary_status": status,
-        "extra_models_status": extra or [],
+        "group_ids": [group_id],
     }
 
 
@@ -60,61 +54,76 @@ class MonitorTests(unittest.TestCase):
         payload = {"five_hour": {"utilization": 79}, "models": [{"utilization": 81}]}
         self.assertEqual([79.0, 81.0], monitor.collect_utilizations(payload))
 
-    def test_unschedulable_accounts_are_excluded(self):
+    def test_self_hosted_text_works_and_images_work_is_normal(self):
         client = FakeClient(
-            [account(1), account(2, schedulable=False)],
-            {"1": {"is_available": True}, "2": {"is_available": False}},
-            [channel()],
-            {1: {"utilization": 10}},
+            monitor.SELF_HOSTED_GROUP,
+            [account(1, "apikey"), account(2)],
+            {2: {"utilization": 99}},
+            {1: True},
         )
         report = monitor.evaluate(client, now=NOW)
-        self.assertEqual((1, 1), (report.pool_available, report.pool_total))
+        self.assertFalse(report.alerting)
+        self.assertEqual((1, 1), (report.relay_available, report.own_available))
+
+    def test_self_hosted_exhausted_own_pool_uses_required_message(self):
+        client = FakeClient(
+            monitor.SELF_HOSTED_GROUP,
+            [account(1, "apikey"), account(2), account(3)],
+            {2: {"utilization": 100}, 3: {"utilization": 100}},
+            {1: True},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertIn(
+            "现在正常的文字模型还能用，但是图片模型已经不能用了。", report.problems
+        )
+
+    def test_self_hosted_stops_relay_testing_after_first_success(self):
+        client = FakeClient(
+            monitor.SELF_HOSTED_GROUP,
+            [account(1, "apikey"), account(2, "apikey"), account(3)],
+            {3: {"utilization": 10}},
+            {1: True, 2: False},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertEqual(1, report.relay_tested)
+
+    def test_safe_group_uses_average_total_usage(self):
+        accounts = [account(1, group_id=9), account(2, group_id=9)]
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            accounts,
+            {1: {"utilization": 70}, 2: {"utilization": 90}},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertEqual(80.0, report.total_quota_utilization)
+        self.assertTrue(any("总用量达到 80.0%" in item for item in report.problems))
+
+    def test_safe_group_below_80_does_not_alert(self):
+        accounts = [account(1, group_id=9), account(2, group_id=9)]
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            accounts,
+            {1: {"utilization": 60}, 2: {"utilization": 99}},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertEqual(79.5, report.total_quota_utilization)
         self.assertFalse(report.alerting)
 
-    def test_pool_below_80_alerts(self):
-        accounts = [account(i, account_type="apikey") for i in range(1, 6)]
-        availability = {str(i): {"is_available": i < 4} for i in range(1, 6)}
-        report = monitor.evaluate(FakeClient(accounts, availability, [channel()]), now=NOW)
-        self.assertEqual(60.0, report.pool_percentage)
-        self.assertTrue(any("号池可用性" in item for item in report.problems))
-
-    def test_model_exactly_80_does_not_alert(self):
-        extra = [
-            {"model": "m2", "status": "operational"},
-            {"model": "m3", "status": "operational"},
-            {"model": "m4", "status": "operational"},
-            {"model": "m5", "status": "error"},
-        ]
+    def test_safe_group_rejects_relay_account(self):
         client = FakeClient(
-            [account(1)], {"1": {"is_available": True}}, [channel(extra=extra)], {1: {"utilization": 1}}
+            monitor.SAFE_GROUP,
+            [account(1, "apikey", group_id=9), account(2, group_id=9)],
+            {2: {"utilization": 10}},
         )
         report = monitor.evaluate(client, now=NOW)
-        self.assertEqual(80.0, report.model_percentage)
-        self.assertFalse(any("模型当前可用性" in item for item in report.problems))
+        self.assertTrue(any("不应存在的中转站账号" in item for item in report.emergencies))
 
-    def test_quota_at_80_alerts(self):
+    def test_all_own_usage_checks_failed_is_emergency(self):
         client = FakeClient(
-            [account(1)], {"1": {"is_available": True}}, [channel()], {1: {"weekly": {"utilization": 80}}}
-        )
-        report = monitor.evaluate(client, now=NOW)
-        self.assertTrue(any("额度使用率" in item for item in report.problems))
-
-    def test_stale_channel_is_emergency(self):
-        client = FakeClient(
-            [account(1)],
-            {"1": {"is_available": True}},
-            [channel(checked_at=NOW - timedelta(minutes=16))],
-            {1: {"utilization": 1}},
-        )
-        report = monitor.evaluate(client, now=NOW)
-        self.assertTrue(any("数据过期" in item for item in report.emergencies))
-
-    def test_all_quota_checks_failed_is_emergency(self):
-        client = FakeClient(
-            [account(1)],
-            {"1": {"is_available": True}},
-            [channel()],
-            {1: monitor.MonitorError("failed")},
+            monitor.SELF_HOSTED_GROUP,
+            [account(1, "apikey"), account(2)],
+            {2: monitor.MonitorError("failed")},
+            {1: True},
         )
         report = monitor.evaluate(client, now=NOW)
         self.assertTrue(any("额度查询均失败" in item for item in report.emergencies))
