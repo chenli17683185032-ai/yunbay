@@ -34,7 +34,6 @@ rsync -a --delete \
 rsync -a --delete \
   --exclude='/package.json' \
   --exclude='/pnpm-lock.yaml' \
-  --exclude='/pnpm-workspace.yaml' \
   --exclude='/bun.lock' \
   --exclude='/bun.lockb' \
   --exclude='/node_modules/' \
@@ -59,6 +58,7 @@ rsync -a --delete \
   cd -- "${target}/frontend"
   test -f package.json || { echo "missing pinned frontend package.json" >&2; exit 1; }
   test -f pnpm-lock.yaml || { echo "missing pinned frontend pnpm-lock.yaml" >&2; exit 1; }
+  test -f pnpm-workspace.yaml || { echo "missing overlay frontend pnpm-workspace.yaml" >&2; exit 1; }
   command -v bunx >/dev/null || { echo "bunx is required" >&2; exit 1; }
   actual_pnpm_version="$(bunx "pnpm@${PNPM_VERSION}" --version)"
   if [[ "${actual_pnpm_version}" != "${PNPM_VERSION}" ]]; then
