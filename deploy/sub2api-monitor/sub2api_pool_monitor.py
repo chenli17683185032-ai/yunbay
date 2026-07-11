@@ -27,6 +27,7 @@ DEFAULT_TIMEOUT_SECONDS = 60
 PRIMARY_API_KEY_ID = 1
 SELF_HOSTED_GROUP = "自建池"
 SAFE_GROUP = "自建安全使用"
+CAPACITY_ENV = "ACCOUNT_CAPACITY_WEIGHTS_JSON"
 
 
 class MonitorError(RuntimeError):
@@ -197,6 +198,8 @@ class Report:
     own_available: int = 0
     own_total: int = 0
     total_quota_utilization: float | None = None
+    weighted_used_capacity: float | None = None
+    weighted_total_capacity: float | None = None
     quota_checks_ok: int = 0
     quota_checks_failed: int = 0
     account_details: list[str] = field(default_factory=list)
@@ -212,6 +215,7 @@ def evaluate(
     client: Sub2APIClient,
     threshold: float = DEFAULT_THRESHOLD,
     now: datetime | None = None,
+    capacity_weights: dict[int, float] | None = None,
 ) -> Report:
     current = now or utc_now()
     report = Report(checked_at=current)
@@ -297,8 +301,26 @@ def evaluate(
         if relay_accounts:
             report.emergencies.append("自建安全使用分组中出现了不应存在的中转站账号")
         if usage_by_account:
-            report.total_quota_utilization = sum(value for _, value in usage_by_account) / len(
-                usage_by_account
+            weights = capacity_weights or {}
+            missing = [
+                str(account.get("name") or account.get("id"))
+                for account, _ in usage_by_account
+                if float(weights.get(int(account["id"]), 0)) <= 0
+            ]
+            if missing:
+                report.emergencies.append(
+                    "自建安全使用分组缺少额度总量配置：" + "、".join(missing)
+                )
+                return report
+            report.weighted_total_capacity = sum(
+                float(weights[int(account["id"])]) for account, _ in usage_by_account
+            )
+            report.weighted_used_capacity = sum(
+                float(weights[int(account["id"])]) * utilization / 100
+                for account, utilization in usage_by_account
+            )
+            report.total_quota_utilization = (
+                report.weighted_used_capacity / report.weighted_total_capacity * 100
             )
             if report.total_quota_utilization >= threshold:
                 report.problems.append(
@@ -378,6 +400,13 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
         f"中转站账号测试：成功 {report.relay_available}，已测试 {report.relay_tested}",
         f"自有账号额度可用：{report.own_available}/{report.own_total}",
         f"安全使用组总用量：{report.total_quota_utilization:.1f}%" if report.total_quota_utilization is not None else "安全使用组总用量：不适用",
+        (
+            f"加权额度：已用约 {report.weighted_used_capacity:.1f}M / "
+            f"总计 {report.weighted_total_capacity:.1f}M"
+            if report.weighted_used_capacity is not None
+            and report.weighted_total_capacity is not None
+            else "加权额度：不适用"
+        ),
         f"额度查询：成功 {report.quota_checks_ok}，失败 {report.quota_checks_failed}",
     ]
     if report.problems:
@@ -457,6 +486,20 @@ def build_client(timeout: int) -> Sub2APIClient:
     return client
 
 
+def load_capacity_weights() -> dict[int, float]:
+    raw = os.environ.get(CAPACITY_ENV, "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+        weights = {int(key): float(value) for key, value in payload.items()}
+    except (json.JSONDecodeError, TypeError, ValueError, AttributeError) as exc:
+        raise MonitorError(f"{CAPACITY_ENV} is invalid") from exc
+    if any(value <= 0 for value in weights.values()):
+        raise MonitorError(f"{CAPACITY_ENV} values must be positive")
+    return weights
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--recipient", default=os.environ.get("ALERT_EMAIL_TO", ""))
@@ -489,7 +532,11 @@ def main() -> int:
         state_path = Path(args.state_file)
         previous = load_state(state_path)
         try:
-            report = evaluate(build_client(args.timeout), args.threshold)
+            report = evaluate(
+                build_client(args.timeout),
+                args.threshold,
+                capacity_weights=load_capacity_weights(),
+            )
         except Exception as exc:  # keep the scheduled job alive and alert on unexpected failures
             report = Report(checked_at=utc_now(), emergencies=[str(exc)])
 

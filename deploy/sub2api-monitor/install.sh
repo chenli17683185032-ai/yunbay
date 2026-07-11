@@ -6,9 +6,10 @@ INSTALL_DIR=${INSTALL_DIR:-/opt/new-api/monitor/sub2api-pool-monitor}
 CONFIG_DIR=${CONFIG_DIR:-"$HOME/.config/yunbay"}
 ENV_FILE=${ENV_FILE:-"$CONFIG_DIR/sub2api-monitor.env"}
 RECIPIENT=${ALERT_EMAIL_TO:-${1:-}}
+CAPACITY_WEIGHTS=${ACCOUNT_CAPACITY_WEIGHTS_JSON:-${2:-}}
 
-if [ -z "$RECIPIENT" ]; then
-  echo "usage: ALERT_EMAIL_TO=user@example.com $0" >&2
+if [ -z "$RECIPIENT" ] || [ -z "$CAPACITY_WEIGHTS" ]; then
+  echo "usage: ALERT_EMAIL_TO=user@example.com ACCOUNT_CAPACITY_WEIGHTS_JSON='{\"9\":15}' $0" >&2
   exit 2
 fi
 
@@ -18,6 +19,7 @@ install -m 0750 "$SOURCE_DIR/sub2api_pool_monitor.py" "$INSTALL_DIR/sub2api_pool
 umask 077
 cat >"$ENV_FILE" <<EOF
 ALERT_EMAIL_TO=$RECIPIENT
+ACCOUNT_CAPACITY_WEIGHTS_JSON='$CAPACITY_WEIGHTS'
 MONITOR_STATE_FILE=$INSTALL_DIR/state.json
 MONITOR_LOCK_FILE=$INSTALL_DIR/monitor.lock
 EOF

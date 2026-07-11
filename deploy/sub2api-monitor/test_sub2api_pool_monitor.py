@@ -87,16 +87,16 @@ class MonitorTests(unittest.TestCase):
         report = monitor.evaluate(client, now=NOW)
         self.assertEqual(1, report.relay_tested)
 
-    def test_safe_group_uses_average_total_usage(self):
+    def test_safe_group_uses_weighted_total_usage(self):
         accounts = [account(1, group_id=9), account(2, group_id=9)]
         client = FakeClient(
             monitor.SAFE_GROUP,
             accounts,
             {1: {"utilization": 70}, 2: {"utilization": 90}},
         )
-        report = monitor.evaluate(client, now=NOW)
-        self.assertEqual(80.0, report.total_quota_utilization)
-        self.assertTrue(any("总用量达到 80.0%" in item for item in report.problems))
+        report = monitor.evaluate(client, now=NOW, capacity_weights={1: 15, 2: 200})
+        self.assertAlmostEqual(88.6047, report.total_quota_utilization, places=3)
+        self.assertTrue(any("总用量达到 88.6%" in item for item in report.problems))
 
     def test_safe_group_below_80_does_not_alert(self):
         accounts = [account(1, group_id=9), account(2, group_id=9)]
@@ -105,9 +105,19 @@ class MonitorTests(unittest.TestCase):
             accounts,
             {1: {"utilization": 60}, 2: {"utilization": 99}},
         )
-        report = monitor.evaluate(client, now=NOW)
-        self.assertEqual(79.5, report.total_quota_utilization)
+        report = monitor.evaluate(client, now=NOW, capacity_weights={1: 200, 2: 15})
+        self.assertAlmostEqual(62.7209, report.total_quota_utilization, places=3)
         self.assertFalse(report.alerting)
+
+    def test_safe_group_missing_capacity_is_emergency(self):
+        accounts = [account(1, group_id=9), account(2, group_id=9)]
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            accounts,
+            {1: {"utilization": 60}, 2: {"utilization": 70}},
+        )
+        report = monitor.evaluate(client, now=NOW, capacity_weights={1: 15})
+        self.assertTrue(any("缺少额度总量配置" in item for item in report.emergencies))
 
     def test_safe_group_rejects_relay_account(self):
         client = FakeClient(
@@ -115,7 +125,7 @@ class MonitorTests(unittest.TestCase):
             [account(1, "apikey", group_id=9), account(2, group_id=9)],
             {2: {"utilization": 10}},
         )
-        report = monitor.evaluate(client, now=NOW)
+        report = monitor.evaluate(client, now=NOW, capacity_weights={2: 15})
         self.assertTrue(any("不应存在的中转站账号" in item for item in report.emergencies))
 
     def test_all_own_usage_checks_failed_is_emergency(self):

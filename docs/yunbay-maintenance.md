@@ -1201,7 +1201,7 @@ qr=called / qr=not_called
 脚本只监控 new-api 使用的第一个 Sub2API API Key（ID=1）当前绑定分组，不再使用错误的全局账号/全局渠道可用率口径。
 
 - `自建池`：`apikey` 账号视为中转站账号，调用 Sub2API 自带账号测试，任一成功即认为正常文字模型可用；`oauth/setup-token` 账号视为自有账号，读取额度。所有自有账号达到 100% 且中转站仍可用时，邮件明确提示“现在正常的文字模型还能用，但是图片模型已经不能用了。”
-- `自建安全使用`：预期只有自有账号，以各账号最大额度窗口使用率的平均值作为组总用量，达到 80% 时告警；不会因单个账号超过 80% 而在总池仍充足时误报。
+- `自建安全使用`：预期只有自有账号，按各账号实际额度总量加权计算组总用量，达到 80% 时告警；不会因单个账号超过 80% 而在总池仍充足时误报。
 - Key 被切到其他未定义分组、所有额度查询失败或安全组混入中转账号时，发送配置/监控异常邮件。
 
 运行方式：deploy 用户 crontab 每 5 分钟执行。配置文件 `/home/deploy/.config/yunbay/sub2api-monitor.env` 权限为 `0600`；Sub2API 管理凭据从容器环境动态读取，SMTP 配置从 new-api PostgreSQL `options` 表动态读取，不复制 secret。
@@ -1218,3 +1218,12 @@ set +a
 tail -n 200 /opt/new-api/monitor/sub2api-pool-monitor/monitor.log
 crontab -l
 ```
+
+额度权重配置保存在 `/home/deploy/.config/yunbay/sub2api-monitor.env` 的 `ACCOUNT_CAPACITY_WEIGHTS_JSON`。当前按用户确认的容量基线配置：普通 5 小时账号各 `15M`，`mucky-filler-2k@icloud.com` 为 `200M`。这组数值用于相对加权；如果确认 2K 账号的精确总量不是 200M，应只修改该配置，不需要改代码。计算公式：
+
+```text
+组已用量 = Σ(账号总额度 × 账号使用率)
+组总用量百分比 = 组已用量 ÷ Σ(账号总额度) × 100%
+```
+
+严禁在缺少任一账号额度配置时回退到等权平均；脚本会改为发送配置异常提醒。
