@@ -121,3 +121,19 @@ func TestReadAppliedB2ReportRequiresPath(t *testing.T) {
 	require.Nil(t, report)
 	require.Contains(t, err.Error(), "--b2-report")
 }
+
+func TestParseValuePackageResetReconcileFlags(t *testing.T) {
+	apply, prepare, manifest, reportPath, err := parseValuePackageResetReconcileFlags([]string{"--apply", "--manifest", "abc", "--b2-report", "/tmp/b2.json"})
+	require.NoError(t, err)
+	require.True(t, apply)
+	require.False(t, prepare)
+	require.Equal(t, "abc", manifest)
+	require.Equal(t, "/tmp/b2.json", reportPath)
+
+	apply, prepare, manifest, reportPath, err = parseValuePackageResetReconcileFlags([]string{"--prepare-schema"})
+	require.NoError(t, err)
+	require.False(t, apply)
+	require.True(t, prepare)
+	require.Empty(t, manifest)
+	require.Empty(t, reportPath)
+}
