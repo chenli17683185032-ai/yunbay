@@ -55,6 +55,18 @@ func normalizeKnownOpenAICodexModel(model string) string {
 		return ""
 	}
 
+	switch normalized {
+	case "gpt-5.6", "gpt-5.6-sol":
+		return "gpt-5.6-sol"
+	case "gpt-5.6-terra":
+		return "gpt-5.6-terra"
+	case "gpt-5.6-luna":
+		return "gpt-5.6-luna"
+	}
+	if strings.HasPrefix(normalized, "gpt-5.6") {
+		return ""
+	}
+
 	if mapped := getNormalizedCodexModel(normalized); mapped != "" {
 		return mapped
 	}

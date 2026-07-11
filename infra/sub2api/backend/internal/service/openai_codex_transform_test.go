@@ -868,6 +868,29 @@ func TestNormalizeCodexModel_Gpt53(t *testing.T) {
 	}
 }
 
+func TestCodexModelMap_GPT56ExactMappings(t *testing.T) {
+	tests := map[string]string{
+		"gpt-5.6":       "gpt-5.6-sol",
+		"gpt-5.6-sol":   "gpt-5.6-sol",
+		"gpt-5.6-terra": "gpt-5.6-terra",
+		"gpt-5.6-luna":  "gpt-5.6-luna",
+	}
+
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			require.Equal(t, want, getNormalizedCodexModel(input))
+			require.Equal(t, want, normalizeCodexModel(input))
+		})
+	}
+
+	for _, unknown := range []string{"gpt-5.6-pro", "gpt-5.6-unknown"} {
+		t.Run(unknown, func(t *testing.T) {
+			require.Empty(t, getNormalizedCodexModel(unknown))
+			require.Equal(t, unknown, normalizeCodexModel(unknown))
+		})
+	}
+}
+
 func TestNormalizeCodexModel_RemovedModelsFallbackToSupportedTargets(t *testing.T) {
 	cases := map[string]string{
 		"":                   "gpt-5.4",
