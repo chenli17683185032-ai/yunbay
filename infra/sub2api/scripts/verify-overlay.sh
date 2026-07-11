@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly UPSTREAM_URL="https://github.com/Wei-Shaw/sub2api.git"
 readonly UPSTREAM_PIN="ddb1a210ce6742ebd4bd5339b9a0c8f309bcbbf0"
+readonly GO_VERSION="1.26.5"
 readonly PNPM_VERSION="10.28.2"
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -47,6 +48,12 @@ git -C "${target}" checkout --detach "${UPSTREAM_PIN}"
 upstream_head="$(git -C "${target}" rev-parse HEAD)"
 if [[ "${upstream_head}" != "${UPSTREAM_PIN}" ]]; then
   echo "unexpected upstream HEAD: ${upstream_head}" >&2
+  exit 1
+fi
+
+upstream_go_version="$(awk '$1 == "go" { print $2; exit }' "${target}/backend/go.mod")"
+if [[ "${upstream_go_version}" != "${GO_VERSION}" ]]; then
+  echo "unexpected pinned upstream Go version: ${upstream_go_version}" >&2
   exit 1
 fi
 

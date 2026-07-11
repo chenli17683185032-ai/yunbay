@@ -8,6 +8,8 @@ dockerfile="${repo_root}/infra/sub2api/Dockerfile"
 
 verifier_pnpm_version="$(sed -n 's/^readonly PNPM_VERSION="\([^"]*\)"$/\1/p' "${verifier}")"
 dockerfile_pnpm_version="$(sed -n 's/^RUN corepack enable && corepack prepare pnpm@\([^ ]*\) --activate$/\1/p' "${dockerfile}")"
+verifier_go_version="$(sed -n 's/^readonly GO_VERSION="\([^"]*\)"$/\1/p' "${verifier}")"
+dockerfile_go_version="$(sed -n 's/^ARG GOLANG_IMAGE=golang:\([0-9.]*\)-alpine$/\1/p' "${dockerfile}")"
 
 if [[ "${verifier_pnpm_version}" != "10.28.2" ]]; then
   echo "unexpected verifier pnpm version: ${verifier_pnpm_version}" >&2
@@ -16,6 +18,16 @@ fi
 
 if [[ "${dockerfile_pnpm_version}" != "${verifier_pnpm_version}" ]]; then
   echo "Dockerfile pnpm version ${dockerfile_pnpm_version} does not match verifier ${verifier_pnpm_version}" >&2
+  exit 1
+fi
+
+if [[ "${verifier_go_version}" != "1.26.5" ]]; then
+  echo "unexpected verifier Go version: ${verifier_go_version}" >&2
+  exit 1
+fi
+
+if [[ "${dockerfile_go_version}" != "${verifier_go_version}" ]]; then
+  echo "Dockerfile Go version ${dockerfile_go_version} does not match verifier ${verifier_go_version}" >&2
   exit 1
 fi
 
