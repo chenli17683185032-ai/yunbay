@@ -202,11 +202,14 @@ class Report:
     relay_tested: int = 0
     relay_low_latency: int = 0
     relay_all_slow: bool = False
+    relay_average_latency: float | None = None
     own_available: int = 0
     own_total: int = 0
     total_quota_utilization: float | None = None
     weighted_used_capacity: float | None = None
     weighted_total_capacity: float | None = None
+    own_min_remaining: float | None = None
+    own_max_remaining: float | None = None
     quota_checks_ok: int = 0
     quota_checks_failed: int = 0
     account_details: list[str] = field(default_factory=list)
@@ -261,6 +264,7 @@ def evaluate(
     report.own_total = len(own_accounts)
 
     usage_by_account: list[tuple[dict[str, Any], float]] = []
+    own_remaining_values: list[float] = []
     own_liveness: dict[int, tuple[bool, float | None]] = {}
     for account in own_accounts:
         try:
@@ -278,6 +282,7 @@ def evaluate(
         report.quota_checks_ok += 1
         account_max = max(values)
         usage_by_account.append((account, account_max))
+        own_remaining_values.append(max(0.0, 100 - account_max))
         alive, latency = own_liveness[int(account["id"])]
         if account_max < 100 and alive:
             report.own_available += 1
@@ -289,8 +294,12 @@ def evaluate(
 
     if own_accounts and report.quota_checks_ok == 0:
         report.emergencies.append("该分组内所有自有账号的额度查询均失败")
+    if own_remaining_values:
+        report.own_min_remaining = min(own_remaining_values)
+        report.own_max_remaining = max(own_remaining_values)
 
     if report.mode == SELF_HOSTED_GROUP:
+        relay_latencies: list[float] = []
         for account in relay_accounts:
             report.relay_tested += 1
             try:
@@ -303,8 +312,12 @@ def evaluate(
             )
             if usable:
                 report.relay_available += 1
+                if latency is not None:
+                    relay_latencies.append(latency)
                 if latency is not None and latency <= RELAY_LATENCY_ALERT_SECONDS:
                     report.relay_low_latency += 1
+        if relay_latencies:
+            report.relay_average_latency = sum(relay_latencies) / len(relay_latencies)
         if not relay_accounts:
             report.emergencies.append("自建池中没有可测试的中转站账号")
         elif report.relay_available == 0:
@@ -410,12 +423,33 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
         subject = "[正常] 云贝 Sub2API 分组监控"
         heading = "Sub2API 分组监控正常"
 
+    if report.total_quota_utilization is not None:
+        own_summary = f"加权总体剩余 {max(0.0, 100-report.total_quota_utilization):.1f}%"
+    elif report.own_min_remaining is not None and report.own_max_remaining is not None:
+        own_summary = (
+            f"{report.own_available}/{report.own_total} 可用，单账号剩余范围 "
+            f"{report.own_min_remaining:.1f}%～{report.own_max_remaining:.1f}%；"
+            "上游未返回绝对总额度，无法准确加权合计"
+        )
+    else:
+        own_summary = "暂无可汇总数据"
+    relay_summary = (
+        f"{report.relay_available} 个可用中转站，平均延迟 {report.relay_average_latency:.2f} 秒"
+        if report.relay_average_latency is not None
+        else f"{report.relay_available} 个可用中转站，暂无平均延迟"
+    )
+
     lines = [
         heading,
         "",
         f"检查时间：{report.checked_at.astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}",
         f"new-api 使用的 Key：{report.primary_key_name or '未知'}",
         f"当前分组模式：{report.mode or '未知'}",
+        "",
+        "汇总：",
+        f"- 自有账号总体余量：{own_summary}",
+        f"- 中转站总体状态：{relay_summary}",
+        "",
         f"中转站账号测试：成功 {report.relay_available}，已测试 {report.relay_tested}",
         f"自有账号额度可用：{report.own_available}/{report.own_total}",
         f"安全使用组总用量：{report.total_quota_utilization:.1f}%" if report.total_quota_utilization is not None else "安全使用组总用量：不适用",

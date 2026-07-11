@@ -86,6 +86,7 @@ class MonitorTests(unittest.TestCase):
         )
         report = monitor.evaluate(client, now=NOW)
         self.assertEqual(2, report.relay_tested)
+        self.assertEqual(2.0, report.relay_average_latency)
 
     def test_self_hosted_marks_all_live_relays_slow(self):
         client = FakeClient(
