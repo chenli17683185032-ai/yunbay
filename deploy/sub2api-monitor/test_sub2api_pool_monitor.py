@@ -146,6 +146,19 @@ class MonitorTests(unittest.TestCase):
         report = monitor.evaluate(client, now=NOW, capacity_weights={1: 15})
         self.assertTrue(any("缺少额度总量配置" in item for item in report.emergencies))
 
+    def test_safe_group_report_omits_relay_wording(self):
+        accounts = [account(1, group_id=9), account(2, group_id=9)]
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            accounts,
+            {1: {"utilization": 10}, 2: {"utilization": 20}},
+        )
+        report = monitor.evaluate(client, now=NOW, capacity_weights={1: 15, 2: 200})
+        _, text, _ = monitor.render_report(report)
+        self.assertNotIn("中转站", text)
+        self.assertIn("估算总体剩余", text)
+        self.assertIn("估算总额 $215.00", text)
+
     def test_safe_group_rejects_relay_account(self):
         client = FakeClient(
             monitor.SAFE_GROUP,

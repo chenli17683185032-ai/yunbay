@@ -429,8 +429,8 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
     if report.total_quota_utilization is not None:
         own_summary = (
             f"估算总体剩余 {max(0.0, 100-report.total_quota_utilization):.1f}%，"
-            f"约剩 {report.weighted_total_capacity-report.weighted_used_capacity:.1f}M / "
-            f"估算总量 {report.weighted_total_capacity:.1f}M"
+            f"约剩 ${report.weighted_total_capacity-report.weighted_used_capacity:.2f} / "
+            f"估算总额 ${report.weighted_total_capacity:.2f}"
         )
     elif report.own_min_remaining is not None and report.own_max_remaining is not None:
         own_summary = (
@@ -440,12 +440,6 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
         )
     else:
         own_summary = "暂无可汇总数据"
-    relay_summary = (
-        f"{report.relay_available} 个可用中转站，平均延迟 {report.relay_average_latency:.2f} 秒"
-        if report.relay_average_latency is not None
-        else f"{report.relay_available} 个可用中转站，暂无平均延迟"
-    )
-
     lines = [
         heading,
         "",
@@ -455,20 +449,36 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
         "",
         "汇总：",
         f"- 自有账号总体余量：{own_summary}",
-        f"- 中转站总体状态：{relay_summary}",
-        "",
-        f"中转站账号测试：成功 {report.relay_available}，已测试 {report.relay_tested}",
-        f"自有账号额度可用：{report.own_available}/{report.own_total}",
-        f"自有账号估算总用量：{report.total_quota_utilization:.1f}%" if report.total_quota_utilization is not None else "自有账号估算总用量：暂不可用",
-        (
-            f"加权额度：已用约 {report.weighted_used_capacity:.1f}M / "
-            f"总计 {report.weighted_total_capacity:.1f}M"
-            if report.weighted_used_capacity is not None
-            and report.weighted_total_capacity is not None
-            else "加权额度：不适用"
-        ),
-        f"额度查询：成功 {report.quota_checks_ok}，失败 {report.quota_checks_failed}",
     ]
+    if report.mode == SELF_HOSTED_GROUP:
+        relay_summary = (
+            f"{report.relay_available} 个可用中转站，平均延迟 "
+            f"{report.relay_average_latency:.2f} 秒"
+            if report.relay_average_latency is not None
+            else f"{report.relay_available} 个可用中转站，暂无平均延迟"
+        )
+        lines.append(f"- 中转站总体状态：{relay_summary}")
+    lines.append("")
+    if report.mode == SELF_HOSTED_GROUP:
+        lines.append(
+            f"中转站账号测试：成功 {report.relay_available}，已测试 {report.relay_tested}"
+        )
+    lines.extend(
+        [
+            f"自有账号额度可用：{report.own_available}/{report.own_total}",
+            f"自有账号估算总用量：{report.total_quota_utilization:.1f}%"
+            if report.total_quota_utilization is not None
+            else "自有账号估算总用量：暂不可用",
+            (
+                f"加权额度：已用约 ${report.weighted_used_capacity:.2f} / "
+                f"总额 ${report.weighted_total_capacity:.2f}"
+                if report.weighted_used_capacity is not None
+                and report.weighted_total_capacity is not None
+                else "加权额度：不适用"
+            ),
+            f"额度查询：成功 {report.quota_checks_ok}，失败 {report.quota_checks_failed}",
+        ]
+    )
     if report.problems:
         lines.extend(["", "告警原因：", *[f"- {item}" for item in report.problems]])
     if report.emergencies:
