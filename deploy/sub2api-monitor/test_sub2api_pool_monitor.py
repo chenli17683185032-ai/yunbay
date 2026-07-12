@@ -19,6 +19,9 @@ class FakeClient:
     def accounts(self):
         return self._accounts
 
+    def account_details(self, account_id):
+        return next(account for account in self._accounts if account["id"] == account_id)
+
     def groups(self):
         return [self.group]
 
@@ -53,6 +56,23 @@ class MonitorTests(unittest.TestCase):
     def test_collect_utilizations_recurses(self):
         payload = {"five_hour": {"utilization": 79}, "models": [{"utilization": 81}]}
         self.assertEqual([79.0, 81.0], monitor.collect_utilizations(payload))
+
+    def test_capacity_is_inferred_from_long_window_metadata(self):
+        self.assertEqual(
+            200.0,
+            monitor.estimate_account_capacity_usd(
+                {"extra": {"codex_primary_window_minutes": 43800}}
+            ),
+        )
+        self.assertEqual(
+            15.0,
+            monitor.estimate_account_capacity_usd(
+                {"extra": {"codex_primary_window_minutes": 300}}
+            ),
+        )
+
+    def test_capacity_override_wins(self):
+        self.assertEqual(350.0, monitor.estimate_account_capacity_usd({}, 350))
 
     def test_self_hosted_text_works_and_images_work_is_normal(self):
         client = FakeClient(
@@ -136,7 +156,7 @@ class MonitorTests(unittest.TestCase):
         self.assertAlmostEqual(62.7209, report.total_quota_utilization, places=3)
         self.assertFalse(report.alerting)
 
-    def test_safe_group_missing_capacity_is_emergency(self):
+    def test_safe_group_new_account_is_auto_estimated(self):
         accounts = [account(1, group_id=9), account(2, group_id=9)]
         client = FakeClient(
             monitor.SAFE_GROUP,
@@ -144,7 +164,7 @@ class MonitorTests(unittest.TestCase):
             {1: {"utilization": 60}, 2: {"utilization": 70}},
         )
         report = monitor.evaluate(client, now=NOW, capacity_weights={1: 15})
-        self.assertTrue(any("缺少额度总量配置" in item for item in report.emergencies))
+        self.assertFalse(any("缺少额度总量配置" in item for item in report.emergencies))
 
     def test_safe_group_report_omits_relay_wording(self):
         accounts = [account(1, group_id=9), account(2, group_id=9)]

@@ -31,6 +31,9 @@ SAFE_GROUP = "自建安全使用"
 CAPACITY_ENV = "ACCOUNT_CAPACITY_WEIGHTS_JSON"
 RELAY_LATENCY_ALERT_SECONDS = 15.0
 RELAY_SLOW_STREAK_REQUIRED = 3
+REGULAR_ACCOUNT_ESTIMATED_USD = 15.0
+LONG_WINDOW_ACCOUNT_ESTIMATED_USD = 200.0
+LONG_WINDOW_MINUTES_THRESHOLD = 10080
 
 
 class MonitorError(RuntimeError):
@@ -177,6 +180,12 @@ class Sub2APIClient:
             self.request(f"/admin/accounts/{account_id}/usage?source=active&force=false")
         )
 
+    def account_details(self, account_id: int) -> dict[str, Any]:
+        payload = unwrap(self.request(f"/admin/accounts/{account_id}"))
+        if not isinstance(payload, dict):
+            raise MonitorError("Sub2API account details have unexpected shape")
+        return payload
+
     def test_account(self, account_id: int) -> tuple[bool, float]:
         started = time.monotonic()
         raw = self.request_raw(f"/admin/accounts/{account_id}/test", "POST", {})
@@ -264,13 +273,22 @@ def evaluate(
     report.own_total = len(own_accounts)
 
     usage_by_account: list[tuple[dict[str, Any], float]] = []
+    estimated_weights: dict[int, float] = {}
     own_remaining_values: list[float] = []
     own_liveness: dict[int, tuple[bool, float | None]] = {}
     for account in own_accounts:
+        account_id = int(account["id"])
         try:
-            own_liveness[int(account["id"])] = client.test_account(int(account["id"]))
+            details = client.account_details(account_id)
         except MonitorError:
-            own_liveness[int(account["id"])] = (False, None)
+            details = account
+        estimated_weights[account_id] = estimate_account_capacity_usd(
+            details, (capacity_weights or {}).get(account_id)
+        )
+        try:
+            own_liveness[account_id] = client.test_account(account_id)
+        except MonitorError:
+            own_liveness[account_id] = (False, None)
         try:
             values = collect_utilizations(client.account_usage(int(account["id"])))
         except MonitorError:
@@ -287,7 +305,8 @@ def evaluate(
         if account_max < 100 and alive:
             report.own_available += 1
         report.account_details.append(
-            f"自有账号 {account.get('name')}: 剩余 {max(0.0, 100-account_max):.1f}%，"
+            f"自有账号 {account.get('name')}: 估算总额 ${estimated_weights[account_id]:.2f}，"
+            f"剩余 {max(0.0, 100-account_max):.1f}%，"
             f"测活 {'成功' if alive else '失败'}"
             + (f"，延迟 {latency:.2f} 秒" if latency is not None else "")
         )
@@ -298,18 +317,13 @@ def evaluate(
         report.own_min_remaining = min(own_remaining_values)
         report.own_max_remaining = max(own_remaining_values)
 
-    configured_weights = capacity_weights or {}
-    missing_capacity_accounts = [
-        str(account.get("name") or account.get("id"))
-        for account, _ in usage_by_account
-        if float(configured_weights.get(int(account["id"]), 0)) <= 0
-    ]
-    if usage_by_account and not missing_capacity_accounts:
+    missing_capacity_accounts: list[str] = []
+    if usage_by_account:
         report.weighted_total_capacity = sum(
-            float(configured_weights[int(account["id"])]) for account, _ in usage_by_account
+            estimated_weights[int(account["id"])] for account, _ in usage_by_account
         )
         report.weighted_used_capacity = sum(
-            float(configured_weights[int(account["id"])]) * utilization / 100
+            estimated_weights[int(account["id"])] * utilization / 100
             for account, utilization in usage_by_account
         )
         report.total_quota_utilization = (
@@ -568,6 +582,32 @@ def load_capacity_weights() -> dict[int, float]:
     if any(value <= 0 for value in weights.values()):
         raise MonitorError(f"{CAPACITY_ENV} values must be positive")
     return weights
+
+
+def estimate_account_capacity_usd(
+    account: dict[str, Any], override: float | None = None
+) -> float:
+    if override is not None and float(override) > 0:
+        return float(override)
+    extra = account.get("extra") if isinstance(account.get("extra"), dict) else {}
+    auth_provider = str(extra.get("auth_provider") or "").lower()
+    import_source = str(extra.get("import_source") or "").lower()
+    source = str(extra.get("source") or "").lower()
+    window_minutes = extra.get("codex_primary_window_minutes") or extra.get(
+        "codex_7d_window_minutes"
+    )
+    try:
+        long_window = float(window_minutes or 0) > LONG_WINDOW_MINUTES_THRESHOLD
+    except (TypeError, ValueError):
+        long_window = False
+    if (
+        long_window
+        or auth_provider == "codex_personal_access_token"
+        or import_source == "codex_personal_access_token"
+        or source == "chatgpt_web_session"
+    ):
+        return LONG_WINDOW_ACCOUNT_ESTIMATED_USD
+    return REGULAR_ACCOUNT_ESTIMATED_USD
 
 
 def apply_relay_latency_stability(report: Report, previous_streak: int) -> int:

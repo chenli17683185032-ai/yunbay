@@ -7,9 +7,10 @@ CONFIG_DIR=${CONFIG_DIR:-"$HOME/.config/yunbay"}
 ENV_FILE=${ENV_FILE:-"$CONFIG_DIR/sub2api-monitor.env"}
 RECIPIENT=${ALERT_EMAIL_TO:-${1:-}}
 CAPACITY_WEIGHTS=${ACCOUNT_CAPACITY_WEIGHTS_JSON:-${2:-}}
+[ -n "$CAPACITY_WEIGHTS" ] || CAPACITY_WEIGHTS='{}'
 
-if [ -z "$RECIPIENT" ] || [ -z "$CAPACITY_WEIGHTS" ]; then
-  echo "usage: ALERT_EMAIL_TO=user@example.com ACCOUNT_CAPACITY_WEIGHTS_JSON='{\"9\":15}' $0" >&2
+if [ -z "$RECIPIENT" ]; then
+  echo "usage: ALERT_EMAIL_TO=user@example.com $0" >&2
   exit 2
 fi
 
