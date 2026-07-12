@@ -2,6 +2,37 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-12 模型价格同步手动编辑上线
+
+本轮将模型价格同步预览中的手动编辑能力发布到生产。运维记录只包含可复现的代码、构建和运行状态，不记录 SSH 私钥、后台会话、API Key 或生产环境变量明文。
+
+### 发布内容
+
+- 发布提交：`f0a2b58d8bd75f5c9c61f8bf8f6ef8783f377101`（`feat allow editing synced model prices`）。
+- 模型价格同步预览的每一行增加最终价格编辑入口，可修改输入、输出、缓存、图片、音频、推理和 Web 搜索价格。
+- 没有官方或 OpenRouter 匹配价格、原先会被跳过的模型，也可以通过手动填写价格转为可保存状态。
+- 后端保存时使用前端提交的手动覆盖价格重新生成计费表达式，而不是只修改前端显示值。
+
+### 验证与部署
+
+- 部署前通过：`go test ./service ./controller`、`bun run typecheck`、`git diff --check`。
+- 使用提交归档生成独立源码发布包，生产端校验 SHA-256 和 `.yunbay-source-manifest` 后，从独立 release 目录构建候选镜像。
+- 候选镜像：`sha256:70bf3b9003f5c38f669c6a62223c121d934e64265f66001956bc0b481b81ce0d`。
+- 只切换 `yunbay-new-api`，未重启 Caddy、PostgreSQL、Redis、Sub2API 或 LDXP Worker。
+- 使用服务器端独立 watchdog 和有界回滚脚本；本次切换记录的公开入口中断时间为 `8` 秒，未触发回滚。
+- 上线后 `yunbay-new-api` 与 `yunbay-caddy` 均为 `healthy`，`https://yunbay.xyz/` 和 `https://yunbay.xyz/api/status` 均返回 HTTP `200`。
+- 已从生产实际提供的 JavaScript 资产中确认 `overrides`、`Preview sync`、`web_search` 和 `No OpenRouter match` 标记存在。
+
+### 生产记录与回滚
+
+```text
+生产部署标记：f0a2b58d8bd75f5c9c61f8bf8f6ef8783f377101
+生产备份目录：/opt/new-api/backups/model-price-manual-edit-20260712T090108Z-f0a2b58d
+生产容器镜像：sha256:70bf3b9003f5c38f669c6a62223c121d934e64265f66001956bc0b481b81ce0d
+```
+
+回滚时使用上述备份目录中的 `rollback.sh` 和固定回滚镜像；不要执行全栈 `compose down/up`，也不要无限等待旧容器排空连接。生产 `.yunbay-deploy-sha` 与 `.yunbay-source-manifest` 当前均指向本轮发布提交。
+
 ## 当前架构结论（2026-06-23）
 
 当前生产目标已经收敛为：
