@@ -1243,3 +1243,7 @@ new-api 使用的 Key 已从 `自建池` 切换到 `自建安全使用`。该组
 ## 2026-07-12 新自有账号容量自动估算
 
 监控不再依赖账号 ID 到美元额度的手工映射。每次检查会读取 `/admin/accounts/:id` 的真实账号元数据：`codex_primary_window_minutes` 超过 10080，或来源为 `codex_personal_access_token` / `chatgpt_web_session` 时自动按长窗口 2K 类账号估算 `$200`；其余常规 OAuth 账号自动估算 `$15`。`ACCOUNT_CAPACITY_WEIGHTS_JSON` 仅保留为特殊账号人工覆盖，默认 `{}`。因此新增或替换账号后无需更新 ID 配置，脚本会自动将新账号纳入美元加权总量；逐账号明细会显示本轮自动判断的估算总额。
+
+## 2026-07-13 本机一键状态组件入库
+
+可双击的 macOS 组件已加入 `deploy/sub2api-monitor/check-sub2api-status.command`，示例配置为 `deploy/sub2api-monitor/sub2api-status.env.example`。仓库组件不包含生产 IP、私钥路径或凭据；本机实际连接参数仅保存在 `$HOME/Desktop/云贝/服务器相关/sub2api-status.env`（权限 `0600`），桌面组件 `$HOME/Desktop/云贝/查看Sub2API账号状态.command` 权限为 `0700`。组件只执行远程 `--dry-run`，不会发邮件或修改监控状态，远端检查超过 180 秒会自动终止。
