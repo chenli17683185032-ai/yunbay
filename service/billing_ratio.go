@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/shopspring/decimal"
 )
@@ -354,6 +355,34 @@ func restoreOriginalBillingRatio(relayInfo *relaycommon.RelayInfo) {
 			priceData.Quota = snap.EstimatedQuotaAfterGroup
 		}
 	}
+}
+
+func prepareValuePackageWalletFallback(relayInfo *relaycommon.RelayInfo) {
+	if relayInfo == nil {
+		return
+	}
+	userGroup := strings.TrimSpace(relayInfo.RealUserGroup)
+	if userGroup == "" {
+		userGroup = strings.TrimSpace(relayInfo.UserGroup)
+	}
+	relayInfo.BillingUserGroup = userGroup
+	if relayInfo.TieredBillingSnapshot == nil &&
+		relayInfo.PriceData.QuotaBeforeGroup == 0 &&
+		relayInfo.PriceData.GroupRatioInfo.GroupRatio > 0 &&
+		relayInfo.PriceData.QuotaToPreConsume > 0 {
+		relayInfo.PriceData.QuotaBeforeGroup = float64(relayInfo.PriceData.QuotaToPreConsume) / relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	}
+	walletGroupRatioInfo := ratio_setting.GetGroupRatioInfo(userGroup, relayInfo.UsingGroup)
+	relayInfo.PriceData.OriginalGroupRatioInfo = walletGroupRatioInfo
+	relayInfo.PriceData.HasOriginalGroupRatioInfo = true
+	relayInfo.PriceData.FreeByGroupRatio = walletGroupRatioInfo.GroupRatio == 0
+	relayInfo.ValuePackageSubscriptionId = 0
+	relayInfo.ValuePackagePlanId = 0
+	relayInfo.ValuePackageBillingGroup = ""
+	relayInfo.ValuePackageModelGroup = ""
+	relayInfo.ValuePackagePackageType = ""
+	relayInfo.ValuePackageUseWallet = true
+	restoreOriginalBillingRatio(relayInfo)
 }
 
 func ApplyTaskOtherRatios(quota int, ratios map[string]float64) int {

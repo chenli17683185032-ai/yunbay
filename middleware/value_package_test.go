@@ -130,6 +130,7 @@ func runValuePackageMiddlewareRequest(t *testing.T, userID int, initialGroup str
 			"token_group":                   common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
 			"value_package_subscription_id": common.GetContextKeyInt(c, constant.ContextKeyValuePackageSubscriptionId),
 			"value_package_model_group":     common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup),
+			"value_package_use_wallet":      common.GetContextKeyBool(c, constant.ContextKeyValuePackageUseWallet),
 		})
 	})
 	recorder := httptest.NewRecorder()
@@ -162,6 +163,7 @@ func runValuePackageMiddlewareRequestWithMethod(t *testing.T, userID int, initia
 			"token_group":                   common.GetContextKeyString(c, constant.ContextKeyTokenGroup),
 			"value_package_subscription_id": common.GetContextKeyInt(c, constant.ContextKeyValuePackageSubscriptionId),
 			"value_package_model_group":     common.GetContextKeyString(c, constant.ContextKeyValuePackageModelGroup),
+			"value_package_use_wallet":      common.GetContextKeyBool(c, constant.ContextKeyValuePackageUseWallet),
 		})
 	})
 	recorder := httptest.NewRecorder()
@@ -173,6 +175,8 @@ func runValuePackageMiddlewareRequestWithMethod(t *testing.T, userID int, initia
 func TestValuePackageRealtimeRejectsOverRollingWindows(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	_, err := model.UpdateValuePackageWalletFallback(user.Id, false)
+	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "realtime-exhausted", Quota: 100, CreatedAt: now}))
 
@@ -197,6 +201,8 @@ func TestValuePackageRealtimeHonorsConcurrencyLimit(t *testing.T) {
 func TestValuePackageReadOnlyRequestsKeepDistributorGroupButSkipQuotaChecks(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	_, err := model.UpdateValuePackageWalletFallback(user.Id, false)
+	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "exhausted", Quota: 100, CreatedAt: now}))
 
@@ -306,6 +312,8 @@ func TestValuePackageMiddlewareKeepsOriginalUserGroupForPermissions(t *testing.T
 func TestValuePackageMiddlewareRejectsOverPeriodWindows(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	_, err := model.UpdateValuePackageWalletFallback(user.Id, false)
+	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "hit-5h", Quota: 100, CreatedAt: now}))
 
@@ -334,6 +342,8 @@ func TestValuePackageMiddlewareRejectsOverPeriodWindows(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"value_package_model_group":"week-card"`)
 
 	monthUser, monthPlan, monthSub := seedValuePackageMiddlewareStateForPackage(t, model.ValuePackageTypeMonth, model.ValuePackageLevelMonth, true, 0, 100, 1)
+	_, err = model.UpdateValuePackageWalletFallback(monthUser.Id, false)
+	require.NoError(t, err)
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: monthUser.Id, UserSubscriptionId: monthSub.Id, PlanId: monthPlan.Id, PackageType: monthPlan.PackageType, ModelGroup: monthPlan.ModelGroup, RequestId: "month-hit-7d-period", Quota: 100, CreatedAt: now - int64(6*time.Hour/time.Second)}))
 
 	recorder = runValuePackageMiddlewareRequest(t, monthUser.Id, "gpt-plus")
@@ -344,9 +354,46 @@ func TestValuePackageMiddlewareRejectsOverPeriodWindows(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "完全恢复")
 }
 
+func TestValuePackageMiddlewareFallsBackToWalletByDefaultWhenWindowIsExhausted(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	now := common.GetTimestamp()
+	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{
+		UserId:             user.Id,
+		UserSubscriptionId: sub.Id,
+		PlanId:             plan.Id,
+		PackageType:        plan.PackageType,
+		ModelGroup:         plan.ModelGroup,
+		RequestId:          "wallet-fallback-window",
+		Quota:              100,
+		CreatedAt:          now,
+	}))
+
+	recorder := runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"value_package_subscription_id":0`)
+	require.Contains(t, recorder.Body.String(), `"value_package_model_group":""`)
+	require.Contains(t, recorder.Body.String(), `"value_package_use_wallet":true`)
+}
+
+func TestValuePackageMiddlewareFallsBackToWalletByDefaultWhenTotalIsExhausted(t *testing.T) {
+	setupValuePackageMiddlewareTestDB(t)
+	user, _, sub := seedValuePackageMiddlewareState(t, true, 1000, 5000, 1)
+	require.NoError(t, model.DB.Model(&model.UserSubscription{}).Where("id = ?", sub.Id).Update("amount_used", sub.AmountTotal).Error)
+
+	recorder := runValuePackageMiddlewareRequest(t, user.Id, "gpt-plus")
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), `"value_package_subscription_id":0`)
+	require.Contains(t, recorder.Body.String(), `"value_package_use_wallet":true`)
+}
+
 func TestValuePackageMiddlewareResetCountdownUsesEarliestUsage(t *testing.T) {
 	setupValuePackageMiddlewareTestDB(t)
 	user, plan, sub := seedValuePackageMiddlewareState(t, true, 100, 500, 1)
+	_, err := model.UpdateValuePackageWalletFallback(user.Id, false)
+	require.NoError(t, err)
 	now := common.GetTimestamp()
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "first-window-usage", Quota: 99, CreatedAt: now - (3*3600 + 55*60)}))
 	require.NoError(t, model.RecordValuePackageUsage(&model.ValuePackageUsageRecord{UserId: user.Id, UserSubscriptionId: sub.Id, PlanId: plan.Id, PackageType: plan.PackageType, ModelGroup: plan.ModelGroup, RequestId: "later-window-usage", Quota: 1, CreatedAt: now - 2*3600}))

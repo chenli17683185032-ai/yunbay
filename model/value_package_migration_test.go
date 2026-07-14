@@ -231,7 +231,7 @@ func TestValuePackageResetCountMigrationAddsPreferenceColumnAndTables(t *testing
 	require.True(t, DB.Migrator().HasTable(&ValuePackageResetCountLedger{}))
 }
 
-func TestEnsureUserValuePackagePreferenceTableSQLiteAddsResetCount(t *testing.T) {
+func TestEnsureUserValuePackagePreferenceTableSQLiteAddsRequiredColumns(t *testing.T) {
 	setupValuePackageMigrationTestDB(t)
 	require.NoError(t, DB.Exec("CREATE TABLE `user_value_package_preferences` (`id` integer, `user_id` integer, `enabled` numeric DEFAULT 0, `active_user_subscription_id` integer DEFAULT 0, `created_at` bigint, `updated_at` bigint, PRIMARY KEY (`id`))").Error)
 	require.NoError(t, DB.Exec("INSERT INTO `user_value_package_preferences` (`id`, `user_id`, `enabled`, `active_user_subscription_id`, `created_at`, `updated_at`) VALUES (1, 100, 1, 200, 10, 20)").Error)
@@ -239,15 +239,18 @@ func TestEnsureUserValuePackagePreferenceTableSQLiteAddsResetCount(t *testing.T)
 	require.NoError(t, ensureUserValuePackagePreferenceTableSQLite())
 
 	require.True(t, DB.Migrator().HasColumn(&UserValuePackagePreference{}, "reset_count"))
+	require.True(t, DB.Migrator().HasColumn(&UserValuePackagePreference{}, "wallet_fallback_enabled"))
 	var got struct {
-		Id         int
-		UserId     int
-		ResetCount int
+		Id                    int
+		UserId                int
+		ResetCount            int
+		WalletFallbackEnabled *bool
 	}
 	require.NoError(t, DB.Table("user_value_package_preferences").Where("id = ?", 1).First(&got).Error)
 	require.Equal(t, 1, got.Id)
 	require.Equal(t, 100, got.UserId)
 	require.Equal(t, 0, got.ResetCount)
+	require.Nil(t, got.WalletFallbackEnabled)
 }
 
 func TestValuePackageMigrateDBCreatesTablesAndColumns(t *testing.T) {
@@ -262,6 +265,7 @@ func TestValuePackageMigrateDBCreatesTablesAndColumns(t *testing.T) {
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_time"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "quota_epoch"))
 	require.True(t, DB.Migrator().HasTable(&UserValuePackagePreference{}))
+	require.True(t, DB.Migrator().HasColumn(&UserValuePackagePreference{}, "wallet_fallback_enabled"))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageUsageRecord{}))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageQuotaReset{}))
 	require.True(t, DB.Migrator().HasTable(&ValuePackageResetCountLedger{}))

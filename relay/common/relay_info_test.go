@@ -56,6 +56,8 @@ func TestGenRelayInfoKeepsUserGroupAndSetsValuePackageBillingGroup(t *testing.T)
 	common.SetContextKey(ctx, constant.ContextKeyValuePackagePlanId, 456)
 	common.SetContextKey(ctx, constant.ContextKeyValuePackageModelGroup, "month-card")
 	common.SetContextKey(ctx, constant.ContextKeyValuePackagePackageType, "month")
+	common.SetContextKey(ctx, constant.ContextKeyValuePackageWalletFallback, true)
+	common.SetContextKey(ctx, constant.ContextKeyValuePackageUseWallet, false)
 
 	info, err := GenRelayInfo(ctx, types.RelayFormatOpenAI, &dto.GeneralOpenAIRequest{Model: "gpt-5.5"}, nil)
 
@@ -69,5 +71,7 @@ func TestGenRelayInfoKeepsUserGroupAndSetsValuePackageBillingGroup(t *testing.T)
 	require.Equal(t, "month-card", info.ValuePackageBillingGroup)
 	require.Equal(t, "month-card", info.ValuePackageModelGroup)
 	require.Equal(t, "month", info.ValuePackagePackageType)
+	require.True(t, info.ValuePackageWalletFallback)
+	require.False(t, info.ValuePackageUseWallet)
 	require.Equal(t, "month-card", info.BillingRatioUserGroup())
 }

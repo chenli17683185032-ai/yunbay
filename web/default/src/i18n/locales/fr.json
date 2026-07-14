@@ -5124,6 +5124,8 @@
     "1-day total remaining": "Total restant sur 1 jour",
     "7-day total remaining": "Total restant sur 7 jours",
     "30-day total remaining": "Total restant sur 30 jours",
-    "Does not refresh": "Ne se renouvelle pas"
+    "Does not refresh": "Ne se renouvelle pas",
+    "Uninterrupted Boost": "Boost ininterrompu",
+    "Use value package quota first, then wallet balance at your VIP rate, and switch back automatically when package quota recovers.": "Utilisez d'abord le quota du forfait avantageux, puis le solde du portefeuille selon votre niveau VIP, avec un retour automatique au forfait dès que son quota est rétabli."
   }
 }

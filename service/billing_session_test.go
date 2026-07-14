@@ -153,6 +153,99 @@ func TestValuePackageBillingIgnoresWalletOnlyPreference(t *testing.T) {
 	require.EqualValues(t, 0, used7d)
 }
 
+func TestValuePackageBillingFallsBackToWalletWithUserGroupRatio(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	preserveRealtimeRatioSettings(t)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"gpt-plus":0.3}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"month-card":{"gpt-plus":0.5},"vip":{"gpt-plus":2}}`))
+
+	user := model.User{Username: "vp-wallet-fallback", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 1000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	plan := model.SubscriptionPlan{Title: "fallback month card", Enabled: true, PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "month-card", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, ConcurrencyLimit: 1, TotalAmount: 100}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 100, AmountUsed: 100, StartTime: now - 10, EndTime: now + 86400, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                     user.Id,
+		RequestId:                  "vp-wallet-fallback-request",
+		OriginModelName:            "gpt-test",
+		IsPlayground:               true,
+		UsingGroup:                 "gpt-plus",
+		UserGroup:                  model.UserGroupVIP,
+		RealUserGroup:              model.UserGroupVIP,
+		BillingUserGroup:           plan.ModelGroup,
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageBillingGroup:   plan.ModelGroup,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+		ValuePackageWalletFallback: true,
+		PriceData: types.PriceData{
+			QuotaBeforeGroup:  0,
+			QuotaToPreConsume: 50,
+			GroupRatioInfo: types.GroupRatioInfo{
+				GroupRatio:        0.5,
+				GroupSpecialRatio: 0.5,
+				HasSpecialRatio:   true,
+			},
+		},
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, 50)
+
+	require.Nil(t, apiErr)
+	require.NotNil(t, session)
+	require.Equal(t, BillingSourceWallet, relayInfo.BillingSource)
+	require.Equal(t, model.UserGroupVIP, relayInfo.BillingUserGroup)
+	require.Equal(t, 2.0, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.Equal(t, 200, session.GetPreConsumedQuota())
+	require.Zero(t, relayInfo.ValuePackageSubscriptionId)
+	require.Empty(t, relayInfo.ValuePackageBillingGroup)
+	require.True(t, relayInfo.ValuePackageUseWallet)
+
+	var reloadedUser model.User
+	require.NoError(t, model.DB.First(&reloadedUser, user.Id).Error)
+	require.Equal(t, 800, reloadedUser.Quota)
+	var reloadedSub model.UserSubscription
+	require.NoError(t, model.DB.First(&reloadedSub, sub.Id).Error)
+	require.EqualValues(t, 100, reloadedSub.AmountUsed)
+}
+
+func TestValuePackageBillingDoesNotFallbackWhenDisabled(t *testing.T) {
+	setupValuePackageBillingSessionTestDB(t)
+	user := model.User{Username: "vp-wallet-fallback-disabled", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 1000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	plan := model.SubscriptionPlan{Title: "strict month card", Enabled: true, PlanKind: model.SubscriptionPlanKindValuePackage, PackageType: model.ValuePackageTypeMonth, PackageLevel: model.ValuePackageLevelMonth, ModelGroup: "month-card", DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, ConcurrencyLimit: 1, TotalAmount: 100}
+	require.NoError(t, model.DB.Create(&plan).Error)
+	now := common.GetTimestamp()
+	sub := model.UserSubscription{UserId: user.Id, PlanId: plan.Id, AmountTotal: 100, AmountUsed: 100, StartTime: now - 10, EndTime: now + 86400, Status: model.UserSubscriptionStatusActive}
+	require.NoError(t, model.DB.Create(&sub).Error)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:                     user.Id,
+		RequestId:                  "vp-wallet-fallback-disabled-request",
+		OriginModelName:            "gpt-test",
+		IsPlayground:               true,
+		ValuePackageSubscriptionId: sub.Id,
+		ValuePackagePlanId:         plan.Id,
+		ValuePackageBillingGroup:   plan.ModelGroup,
+		ValuePackageModelGroup:     plan.ModelGroup,
+		ValuePackagePackageType:    plan.PackageType,
+	}
+
+	session, apiErr := NewBillingSession(ctx, relayInfo, 50)
+
+	require.Nil(t, session)
+	require.NotNil(t, apiErr)
+	require.Equal(t, types.ErrorCodeInsufficientUserQuota, apiErr.GetErrorCode())
+	var reloadedUser model.User
+	require.NoError(t, model.DB.First(&reloadedUser, user.Id).Error)
+	require.Equal(t, 1000, reloadedUser.Quota)
+}
+
 func TestValuePackageBillingDefaultsToOneXWithoutConfiguredPair(t *testing.T) {
 	setupValuePackageBillingSessionTestDB(t)
 	user := model.User{Username: "vp-billing-ratio-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: model.UserGroupVIP, Quota: 1000}

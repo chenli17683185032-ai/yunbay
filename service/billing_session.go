@@ -548,36 +548,6 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		return nil, types.NewError(fmt.Errorf("relayInfo is nil"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 
-	if relayInfo.ValuePackageSubscriptionId > 0 {
-		ratio, source := resolveSubscriptionBillingRatio(relayInfo)
-		subConsumeInt := subscriptionPreConsumeQuota(relayInfo, preConsumedQuota, ratio, source)
-		if subConsumeInt <= 0 {
-			subConsumeInt = 1
-		}
-		subConsume := int64(subConsumeInt)
-		session := &BillingSession{
-			relayInfo: relayInfo,
-			funding: &SubscriptionFunding{
-				requestId:                  relayInfo.RequestId,
-				userId:                     relayInfo.UserId,
-				modelName:                  relayInfo.OriginModelName,
-				amount:                     subConsume,
-				valuePackageSubscriptionId: relayInfo.ValuePackageSubscriptionId,
-			},
-			subscriptionRatio:       ratio,
-			subscriptionRatioSource: source,
-			billingUsingGroup:       strings.TrimSpace(relayInfo.UsingGroup),
-		}
-		if apiErr := session.preConsume(c, subConsumeInt); apiErr != nil {
-			return nil, apiErr
-		}
-		applySubscriptionBillingRatio(relayInfo, subConsumeInt, ratio, source)
-		session.preConsumedQuota = subConsumeInt
-		session.freezeBillingTuple()
-		session.syncRelayInfo()
-		return session, nil
-	}
-
 	pref := common.NormalizeBillingPreference(relayInfo.UserSetting.BillingPreference)
 
 	// 钱包路径需要先检查用户额度
@@ -618,6 +588,44 @@ func NewBillingSession(c *gin.Context, relayInfo *relaycommon.RelayInfo, preCons
 		if apiErr := session.preConsume(c, walletConsume); apiErr != nil {
 			return nil, apiErr
 		}
+		return session, nil
+	}
+
+	if relayInfo.ValuePackageUseWallet {
+		return tryWallet()
+	}
+
+	if relayInfo.ValuePackageSubscriptionId > 0 {
+		ratio, source := resolveSubscriptionBillingRatio(relayInfo)
+		subConsumeInt := subscriptionPreConsumeQuota(relayInfo, preConsumedQuota, ratio, source)
+		if subConsumeInt <= 0 {
+			subConsumeInt = 1
+		}
+		subConsume := int64(subConsumeInt)
+		session := &BillingSession{
+			relayInfo: relayInfo,
+			funding: &SubscriptionFunding{
+				requestId:                  relayInfo.RequestId,
+				userId:                     relayInfo.UserId,
+				modelName:                  relayInfo.OriginModelName,
+				amount:                     subConsume,
+				valuePackageSubscriptionId: relayInfo.ValuePackageSubscriptionId,
+			},
+			subscriptionRatio:       ratio,
+			subscriptionRatioSource: source,
+			billingUsingGroup:       strings.TrimSpace(relayInfo.UsingGroup),
+		}
+		if apiErr := session.preConsume(c, subConsumeInt); apiErr != nil {
+			if relayInfo.ValuePackageWalletFallback && apiErr.GetErrorCode() == types.ErrorCodeInsufficientUserQuota {
+				prepareValuePackageWalletFallback(relayInfo)
+				return tryWallet()
+			}
+			return nil, apiErr
+		}
+		applySubscriptionBillingRatio(relayInfo, subConsumeInt, ratio, source)
+		session.preConsumedQuota = subConsumeInt
+		session.freezeBillingTuple()
+		session.syncRelayInfo()
 		return session, nil
 	}
 

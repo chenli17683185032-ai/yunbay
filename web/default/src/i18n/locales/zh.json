@@ -5124,6 +5124,8 @@
     "1-day total remaining": "1 天总额度剩余",
     "7-day total remaining": "7 天总额度剩余",
     "30-day total remaining": "30 天总额度剩余",
-    "Does not refresh": "不刷新"
+    "Does not refresh": "不刷新",
+    "Uninterrupted Boost": "无限狂暴不中断",
+    "Use value package quota first, then wallet balance at your VIP rate, and switch back automatically when package quota recovers.": "优先使用特惠套餐额度；用尽后按 VIP 等级倍率使用账户余额，套餐额度恢复后自动切回。"
   }
 }

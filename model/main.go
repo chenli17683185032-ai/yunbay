@@ -655,8 +655,15 @@ func ensureUserValuePackagePreferenceTableSQLite() error {
 	if !DB.Migrator().HasTable(tableName) {
 		return nil
 	}
-	if !DB.Migrator().HasColumn(&UserValuePackagePreference{}, "reset_count") {
-		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN `reset_count` integer DEFAULT 0").Error; err != nil {
+	required := []sqliteColumnDef{
+		{Name: "reset_count", DDL: "`reset_count` integer DEFAULT 0"},
+		{Name: "wallet_fallback_enabled", DDL: "`wallet_fallback_enabled` numeric"},
+	}
+	for _, column := range required {
+		if DB.Migrator().HasColumn(&UserValuePackagePreference{}, column.Name) {
+			continue
+		}
+		if err := DB.Exec("ALTER TABLE `" + tableName + "` ADD COLUMN " + column.DDL).Error; err != nil {
 			return err
 		}
 	}

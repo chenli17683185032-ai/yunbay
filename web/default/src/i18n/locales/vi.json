@@ -5124,6 +5124,8 @@
     "1-day total remaining": "Tổng hạn mức còn lại trong 1 ngày",
     "7-day total remaining": "Tổng hạn mức còn lại trong 7 ngày",
     "30-day total remaining": "Tổng hạn mức còn lại trong 30 ngày",
-    "Does not refresh": "Không làm mới"
+    "Does not refresh": "Không làm mới",
+    "Uninterrupted Boost": "Tăng tốc không gián đoạn",
+    "Use value package quota first, then wallet balance at your VIP rate, and switch back automatically when package quota recovers.": "Ưu tiên dùng hạn mức gói ưu đãi, sau đó dùng số dư ví theo hệ số cấp VIP; hệ thống tự động chuyển lại khi hạn mức gói được khôi phục."
   }
 }

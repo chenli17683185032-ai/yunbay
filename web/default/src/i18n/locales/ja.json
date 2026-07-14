@@ -5124,6 +5124,8 @@
     "1-day total remaining": "1日分の合計残量",
     "7-day total remaining": "7日分の合計残量",
     "30-day total remaining": "30日分の合計残量",
-    "Does not refresh": "更新されません"
+    "Does not refresh": "更新されません",
+    "Uninterrupted Boost": "中断なしブースト",
+    "Use value package quota first, then wallet balance at your VIP rate, and switch back automatically when package quota recovers.": "まずお得なパッケージ枠を使用し、使い切った後は VIP レベルの倍率でウォレット残高を使用します。枠が回復すると自動的にパッケージへ戻ります。"
   }
 }

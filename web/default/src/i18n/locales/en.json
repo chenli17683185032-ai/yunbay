@@ -5124,6 +5124,8 @@
     "1-day total remaining": "1-day total remaining",
     "7-day total remaining": "7-day total remaining",
     "30-day total remaining": "30-day total remaining",
-    "Does not refresh": "Does not refresh"
+    "Does not refresh": "Does not refresh",
+    "Uninterrupted Boost": "Uninterrupted Boost",
+    "Use value package quota first, then wallet balance at your VIP rate, and switch back automatically when package quota recovers.": "Use value package quota first, then wallet balance at your VIP rate, and switch back automatically when package quota recovers."
   }
 }

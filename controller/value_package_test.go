@@ -696,6 +696,32 @@ func TestGetValuePackagePurchaseIntentConfirmedCover(t *testing.T) {
 	assert.Equal(t, false, data["requires_confirmation"])
 }
 
+func TestUpdateValuePackageWalletFallbackSelf(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_wallet_fallback_user")
+
+	rec := valuePackageControllerRequest(UpdateValuePackageWalletFallbackSelf, http.MethodPut, "/value-packages/wallet-fallback", gin.H{"enabled": false}, user.Id)
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	preference := data["preference"].(map[string]interface{})
+	require.Equal(t, false, preference["wallet_fallback_enabled"])
+
+	var stored model.UserValuePackagePreference
+	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&stored).Error)
+	require.NotNil(t, stored.WalletFallbackEnabled)
+	require.False(t, *stored.WalletFallbackEnabled)
+}
+
+func TestUpdateValuePackageWalletFallbackSelfRejectsMissingEnabled(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_wallet_fallback_invalid")
+
+	rec := valuePackageControllerRequest(UpdateValuePackageWalletFallbackSelf, http.MethodPut, "/value-packages/wallet-fallback", gin.H{}, user.Id)
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, false, body["success"], rec.Body.String())
+}
+
 func TestCreateValuePackageLdxpSessionCreatesPendingOrder(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	user := createLdxpControllerTestUser(t, "vp_ldxp_user")

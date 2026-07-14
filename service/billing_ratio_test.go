@@ -752,6 +752,74 @@ func TestNewBillingSessionSubscriptionAppliesOneXToTieredSnapshot(t *testing.T) 
 	assert.Equal(t, int64(1000), getSubscriptionUsed(t, subId))
 }
 
+func TestPrepareValuePackageWalletFallbackUsesTieredSnapshotWithoutInferringPriceBase(t *testing.T) {
+	preserveRealtimeRatioSettings(t)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"gpt-plus":0.3}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"vip":{"gpt-plus":2}}`))
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserGroup:                  model.UserGroupVIP,
+		RealUserGroup:              model.UserGroupVIP,
+		BillingUserGroup:           "month-card",
+		UsingGroup:                 "gpt-plus",
+		ValuePackageSubscriptionId: 123,
+		ValuePackagePlanId:         456,
+		ValuePackageBillingGroup:   "month-card",
+		ValuePackageModelGroup:     "month-card",
+		ValuePackagePackageType:    model.ValuePackageTypeMonth,
+		TieredBillingSnapshot: &billingexpr.BillingSnapshot{
+			BillingMode:               "tiered_expr",
+			GroupRatio:                0.5,
+			EstimatedQuotaBeforeGroup: 1000,
+			EstimatedQuotaAfterGroup:  500,
+		},
+		PriceData: types.PriceData{
+			QuotaToPreConsume: 500,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 0.5},
+		},
+	}
+
+	prepareValuePackageWalletFallback(relayInfo)
+
+	require.Zero(t, relayInfo.PriceData.QuotaBeforeGroup)
+	require.Equal(t, 2.0, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.Equal(t, 2000, relayInfo.PriceData.QuotaToPreConsume)
+	require.Equal(t, 2.0, relayInfo.TieredBillingSnapshot.GroupRatio)
+	require.Equal(t, 2000, relayInfo.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
+	require.Equal(t, model.UserGroupVIP, relayInfo.BillingUserGroup)
+	require.Zero(t, relayInfo.ValuePackageSubscriptionId)
+	require.True(t, relayInfo.ValuePackageUseWallet)
+}
+
+func TestPrepareValuePackageWalletFallbackRestoresZeroWalletGroupRatio(t *testing.T) {
+	preserveRealtimeRatioSettings(t)
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"free-vip":0}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{}`))
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserGroup:                  model.UserGroupVIP,
+		RealUserGroup:              model.UserGroupVIP,
+		BillingUserGroup:           "month-card",
+		UsingGroup:                 "free-vip",
+		ValuePackageSubscriptionId: 123,
+		ValuePackageBillingGroup:   "month-card",
+		PriceData: types.PriceData{
+			QuotaBeforeGroup:  1000,
+			QuotaToPreConsume: 500,
+			GroupRatioInfo:    types.GroupRatioInfo{GroupRatio: 0.5},
+		},
+	}
+
+	prepareValuePackageWalletFallback(relayInfo)
+
+	require.Zero(t, relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+	require.Zero(t, relayInfo.PriceData.QuotaToPreConsume)
+	require.True(t, relayInfo.PriceData.FreeByGroupRatio)
+	require.Equal(t, model.UserGroupVIP, relayInfo.BillingUserGroup)
+	require.Zero(t, relayInfo.ValuePackageSubscriptionId)
+	require.True(t, relayInfo.ValuePackageUseWallet)
+}
+
 func TestApplySubscriptionBillingRatioUsesConfiguredRatioOnceForTieredSnapshot(t *testing.T) {
 	relayInfo := &relaycommon.RelayInfo{
 		ValuePackageSubscriptionId: 1,

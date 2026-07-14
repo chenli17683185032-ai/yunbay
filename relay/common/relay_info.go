@@ -154,6 +154,8 @@ type RelayInfo struct {
 	ValuePackageBillingGroup   string
 	ValuePackageModelGroup     string
 	ValuePackagePackageType    string
+	ValuePackageWalletFallback bool
+	ValuePackageUseWallet      bool
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
 	SubscriptionAmountTotal               int64
 	SubscriptionAmountUsedAfterPreConsume int64
@@ -492,6 +494,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		ValuePackageBillingGroup:   valuePackageGroup,
 		ValuePackageModelGroup:     valuePackageGroup,
 		ValuePackagePackageType:    common.GetContextKeyString(c, constant.ContextKeyValuePackagePackageType),
+		ValuePackageWalletFallback: common.GetContextKeyBool(c, constant.ContextKeyValuePackageWalletFallback),
+		ValuePackageUseWallet:      common.GetContextKeyBool(c, constant.ContextKeyValuePackageUseWallet),
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 

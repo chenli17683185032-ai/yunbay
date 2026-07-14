@@ -423,10 +423,15 @@ type UserValuePackagePreference struct {
 	Id                       int   `json:"id"`
 	UserId                   int   `json:"user_id" gorm:"uniqueIndex"`
 	Enabled                  bool  `json:"enabled" gorm:"default:false"`
+	WalletFallbackEnabled    *bool `json:"wallet_fallback_enabled" gorm:"column:wallet_fallback_enabled"`
 	ActiveUserSubscriptionId int   `json:"active_user_subscription_id" gorm:"index;default:0"`
 	ResetCount               int   `json:"reset_count" gorm:"default:0"`
 	CreatedAt                int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt                int64 `json:"updated_at" gorm:"bigint"`
+}
+
+func (p UserValuePackagePreference) AllowsWalletFallback() bool {
+	return p.WalletFallbackEnabled == nil || *p.WalletFallbackEnabled
 }
 
 func (p *UserValuePackagePreference) BeforeCreate(tx *gorm.DB) error {
@@ -2718,6 +2723,41 @@ func DeactivateValuePackage(userId int) (*ValuePackageState, error) {
 		if err != nil {
 			return err
 		}
+		state.Preference = *pref
+		return nil
+	})
+	return state, err
+}
+
+func UpdateValuePackageWalletFallback(userId int, enabled bool) (*ValuePackageState, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid userId")
+	}
+	var state *ValuePackageState
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := ensureExistingUserForUpdateTx(tx, userId); err != nil {
+			return err
+		}
+		var err error
+		state, err = getValuePackageStateTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		pref, err := ensureValuePackagePreferenceForUpdateTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		now := common.GetTimestamp()
+		if err := tx.Model(&UserValuePackagePreference{}).
+			Where("user_id = ?", userId).
+			Updates(map[string]interface{}{
+				"wallet_fallback_enabled": enabled,
+				"updated_at":              now,
+			}).Error; err != nil {
+			return err
+		}
+		pref.WalletFallbackEnabled = common.GetPointer(enabled)
+		pref.UpdatedAt = now
 		state.Preference = *pref
 		return nil
 	})

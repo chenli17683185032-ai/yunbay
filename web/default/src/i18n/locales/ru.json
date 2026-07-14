@@ -5124,6 +5124,8 @@
     "1-day total remaining": "Общий остаток на 1 день",
     "7-day total remaining": "Общий остаток на 7 дней",
     "30-day total remaining": "Общий остаток на 30 дней",
-    "Does not refresh": "Не обновляется"
+    "Does not refresh": "Не обновляется",
+    "Uninterrupted Boost": "Непрерывный режим",
+    "Use value package quota first, then wallet balance at your VIP rate, and switch back automatically when package quota recovers.": "Сначала используется квота выгодного пакета, затем баланс кошелька по коэффициенту VIP-уровня; после восстановления квоты система автоматически вернётся к пакету."
   }
 }
