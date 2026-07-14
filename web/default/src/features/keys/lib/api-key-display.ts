@@ -18,21 +18,20 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { ApiKey } from '../types'
 
-type ApiKeyDisplayGroupInput = Pick<
-  ApiKey,
-  'group' | 'effective_group' | 'effective_group_ratio' | 'cross_group_retry'
->
+type ApiKeyDisplayGroupInput = Pick<ApiKey, 'group'>
 
 export function getApiKeyDisplayGroup(
   apiKey: ApiKeyDisplayGroupInput,
   groupRatios: Record<string, number>,
-  activePackageRatio?: number
+  packageBillingActive = false
 ): { group: string; ratio?: number; isEffective: boolean } {
   const storedGroup = apiKey.group?.trim() ?? ''
   const group = storedGroup
-  const isEffective = activePackageRatio != null
+  const isEffective = packageBillingActive
 
-  const ratio = isEffective ? activePackageRatio : groupRatios[group]
+  if (group === 'auto') {
+    return { group, isEffective }
+  }
 
-  return { group, ratio, isEffective }
+  return { group, ratio: groupRatios[group], isEffective }
 }
