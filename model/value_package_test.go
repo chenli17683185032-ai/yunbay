@@ -422,6 +422,222 @@ func TestCreateValuePackageSubscriptionFromPlanTxExtendsTimeWithoutChangingQuota
 	require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
 }
 
+func TestExtendExhaustedValuePackageStartsFreshCycleImmediately(t *testing.T) {
+	tests := []struct {
+		name         string
+		packageType  string
+		packageLevel int
+		durationDays int64
+		amountUsed   int64
+		usageQuota   int64
+		limit5h      int64
+		limit7d      int64
+	}{
+		{name: "lifecycle exhausted", packageType: ValuePackageTypeWeek, packageLevel: ValuePackageLevelWeek, durationDays: 7, amountUsed: 900, limit5h: 500},
+		{name: "five hour exhausted", packageType: ValuePackageTypeWeek, packageLevel: ValuePackageLevelWeek, durationDays: 7, amountUsed: 100, usageQuota: 500, limit5h: 500},
+		{name: "seven day exhausted", packageType: ValuePackageTypeMonth, packageLevel: ValuePackageLevelMonth, durationDays: 30, amountUsed: 100, usageQuota: 500, limit5h: 900, limit7d: 500},
+	}
+
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupValuePackageTestDB(t)
+			user := createValuePackageUser(t, 3900+index, UserGroupVIP)
+			plan := createValuePackagePlan(t, tt.packageType, tt.packageLevel, int(tt.durationDays), 9.9)
+			plan.TotalAmount = 900
+			plan.Limit5hAmount = tt.limit5h
+			plan.Limit7dAmount = tt.limit7d
+			require.NoError(t, DB.Save(&plan).Error)
+
+			now := common.GetTimestamp()
+			existing := createActiveValuePackageSub(t, user.Id, plan, now-valuePackageDaySeconds, now+3*valuePackageDaySeconds)
+			require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", existing.Id).Updates(map[string]interface{}{
+				"amount_used":     tt.amountUsed,
+				"quota_epoch":     int64(4),
+				"last_reset_time": existing.StartTime,
+			}).Error)
+			if tt.usageQuota > 0 {
+				require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{
+					UserId:             user.Id,
+					UserSubscriptionId: existing.Id,
+					PlanId:             plan.Id,
+					PackageType:        plan.PackageType,
+					ModelGroup:         plan.ModelGroup,
+					RequestId:          fmt.Sprintf("exhausted-renewal-%d", index),
+					Quota:              tt.usageQuota,
+					QuotaEpoch:         4,
+					CreatedAt:          now - 60,
+				}))
+			}
+
+			var renewed *UserSubscription
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				var renewErr error
+				renewed, renewErr = extendValuePackageSubscriptionTx(tx, existing.Id, &plan, now, now+tt.durationDays*valuePackageDaySeconds)
+				return renewErr
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, renewed)
+			require.Equal(t, existing.Id, renewed.Id)
+			require.Equal(t, now, renewed.StartTime)
+			require.Equal(t, now+tt.durationDays*valuePackageDaySeconds, renewed.EndTime)
+			require.Equal(t, plan.TotalAmount, renewed.AmountTotal)
+			require.Zero(t, renewed.AmountUsed)
+			require.EqualValues(t, 5, renewed.QuotaEpoch)
+			require.Equal(t, now, renewed.LastResetTime)
+			require.Zero(t, renewed.NextResetTime)
+
+			var reset ValuePackageQuotaReset
+			require.NoError(t, DB.Where("user_subscription_id = ?", existing.Id).Order("id desc").First(&reset).Error)
+			require.Equal(t, ValuePackageQuotaResetSourcePackageRenewal, reset.Source)
+			require.EqualValues(t, 4, reset.FromEpoch)
+			require.EqualValues(t, 5, reset.ToEpoch)
+			require.Equal(t, tt.amountUsed, reset.AmountUsedBefore)
+			require.Equal(t, now, reset.ResetAt)
+		})
+	}
+}
+
+func TestExtendValuePackageOnlyTreatsBoundedLifecycleDustAsExhausted(t *testing.T) {
+	tests := []struct {
+		name          string
+		remaining     int64
+		wantFresh     bool
+		wantResetNote string
+	}{
+		{name: "production residual dust", remaining: 2_642, wantFresh: true, wantResetNote: "exhausted package renewal: total_quota_dust"},
+		{name: "above one basis point", remaining: 4_501, wantFresh: false},
+	}
+
+	for index, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupValuePackageTestDB(t)
+			oldQuotaPerUnit := common.QuotaPerUnit
+			common.QuotaPerUnit = 500_000
+			t.Cleanup(func() { common.QuotaPerUnit = oldQuotaPerUnit })
+			user := createValuePackageUser(t, 3920+index, UserGroupVIP)
+			week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+			week.TotalAmount = 60_000_000
+			week.Limit5hAmount = 9_000_000
+			require.NoError(t, DB.Save(&week).Error)
+
+			now := common.GetTimestamp()
+			existing := createActiveValuePackageSub(t, user.Id, week, now-valuePackageDaySeconds, now+3*valuePackageDaySeconds)
+			existing.AmountTotal = 45_000_000
+			existing.AmountUsed = existing.AmountTotal - tt.remaining
+			existing.QuotaEpoch = 1
+			existing.LastResetTime = existing.StartTime
+			require.NoError(t, DB.Save(&existing).Error)
+
+			var renewed *UserSubscription
+			err := DB.Transaction(func(tx *gorm.DB) error {
+				var renewErr error
+				renewed, renewErr = extendValuePackageSubscriptionTx(tx, existing.Id, &week, now, now+valuePackageWeekSeconds)
+				return renewErr
+			})
+
+			require.NoError(t, err)
+			require.NotNil(t, renewed)
+			var resetCount int64
+			require.NoError(t, DB.Model(&ValuePackageQuotaReset{}).Where("user_subscription_id = ? AND source = ?", existing.Id, ValuePackageQuotaResetSourcePackageRenewal).Count(&resetCount).Error)
+			if tt.wantFresh {
+				require.Equal(t, now, renewed.StartTime)
+				require.Equal(t, now+valuePackageWeekSeconds, renewed.EndTime)
+				require.Equal(t, week.TotalAmount, renewed.AmountTotal)
+				require.Zero(t, renewed.AmountUsed)
+				require.EqualValues(t, 2, renewed.QuotaEpoch)
+				require.EqualValues(t, 1, resetCount)
+				var reset ValuePackageQuotaReset
+				require.NoError(t, DB.Where("user_subscription_id = ? AND source = ?", existing.Id, ValuePackageQuotaResetSourcePackageRenewal).First(&reset).Error)
+				require.Equal(t, tt.wantResetNote, reset.Note)
+				return
+			}
+			require.Equal(t, existing.StartTime, renewed.StartTime)
+			require.Equal(t, existing.EndTime+valuePackageWeekSeconds, renewed.EndTime)
+			require.Equal(t, existing.AmountTotal, renewed.AmountTotal)
+			require.Equal(t, existing.AmountUsed, renewed.AmountUsed)
+			require.Equal(t, existing.QuotaEpoch, renewed.QuotaEpoch)
+			require.Zero(t, resetCount)
+		})
+	}
+}
+
+func TestRedeemExhaustedValuePackageStartsFreshCycleAndReenablesPreference(t *testing.T) {
+	setupValuePackageTestDB(t)
+	require.NoError(t, DB.AutoMigrate(&Redemption{}))
+	user := createValuePackageUser(t, 3950, UserGroupVIP)
+	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	week.TotalAmount = 900
+	week.Limit5hAmount = 500
+	require.NoError(t, DB.Save(&week).Error)
+
+	now := common.GetTimestamp()
+	existing := createActiveValuePackageSub(t, user.Id, week, now-valuePackageDaySeconds, now+3*valuePackageDaySeconds)
+	require.NoError(t, DB.Model(&UserSubscription{}).Where("id = ?", existing.Id).Updates(map[string]interface{}{
+		"amount_used":     int64(100),
+		"quota_epoch":     int64(4),
+		"last_reset_time": existing.StartTime,
+	}).Error)
+	require.NoError(t, RecordValuePackageUsage(&ValuePackageUsageRecord{
+		UserId:             user.Id,
+		UserSubscriptionId: existing.Id,
+		PlanId:             week.Id,
+		PackageType:        week.PackageType,
+		ModelGroup:         week.ModelGroup,
+		RequestId:          "exhausted-redemption",
+		Quota:              week.Limit5hAmount,
+		QuotaEpoch:         4,
+		CreatedAt:          now - 60,
+	}))
+	require.NoError(t, DB.Create(&UserValuePackagePreference{
+		UserId:                   user.Id,
+		Enabled:                  false,
+		ActiveUserSubscriptionId: existing.Id,
+		CreatedAt:                now - 100,
+		UpdatedAt:                now,
+	}).Error)
+	code := Redemption{
+		UserId:      1,
+		Key:         "EXHAUSTEDWEEKCARD",
+		Name:        "exhausted week card",
+		Type:        RedemptionTypeSubscription,
+		PlanId:      week.Id,
+		Status:      common.RedemptionCodeStatusEnabled,
+		CreatedTime: now,
+	}
+	require.NoError(t, DB.Create(&code).Error)
+
+	var result *RedeemResult
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var redeemErr error
+		result, redeemErr = RedeemWithTx(tx, code.Key, user.Id)
+		return redeemErr
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, week.Id, result.PlanId)
+	var renewed UserSubscription
+	require.NoError(t, DB.First(&renewed, existing.Id).Error)
+	require.Equal(t, week.TotalAmount, renewed.AmountTotal)
+	require.Zero(t, renewed.AmountUsed)
+	require.EqualValues(t, 5, renewed.QuotaEpoch)
+	require.Equal(t, renewed.StartTime+valuePackageWeekSeconds, renewed.EndTime)
+	require.Equal(t, renewed.StartTime, renewed.LastResetTime)
+	require.Zero(t, renewed.NextResetTime)
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.True(t, pref.Enabled)
+	require.Equal(t, renewed.Id, pref.ActiveUserSubscriptionId)
+	var redeemed Redemption
+	require.NoError(t, DB.First(&redeemed, code.Id).Error)
+	require.Equal(t, common.RedemptionCodeStatusUsed, redeemed.Status)
+	require.Equal(t, user.Id, redeemed.UsedUserId)
+	var reset ValuePackageQuotaReset
+	require.NoError(t, DB.Where("user_subscription_id = ? AND source = ?", renewed.Id, ValuePackageQuotaResetSourcePackageRenewal).First(&reset).Error)
+	require.Equal(t, renewed.StartTime, reset.ResetAt)
+}
+
 func TestCreateValuePackageSubscriptionFromPlanTxSnapshotsTotalForNewPurchase(t *testing.T) {
 	setupValuePackageTestDB(t)
 	user := createValuePackageUser(t, 3008, UserGroupTiyan)
@@ -676,6 +892,49 @@ func TestExtendValuePackageSubscriptionTxSaveFailureRollsBackTimeAndTotal(t *tes
 	require.Equal(t, existing.EndTime, reloaded.EndTime)
 	require.Equal(t, existing.AmountTotal, reloaded.AmountTotal)
 	require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+}
+
+func TestExtendExhaustedValuePackageSaveFailureRollsBackFreshCycleAndReset(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3951, UserGroupVIP)
+	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
+	week.TotalAmount = 900
+	require.NoError(t, DB.Save(&week).Error)
+	now := common.GetTimestamp()
+	existing := createActiveValuePackageSub(t, user.Id, week, now-100, now+3*valuePackageDaySeconds)
+	existing.AmountUsed = existing.AmountTotal
+	existing.QuotaEpoch = 4
+	existing.LastResetTime = existing.StartTime
+	require.NoError(t, DB.Save(&existing).Error)
+
+	forcedErr := errors.New("forced exhausted value package renewal save failure")
+	callbackName := "test:force_exhausted_value_package_renewal_save_failure:" + strings.ReplaceAll(t.Name(), "/", "_")
+	require.NoError(t, DB.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Name == "UserSubscription" {
+			tx.AddError(forcedErr)
+		}
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, DB.Callback().Update().Remove(callbackName))
+	})
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		_, extendErr := extendValuePackageSubscriptionTx(tx, existing.Id, &week, now, now+valuePackageWeekSeconds)
+		return extendErr
+	})
+
+	require.ErrorIs(t, err, forcedErr)
+	var reloaded UserSubscription
+	require.NoError(t, DB.First(&reloaded, existing.Id).Error)
+	require.Equal(t, existing.StartTime, reloaded.StartTime)
+	require.Equal(t, existing.EndTime, reloaded.EndTime)
+	require.Equal(t, existing.AmountTotal, reloaded.AmountTotal)
+	require.Equal(t, existing.AmountUsed, reloaded.AmountUsed)
+	require.Equal(t, existing.QuotaEpoch, reloaded.QuotaEpoch)
+	require.Equal(t, existing.LastResetTime, reloaded.LastResetTime)
+	var resetCount int64
+	require.NoError(t, DB.Model(&ValuePackageQuotaReset{}).Where("user_subscription_id = ? AND source = ?", existing.Id, ValuePackageQuotaResetSourcePackageRenewal).Count(&resetCount).Error)
+	require.Zero(t, resetCount)
 }
 
 func TestExtendValuePackageSubscriptionTxRejectsInactiveSubscription(t *testing.T) {
