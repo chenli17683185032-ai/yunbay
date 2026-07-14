@@ -53,6 +53,20 @@ def account(account_id, account_type="oauth", group_id=6):
 
 
 class MonitorTests(unittest.TestCase):
+    def resource_stats(self, cpu=20.0, memory=30.0, disk=40.0):
+        gib = 1024 ** 3
+        return monitor.ResourceStats(
+            cpu_percent=cpu,
+            cpu_count=2,
+            load_1m=0.4,
+            memory_used_bytes=2 * gib,
+            memory_total_bytes=8 * gib,
+            memory_used_percent=memory,
+            disk_used_bytes=20 * gib,
+            disk_total_bytes=100 * gib,
+            disk_used_percent=disk,
+        )
+
     def test_collect_utilizations_recurses(self):
         payload = {"five_hour": {"utilization": 79}, "models": [{"utilization": 81}]}
         self.assertEqual([79.0, 81.0], monitor.collect_utilizations(payload))
@@ -203,6 +217,37 @@ class MonitorTests(unittest.TestCase):
             path = Path(directory) / "state.json"
             monitor.save_state(path, {"alerting": True})
             self.assertEqual({"alerting": True}, monitor.load_state(path))
+
+    def test_normal_resource_report_has_half_hour_subject_and_stats(self):
+        report = monitor.Report(checked_at=NOW, resources=self.resource_stats())
+        subject, text, _ = monitor.render_report(report, periodic=True)
+        self.assertEqual("[定时] 云贝服务器资源与 Sub2API 状态", subject)
+        self.assertIn("CPU：20.0%", text)
+        self.assertIn("内存：2.00 / 8.00 GiB", text)
+        self.assertIn("根分区：20.00 / 100.00 GiB", text)
+
+    def test_resource_thresholds_feed_existing_alert_channel(self):
+        report = monitor.Report(checked_at=NOW)
+        monitor.apply_resource_thresholds(
+            report, self.resource_stats(cpu=81.0, memory=86.0, disk=90.0)
+        )
+        self.assertTrue(report.alerting)
+        self.assertTrue(any("CPU 使用率达到 81.0%" in item for item in report.problems))
+        self.assertTrue(any("内存使用率达到 86.0%" in item for item in report.problems))
+        self.assertTrue(any("根分区使用率达到 90.0%" in item for item in report.problems))
+
+    def test_normal_report_is_due_every_thirty_minutes(self):
+        self.assertTrue(monitor.normal_report_due({}, NOW, 1800))
+        self.assertFalse(
+            monitor.normal_report_due(
+                {"last_normal_email_at": "2026-07-11T23:45:01+00:00"}, NOW, 1800
+            )
+        )
+        self.assertTrue(
+            monitor.normal_report_due(
+                {"last_normal_email_at": "2026-07-11T23:30:00+00:00"}, NOW, 1800
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -1247,3 +1247,9 @@ new-api 使用的 Key 已从 `自建池` 切换到 `自建安全使用`。该组
 ## 2026-07-13 本机一键状态组件入库
 
 可双击的 macOS 组件已加入 `deploy/sub2api-monitor/check-sub2api-status.command`，示例配置为 `deploy/sub2api-monitor/sub2api-status.env.example`。仓库组件不包含生产 IP、私钥路径或凭据；本机实际连接参数仅保存在 `$HOME/Desktop/云贝/服务器相关/sub2api-status.env`（权限 `0600`），桌面组件 `$HOME/Desktop/云贝/查看Sub2API账号状态.command` 权限为 `0700`。组件只执行远程 `--dry-run`，不会发邮件或修改监控状态，远端检查超过 180 秒会自动终止。
+
+## 2026-07-14 服务器资源半小时正常报告
+
+Sub2API 监控继续由原有 cron 每 5 分钟采样，不增加新服务或第二套定时任务。每轮同时读取 Linux `/proc/stat`、`/proc/meminfo` 和根分区使用量，邮件及终端报告新增 CPU、1 分钟负载、内存和根分区统计。CPU 使用率达到 `80%`、内存或根分区使用率达到 `85%` 时进入原有异常通道，约每 5 分钟提醒；全部正常时通过状态文件的 `last_normal_email_at` 限流，每 `1800` 秒发送一封主题为 `[定时] 云贝服务器资源与 Sub2API 状态` 的正常报告。只有 SMTP 发送成功后才推进正常邮件时间戳，失败会在下一轮重试；恢复邮件也计作本轮正常状态报告，避免 5 分钟后重复发送。
+
+生产配置 `/home/deploy/.config/yunbay/sub2api-monitor.env` 已增加 `NORMAL_REPORT_INTERVAL_SECONDS=1800`，权限保持 `0600`。部署前脚本备份为 `/opt/new-api/monitor/sub2api-pool-monitor/sub2api_pool_monitor.py.bak-resource-heartbeat-20260714-144639`。本地 18 项测试、`py_compile`、Shell 语法和 diff 检查通过；生产 dry-run 显示资源正常，首封正常邮件已成功发送。随后立即重复正式运行未发第二封邮件且时间戳不变；14:50 cron 自动推进 `checked_at`、资源统计进入日志、正常邮件时间戳仍不变，证明采样、发送和抗重复闭环有效。部署未重启任何容器。

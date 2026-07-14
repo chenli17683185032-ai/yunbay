@@ -8,6 +8,7 @@ import fcntl
 import html
 import json
 import os
+import shutil
 import smtplib
 import ssl
 import subprocess
@@ -34,6 +35,11 @@ RELAY_SLOW_STREAK_REQUIRED = 3
 REGULAR_ACCOUNT_ESTIMATED_USD = 15.0
 LONG_WINDOW_ACCOUNT_ESTIMATED_USD = 200.0
 LONG_WINDOW_MINUTES_THRESHOLD = 10080
+DEFAULT_NORMAL_REPORT_INTERVAL_SECONDS = 30 * 60
+RESOURCE_CPU_ALERT_PERCENT = 80.0
+RESOURCE_MEMORY_ALERT_PERCENT = 85.0
+RESOURCE_DISK_ALERT_PERCENT = 85.0
+RESOURCE_CPU_SAMPLE_SECONDS = 1.0
 
 
 class MonitorError(RuntimeError):
@@ -42,6 +48,72 @@ class MonitorError(RuntimeError):
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True)
+class ResourceStats:
+    cpu_percent: float
+    cpu_count: int
+    load_1m: float
+    memory_used_bytes: int
+    memory_total_bytes: int
+    memory_used_percent: float
+    disk_used_bytes: int
+    disk_total_bytes: int
+    disk_used_percent: float
+
+
+def read_cpu_snapshot(path: Path = Path("/proc/stat")) -> tuple[int, int]:
+    try:
+        fields = path.read_text().splitlines()[0].split()
+        values = [int(value) for value in fields[1:]]
+    except (OSError, IndexError, ValueError) as exc:
+        raise MonitorError("无法读取服务器 CPU 统计") from exc
+    if not fields or fields[0] != "cpu" or len(values) < 4:
+        raise MonitorError("服务器 CPU 统计格式异常")
+    idle = values[3] + (values[4] if len(values) > 4 else 0)
+    return sum(values), idle
+
+
+def collect_resource_stats(sample_seconds: float = RESOURCE_CPU_SAMPLE_SECONDS) -> ResourceStats:
+    first_total, first_idle = read_cpu_snapshot()
+    time.sleep(sample_seconds)
+    second_total, second_idle = read_cpu_snapshot()
+    total_delta = second_total - first_total
+    idle_delta = second_idle - first_idle
+    if total_delta <= 0:
+        raise MonitorError("服务器 CPU 统计没有有效增量")
+    cpu_percent = max(0.0, min(100.0, (total_delta - idle_delta) / total_delta * 100))
+
+    try:
+        memory = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, value = line.split(":", 1)
+            memory[key] = int(value.strip().split()[0]) * 1024
+        memory_total = memory["MemTotal"]
+        memory_available = memory["MemAvailable"]
+    except (OSError, KeyError, ValueError) as exc:
+        raise MonitorError("无法读取服务器内存统计") from exc
+    memory_used = max(0, memory_total - memory_available)
+    memory_percent = memory_used / memory_total * 100
+
+    disk = shutil.disk_usage("/")
+    disk_percent = disk.used / disk.total * 100
+    try:
+        load_1m = os.getloadavg()[0]
+    except OSError:
+        load_1m = 0.0
+    return ResourceStats(
+        cpu_percent=cpu_percent,
+        cpu_count=os.cpu_count() or 1,
+        load_1m=load_1m,
+        memory_used_bytes=memory_used,
+        memory_total_bytes=memory_total,
+        memory_used_percent=memory_percent,
+        disk_used_bytes=disk.used,
+        disk_total_bytes=disk.total,
+        disk_used_percent=disk_percent,
+    )
 
 
 
@@ -221,6 +293,7 @@ class Report:
     own_max_remaining: float | None = None
     quota_checks_ok: int = 0
     quota_checks_failed: int = 0
+    resources: ResourceStats | None = None
     account_details: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     emergencies: list[str] = field(default_factory=list)
@@ -228,6 +301,37 @@ class Report:
     @property
     def alerting(self) -> bool:
         return bool(self.problems or self.emergencies)
+
+
+def apply_resource_thresholds(report: Report, resources: ResourceStats) -> None:
+    report.resources = resources
+    if resources.cpu_percent >= RESOURCE_CPU_ALERT_PERCENT:
+        report.problems.append(
+            f"服务器 CPU 使用率达到 {resources.cpu_percent:.1f}%"
+        )
+    if resources.memory_used_percent >= RESOURCE_MEMORY_ALERT_PERCENT:
+        report.problems.append(
+            f"服务器内存使用率达到 {resources.memory_used_percent:.1f}%"
+        )
+    if resources.disk_used_percent >= RESOURCE_DISK_ALERT_PERCENT:
+        report.problems.append(
+            f"服务器根分区使用率达到 {resources.disk_used_percent:.1f}%"
+        )
+
+
+def normal_report_due(
+    previous: dict[str, Any], now: datetime, interval_seconds: int
+) -> bool:
+    raw = previous.get("last_normal_email_at")
+    if not raw:
+        return True
+    try:
+        last_sent = datetime.fromisoformat(str(raw))
+        if last_sent.tzinfo is None:
+            last_sent = last_sent.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return True
+    return (now - last_sent.astimezone(timezone.utc)).total_seconds() >= interval_seconds
 
 
 def evaluate(
@@ -426,7 +530,9 @@ def smtp_options() -> dict[str, str]:
     return options
 
 
-def render_report(report: Report, recovered: bool = False) -> tuple[str, str, str]:
+def render_report(
+    report: Report, recovered: bool = False, periodic: bool = False
+) -> tuple[str, str, str]:
     if recovered:
         subject = "[恢复] 云贝 Sub2API 号池监控已恢复正常"
         heading = "Sub2API 号池监控已恢复正常"
@@ -436,6 +542,9 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
     elif report.problems:
         subject = "[告警] 云贝 Sub2API 号池需要处理"
         heading = "Sub2API 分组监控告警"
+    elif periodic:
+        subject = "[定时] 云贝服务器资源与 Sub2API 状态"
+        heading = "服务器资源与 Sub2API 半小时状态报告"
     else:
         subject = "[正常] 云贝 Sub2API 分组监控"
         heading = "Sub2API 分组监控正常"
@@ -472,6 +581,21 @@ def render_report(report: Report, recovered: bool = False) -> tuple[str, str, st
             else f"{report.relay_available} 个可用中转站，暂无平均延迟"
         )
         lines.append(f"- 中转站总体状态：{relay_summary}")
+    if report.resources is not None:
+        resources = report.resources
+        gib = 1024 ** 3
+        lines.extend(
+            [
+                "- 服务器资源：正常" if not any(
+                    problem.startswith("服务器") for problem in report.problems
+                ) else "- 服务器资源：需要处理",
+                "",
+                "服务器资源统计：",
+                f"- CPU：{resources.cpu_percent:.1f}%（1 分钟负载 {resources.load_1m:.2f}，{resources.cpu_count} 核）",
+                f"- 内存：{resources.memory_used_bytes / gib:.2f} / {resources.memory_total_bytes / gib:.2f} GiB（{resources.memory_used_percent:.1f}%）",
+                f"- 根分区：{resources.disk_used_bytes / gib:.2f} / {resources.disk_total_bytes / gib:.2f} GiB（{resources.disk_used_percent:.1f}%）",
+            ]
+        )
     lines.append("")
     if report.mode == SELF_HOSTED_GROUP:
         lines.append(
@@ -628,6 +752,16 @@ def main() -> int:
     parser.add_argument("--lock-file", default=os.environ.get("MONITOR_LOCK_FILE", "./monitor.lock"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--test-email", action="store_true")
+    parser.add_argument(
+        "--normal-report-interval",
+        type=int,
+        default=int(
+            os.environ.get(
+                "NORMAL_REPORT_INTERVAL_SECONDS",
+                DEFAULT_NORMAL_REPORT_INTERVAL_SECONDS,
+            )
+        ),
+    )
     args = parser.parse_args()
     if not args.recipient:
         print("ALERT_EMAIL_TO/--recipient is required", file=sys.stderr)
@@ -659,16 +793,34 @@ def main() -> int:
         except Exception as exc:  # keep the scheduled job alive and alert on unexpected failures
             report = Report(checked_at=utc_now(), emergencies=[str(exc)])
 
+        try:
+            apply_resource_thresholds(report, collect_resource_stats())
+        except Exception as exc:
+            report.emergencies.append(f"服务器资源采集失败：{exc}")
+
         relay_slow_streak = apply_relay_latency_stability(
             report, int(previous.get("relay_slow_streak", 0) or 0)
         )
 
         recovered = previous.get("alerting") is True and not report.alerting
-        subject, text, body = render_report(report, recovered=recovered)
+        periodic = (
+            not report.alerting
+            and not recovered
+            and normal_report_due(
+                previous, report.checked_at, args.normal_report_interval
+            )
+        )
+        subject, text, body = render_report(
+            report, recovered=recovered, periodic=periodic
+        )
         print(text)
-        if not args.dry_run and (report.alerting or recovered):
+        should_send = report.alerting or recovered or periodic
+        sent_normal_at = previous.get("last_normal_email_at")
+        if not args.dry_run and should_send:
             send_email(args.recipient, subject, text, body)
             print("email sent")
+            if not report.alerting:
+                sent_normal_at = report.checked_at.isoformat()
         if not args.dry_run:
             save_state(
                 state_path,
@@ -678,6 +830,7 @@ def main() -> int:
                     "problems": report.problems,
                     "emergencies": report.emergencies,
                     "relay_slow_streak": relay_slow_streak,
+                    "last_normal_email_at": sent_normal_at,
                 },
             )
         return 1 if report.alerting else 0
