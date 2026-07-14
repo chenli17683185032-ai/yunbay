@@ -1221,3 +1221,49 @@ qr=called / qr=not_called
 ```
 
 不要因为支付宝页显示 `10.30` 就把正式商品配置改成 `money=10.3`；那会污染充值金额、VIP 判断和推荐奖励基数。
+
+## 2026-07-15 API Key“无限狂暴不中断”钱包回退上线
+
+- GitHub 代码基线：`main@1de11a839ffd76e7904c27ec57b27a154f8d7e3d`，普通 fast-forward 推送，未使用 force。CI run `29367152184` 全部通过：<https://github.com/chenli17683185032-ai/yunbay/actions/runs/29367152184>。
+- 功能：API Keys 页新增默认开启的“无限狂暴不中断”开关。请求优先使用超值套餐和套餐倍率；套餐总额度、5 小时或 7 天窗口耗尽后整单切到账户余额，并恢复用户真实 VIP 倍率；套餐额度恢复后的新请求自动切回套餐。历史用户和新用户的 `NULL` 偏好均按开启解释，用户可显式关闭以保留原 `403` 行为。
+- 帮助入口：保留闪电图标，另加圆形问号。桌面悬停/键盘聚焦使用 Tooltip，移动端点击使用 Popover，完整说明为“优先使用特惠套餐额度；用尽后按 VIP 等级倍率使用账户余额，套餐额度恢复后自动切回。”
+- 验证：完整主项目 Go 包、根包、default typecheck、6 项定向前端测试、定向 ESLint、default/classic 生产构建、六语 i18n 同步及 `git diff --check` 通过。仓库全量 ESLint 仍有 114 个既有错误，均不在本次改动文件；本次两个新增前端文件定向检查为 0 错误。
+- 响应式 QA：本地 `1440x900`、`390x844`、`320x720` 均通过；移动端点击问号后 Popover 可见且不会改变开关值，320 宽度下 `scrollWidth=viewportWidth=320`。生产登录态 DOM 复核显示开关 `aria-checked=true`、两个响应式帮助按钮中仅一个可见、完整 `aria-label` 存在且页面无横向溢出。
+
+发布使用 27 文件精确、非删除式 rsync，生产文件组合 SHA-256 为：
+
+```text
+ebd9c84b50b037f182b462f7aa6e92f10e049417983234a56b45616b551cb5ed
+```
+
+生产命令：
+
+```bash
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml build new-api
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate new-api
+```
+
+- 第一次切换保护脚本因 GNU `timeout` 不能直接调用 shell 函数而在 `compose up` 前退出，容器未替换，旧服务持续 `healthy/200`。修正为直接调用 `docker compose` 后再次执行，正式切换 12 秒完成。
+- 新镜像：`sha256:59375b4c3e6d846ab21f7f8fe0c5b51bac1f0cff5526590218b01aede5abe945`，保留审计标签 `yunbay-new-api:release-1de11a83`。
+- 数据库迁移：PostgreSQL 新列 `user_value_package_preferences.wallet_fallback_enabled` 为 `boolean`、可空、默认 `NULL`。上线后 39 条历史偏好记录均为 `NULL`，与业务层“默认开启”语义一致。
+- 服务验证：`yunbay-new-api` 为新镜像且 `healthy`；公网 `/`、`/keys`、`/api/status` 均为 HTTP 200；未登录 `PUT /api/value-packages/wallet-fallback` 返回 401，证明路由已注册；启动日志无相关 `panic`、`fatal` 或迁移错误。
+- 重启范围：仅 `yunbay-new-api`。Caddy、PostgreSQL、Redis、Sub2API、LDXP worker 的启动时间均未变化。
+
+回滚点：
+
+```text
+source backup: /opt/new-api/backups/value-package-wallet-fallback-20260714T205310Z
+old image id: sha256:2ad45f2669d6e7f56625da2dfd02ac2b21bf61f10e28145cfdbd8addd879d68c
+old image tag: yunbay-new-api:rollback-wallet-fallback-20260714T205310Z
+```
+
+镜像回滚只重建 `new-api`：
+
+```bash
+cd /opt/new-api/app
+docker tag yunbay-new-api:rollback-wallet-fallback-20260714T205310Z yunbay-new-api:prod
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate new-api
+```
+
+源码回滚从备份目录的 `source/` 恢复原有 24 个文件，并删除部署前不存在的 3 个新增文件。新增数据库列可保留，旧代码会忽略该可空列；禁止为回滚而删除历史偏好数据或重启 PostgreSQL、Caddy、Redis、Sub2API。
