@@ -1222,6 +1222,23 @@ qr=called / qr=not_called
 
 不要因为支付宝页显示 `10.30` 就把正式商品配置改成 `money=10.3`；那会污染充值金额、VIP 判断和推荐奖励基数。
 
+## 2026-07-14 New API/Sub2API 并发 429 紧急处置
+
+- 现象：`new-api` 渠道 35（`http://sub2api:8080`）测试及调用返回 `429 Concurrency limit exceeded for user`；同一时段后台重复触发多个模型测试，每个测试约 30 秒。
+- 证据：New API 日志出现 `value package concurrency denied: subscription=17 limit=2`；这表示云贝订阅套餐自身并发上限已占满，不是 OpenAI 官方固定限制。代码/后台目前只允许套餐并发配置为 1 或 2；Sub2API 账号自身另有独立并发限制。
+- 处置：仅对 `yunbay-new-api` 执行 `docker compose ... up -d --force-recreate new-api`，清理卡住的本地中转请求；未重启 Sub2API、PostgreSQL 或 Redis，未修改计费/套餐数据。
+- 验证：重建后 `yunbay-new-api` healthy；本机 `GET http://127.0.0.1:3000/api/status` 返回 `200`；容器内访问 `http://sub2api:8080/health` 返回 `{"status":"ok"}`。
+- 后续：停止连续点击“测试渠道”；如需提高并发，应在后台调整对应套餐/订阅策略并同步评估 Sub2API 上游账号并发额度，不能把套餐上限误认为官方额度。
+
+## 2026-07-14 Sub2API 用户并发改为无限
+
+- 生产事实：`/opt/new-api/sub2api/data/config.yaml` 原为 `default.user_concurrency: 5`；Sub2API 数据库 `users.id=1`（渠道 API Key ID=1 所属用户）原 `concurrency=5`。
+- 依据：Sub2API 运行代码将 `concurrency <= 0` 定义为不限制，并发 429 文案正来自该用户槽位检查。
+- 处置：将生产数据库 `users.id=1.concurrency` 更新为 `0`；将默认配置 `default.user_concurrency` 更新为 `0`；原配置备份保存在服务器 `/opt/new-api/sub2api/data/config.yaml.bak-unlimited-<timestamp>`。
+- 重启范围：仅 `yunbay-sub2api`，未重启 PostgreSQL/Redis；容器镜像 digest 未变，重启后 healthy。
+- 验证：容器内 `GET http://127.0.0.1:8080/health` 返回 `{"status":"ok"}`。
+- 备注：这只解除 Sub2API 用户级并发；New API 自身的 value-package `subscription=17 limit=2` 仍是独立限制，若继续出现 `value package concurrency denied`，需单独处理订阅权益映射/并发策略。
+
 ## 2026-07-15 API Key“无限狂暴不中断”钱包回退上线
 
 - GitHub 代码基线：`main@1de11a839ffd76e7904c27ec57b27a154f8d7e3d`，普通 fast-forward 推送，未使用 force。CI run `29367152184` 全部通过：<https://github.com/chenli17683185032-ai/yunbay/actions/runs/29367152184>。
