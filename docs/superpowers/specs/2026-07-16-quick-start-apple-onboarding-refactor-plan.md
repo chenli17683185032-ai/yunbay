@@ -182,7 +182,7 @@
 | 导入确认、退出动画、控制台接续 | 已完成 | 导入需人工确认，退出有一次性超时保险，完成弹层排在强制公告之后 |
 | 六语言与自动化验证 | 已完成 | 六语言缺失/未翻译均为 0，49 个快速启动测试、typecheck、涉及文件 ESLint 与生产构建通过 |
 | 浏览器桌面/移动端验收 | 已完成 | 1280x720 与 390x844 全流程、公告队列、复查/直接开始和减少动态效果均通过 |
-| GitHub main、生产部署与运维记录 | 进行中 | 待提交 main、生产健康验证并追加现有运维记录 |
+| GitHub main、生产部署与运维记录 | 已完成 | `6e8ec939` 已推送 main；生产 11 秒切换并通过健康验证；按用户最新指示保持当前版本，未执行回滚 |
 
 ## 9. 实施验证记录
 
@@ -211,3 +211,13 @@
 - `prefers-reduced-motion: reduce`：短淡出分支可进入控制台，测试后已恢复浏览器媒体偏好与视口。
 - 退出动画运行时采样：约 300ms 时 `clip-path` 为波浪多边形、`filter` 约 `blur(1.59px)`、`opacity` 约 `0.936`，并存在轻微下沉缩放；减少动态效果约 70ms 时只改变 `opacity`，`clip-path`、`filter`、`transform` 均保持不变。
 - 浏览器控制台在本轮闭环期间无新增应用错误；记录中仅保留 mock 修正前的旧错误和主动模拟减少动态效果产生的 Motion 提示。
+
+### GitHub 与生产结果
+
+- 发布提交：`6e8ec9399c10a2b844336c3b38c7cae9c4c2a098`，已推送并与 GitHub `main` 同步。
+- 精确同步文件数：21；本地与生产组合 SHA-256 均为 `599de8b839ca93001228875766b197a430b2b00a656e0b548a4c7fa19cf343f0`。
+- 生产备份：`/opt/new-api/backups/quick-start-onboarding-20260715T182454Z-6e8ec939`；旧镜像回滚标签：`yunbay-new-api:rollback-quick-start-20260715T182454Z`。
+- 新镜像：`sha256:3e38bc6f23e74bd51b19a326dbd63aa84b5efc7b2a029378bbab0220da5e403f`；发布标签：`yunbay-new-api:release-6e8ec939`。
+- 仅使用 `--no-deps --force-recreate --no-build` 替换 `yunbay-new-api`，11 秒恢复 healthy；其它生产容器均未重启。
+- 上线后内网状态探针 10/10 为 200，公网 `/`、`/quick-start`、`/api/status` 均为 200；公开入口为 `/static/js/index.3fdb276058.js`，实际 bundle 包含目标模型与 CC Switch v3.17.0 资产标记，不含错误 thinking 后缀。
+- 发布完成后收到“先不要上线”的补充指示时，已先执行只读回滚预检查；在任何源码恢复、镜像重标记、Compose 重建或服务重启发生前，用户进一步明确要求不要撤回、不要打断服务器运行。因此取消回滚，生产继续运行上述新镜像，预检查没有造成服务中断。

@@ -1311,3 +1311,77 @@ old worker image: sha256:a22102ce7afdff6f1973818f7cf7b866fa918b7ed771a9f882bd3be
 ```
 
 回滚时先停止正式 worker，恢复备份中的 `docker-compose.prod.yml.before` 和 `source/` 文件，将两个 rollback 标签重新标记为 `:prod`，再按旧 compose 重建 `new-api` 与 `ldxp-browser-worker`。确认旧 worker 已恢复独立 `yunbay-network` 后，才删除 `yunbay-ldxp-browser-proxy`；禁止重启或回滚 PostgreSQL、Redis、Caddy、Sub2API，也不要删除任何充值、入账或兑换历史数据。
+
+## 2026-07-16 快速启动苹果式五页引导上线
+
+本轮重构普通用户快速启动，保留原有暗色点云与非线性视觉，把用途、模型、软件下载、账户准备和安装导入收敛为五页闭环。运维记录只包含可公开复现的代码、构建、部署和健康事实，不记录 SSH 私钥、生产环境变量、API Key、cookie 或用户会话。
+
+### 发布内容
+
+- 发布提交：`6e8ec9399c10a2b844336c3b38c7cae9c4c2a098`（`feat: rebuild quick start onboarding`），已推送 GitHub `main`。
+- 默认模型精确使用 `gpt-5.6-sol`；思考强度作为独立目标使用 `xhigh`，界面显示“极高思考”，不存在 `gpt-5.6-sol-thinking` 拼接模型。
+- 软件入口只保留 CC Switch 官方 Mac Universal 与 Windows 64 位安装包，版本为 `v3.17.0`，点击后直接打开 GitHub release 资产。
+- 充值/兑换和 API Key 合并为同一页；可恢复最新启用的 `yunbay-quick-start-*` Key，完整 Key 不写入浏览器存储。
+- 安装确认、协议导入、人工确认和控制台完成摘要组成可复查闭环；完成摘要排在强制公告之后。
+- 整页退出使用 Web Animations API 驱动三段波浪裁切、模糊、透明度和位移关键帧；减少动态效果时只执行短淡出。
+- 官方 CC Switch `v3.17.0` 的 Codex 深链仍把 `model_reasoning_effort` 固定为 `high`，公开 importer 不能保留内嵌 `xhigh`。本站因此只可靠导入模型、endpoint 和 Key，并要求用户在 CC Switch 中确认“极高”，没有添加无效伪参数。
+
+### 验证
+
+- `bun test src/features/quick-start/*.test.ts`：49 pass / 0 fail。
+- `bun run typecheck`、本轮文件 ESLint、Prettier、六语 i18n 同步、`bun run build` 和 `git diff --check` 均通过。
+- en、zh、fr、ja、ru、vi 的 missing、extras、untranslated 均为 0；`CC Switch` 在六语中均保留产品专名。
+- 浏览器 1280x720 与 390x844 完整走通五页、Key 恢复、导入、强制公告、复查和直接开始；移动端无横向溢出或底栏覆盖。
+- 约 300ms 的退出动画运行态采样显示波浪 `clip-path`、约 `blur(1.59px)`、`opacity 0.936` 和轻微下沉缩放；减少动态效果约 70ms 时只有 `opacity` 变化。
+- 仓库全量既有边界：lint 仍有 113 errors / 6 warnings，format 检查仍有 61 个既有未格式化文件，版权全量检查仍有 17 个既有文件待更新；本轮文件不在这些失败项中。
+
+### 部署与回滚
+
+生产 `/opt/new-api/app` 仍不是可信 Git checkout。本轮使用提交差异生成 21 文件精确列表，先备份再执行非删除式 rsync；本地与生产文件组合 SHA-256 均为：
+
+```text
+599de8b839ca93001228875766b197a430b2b00a656e0b548a4c7fa19cf343f0
+```
+
+回滚点：
+
+```text
+source backup: /opt/new-api/backups/quick-start-onboarding-20260715T182454Z-6e8ec939
+old image: sha256:d2f26c1e92ea718f49dc2242a580f64df49e0fa1b28fd15287a1fcc06fd6372f
+rollback tag: yunbay-new-api:rollback-quick-start-20260715T182454Z
+```
+
+新版本：
+
+```text
+image: sha256:3e38bc6f23e74bd51b19a326dbd63aa84b5efc7b2a029378bbab0220da5e403f
+release tag: yunbay-new-api:release-6e8ec939
+public entry: /static/js/index.3fdb276058.js
+```
+
+构建期间旧容器持续服务。正式切换只执行 `new-api`：
+
+```bash
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate --no-build new-api
+```
+
+切换 11 秒恢复 healthy，容器 restart count 为 0。Caddy、PostgreSQL、Redis、Sub2API、LDXP worker 和 LDXP proxy 的启动时间均未变化。
+
+上线后验证：内网 `/api/status` 10/10 为 HTTP 200；公网 `/`、`/quick-start`、`/api/status` 均为 HTTP 200；入口 bundle 包含 `gpt-5.6-sol`、CC Switch 官方仓库、`v3.17.0`、`macOS.dmg` 和 `Windows.msi` 标记，且不含 `gpt-5.6-sol-thinking`。新容器启动日志没有 panic 或 fatal；观察到的错误均为上线后真实请求收到的既有上游模型不支持或额度拒绝，与本次启动和快速引导无关。
+
+需要回滚时，从备份 `source/` 恢复 `existing-files.txt` 中的文件，删除 `new-files.txt` 中登记的 4 个本轮新增文件，再把回滚镜像重新标记为 `yunbay-new-api:prod`，最后只重建 `new-api`：
+
+```bash
+cd /opt/new-api/app
+docker tag yunbay-new-api:rollback-quick-start-20260715T182454Z yunbay-new-api:prod
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate --no-build new-api
+```
+
+禁止为本轮前端回滚而重启或修改 PostgreSQL、Redis、Caddy、Sub2API、LDXP worker 或 LDXP proxy。
+
+### 发布后指示与实际状态
+
+发布完成后，用户补充要求“先不要上线”。为恢复发布前状态，运维侧只完成了当前容器、回滚镜像和备份目录的只读预检查，尚未执行源码恢复、文件删除、镜像重标记、Compose 重建或任何服务重启。随后用户明确要求不要撤回，以免打断服务器运行，因此立即取消回滚。
+
+取消时生产仍运行新镜像 `sha256:3e38bc6f23e74bd51b19a326dbd63aa84b5efc7b2a029378bbab0220da5e403f`，Compose 服务状态为 `running / healthy`。本次取消回滚没有造成额外服务切换或中断；后续除非用户再次明确要求，不执行该回滚方案。
