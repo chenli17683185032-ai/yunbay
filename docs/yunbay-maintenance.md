@@ -1267,3 +1267,30 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ```
 
 源码回滚从备份目录的 `source/` 恢复原有 24 个文件，并删除部署前不存在的 3 个新增文件。新增数据库列可保留，旧代码会忽略该可空列；禁止为回滚而删除历史偏好数据或重启 PostgreSQL、Caddy、Redis、Sub2API。
+
+## 2026-07-15 LDXP 中国大陆出口付款链路上线
+
+- 事故现象：生产 VPS 直连 `pay.ldxp.cn` 会间歇进入阿里云 ESA 验证页，导致当天多笔 LDXP 会话在生成订单号和付款二维码前失败。香港 IPLC、香港家宽、Firefox 核心和香港 SOCKS5 均不能稳定消除验证；生产同款 Chromium 通过中国大陆出口后恢复正常。
+- 最终方案：worker 新增可选 `LDXP_BROWSER_PROXY_SERVER`，只把 Playwright Chromium 流量交给代理；后端 claim/callback、IMAP、`new-api` 及其他容器仍走原网络。生产 worker 与 `yunbay-ldxp-browser-proxy` 共享网络命名空间，通过回环 `socks5://127.0.0.1:7891` 访问 Mihomo，宿主机和应用 bridge 均未发布代理端口。
+- 代理控制：Mihomo 固定为 `metacubex/mihomo:v1.19.28`，采用 `rule` 模式和精确节点过滤，只选择已验证的 `影音无限流量a1全球回国1`。provider 每小时刷新，连通性检查每 10 分钟执行；订阅 URL、token 和节点凭据只保存在服务器 `/opt/new-api/secrets/ldxp-browser-proxy.yaml`，权限 `0600`，未进入仓库、`prod.env`、结果 JSON 或日志。
+- 代码收敛：撤回当天“worker 失败后返回 LDXP 直购链接”的 Go、React、类型和六语翻译改动，不再让用户自行填写联系方式和兑换卡密。保留 ESA DOM 快速识别，代理失效时 worker 会立即报告 `waf_challenge`，避免等待完整页面超时。
+- GitHub 经验核对：实现前参考了 Playwright 项目中“代理 URL 启动前严格解析、拒绝混合凭据”的做法，以及 MetaCubeX 官方 `proxy-provider` 文档中的 `path`、`interval`、`filter` 和 `health-check` 约束。第一次生产形态测试发现 Mihomo `global` 模式未显式选择时会落到 `DIRECT`，因此结果作废并修正为 `rule + MATCH,LDXP-MAINLAND` 后重新验证。
+- 代码验证：worker `bun run check` 全部 79/79 通过；非法协议、缺少端口、URL 内嵌凭据、路径污染、ESA 快速失败均有测试。candidate Docker 镜像构建成功，共享 proxy 网络访问 `http://new-api:3000/api/status` 返回 200。
+- 出口验证：正式 compose、正式 worker 镜像和正式 sidecar 连续 3/3 打开商品页，三次出口均为 `116.31.164.40`（中国广东汕头电信），HTTP 200、标题“10 刀兑换券 - 链动小铺”、ESA 元素数为 0、联系方式输入框数为 1 且可见。全程未输入联系方式、未点击购买、未创建订单。结构化结果为 `outputs/recharge-incident-20260715/proxy-tests/ntpizza-production-provider-results.json`，SHA-256 `4ca24d8bbc1abcf36022338fb9614b13fd4e8a4253fc26994178d0a01168b78c`。
+- 业务闭环：使用现有运维账号创建 10 元未付款会话 `id=217`，状态按 `created -> worker_claimed -> qr_ready` 演进，27 秒生成 3750 字节二维码且存在真实 worker 订单号。随即调用正式取消接口，最终数据库为 `canceled`、`topup_id=0`，没有付款或入账。
+- 发布：部署文件组合 SHA-256 为 `43bc5b57e1edaeffb0d5b4c23561512263d1a0cca8127edf97696ab813789faa`，私有 compose SHA-256 为 `c3fe78af2017fd688099495b04f0cf5cf7209e428067b6faee3e738f25933c1f`。worker 切换 6 秒，`new-api` 切换 17 秒；Caddy、PostgreSQL、Redis、Sub2API 均未重启。
+- 当前镜像：`yunbay-new-api:prod` 为 `sha256:d2f26c1e92ea718f49dc2242a580f64df49e0fa1b28fd15287a1fcc06fd6372f`；`yunbay-ldxp-browser-worker:prod` 为 `sha256:3fb25c17ad59d2938ce35139b889cf5c1cb1837bc8751eb891378929e622073c`；Mihomo 为 `sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312`。
+- 最终状态：`new-api running/healthy`、proxy `running/healthy`、worker `running`，三者 restart 均为 0；容器内状态探针 10/10 为 200，部署后 worker 无新 `waf_challenge` 或流程错误，线上前端不再包含直购临时文案。candidate 容器、临时镜像、订阅副本和本机敏感临时文件均已删除。
+- 容量风险：订阅在上线时标注剩余 `5 GB`、到期 `2026-07-17`。同一 token 续费后 provider 会自动刷新；到期或流量耗尽前必须续费。当前端口健康只证明 Mihomo 正在监听，业务健康仍应以 LDXP 联系方式输入框和 `waf_challenge` 日志为准。
+
+回滚点：
+
+```text
+backup: /opt/new-api/backups/ldxp-mainland-proxy-20260715T131333Z
+new-api rollback tag: yunbay-new-api:rollback-ldxp-mainland-proxy-20260715T131333Z
+worker rollback tag: yunbay-ldxp-browser-worker:rollback-ldxp-mainland-proxy-20260715T131333Z
+old new-api image: sha256:53a8348b7a5bdc9aee76788c7e2be11cda0f966e2b06be5c04b9b6446925569d
+old worker image: sha256:a22102ce7afdff6f1973818f7cf7b866fa918b7ed771a9f882bd3beddfaea091
+```
+
+回滚时先停止正式 worker，恢复备份中的 `docker-compose.prod.yml.before` 和 `source/` 文件，将两个 rollback 标签重新标记为 `:prod`，再按旧 compose 重建 `new-api` 与 `ldxp-browser-worker`。确认旧 worker 已恢复独立 `yunbay-network` 后，才删除 `yunbay-ldxp-browser-proxy`；禁止重启或回滚 PostgreSQL、Redis、Caddy、Sub2API，也不要删除任何充值、入账或兑换历史数据。
