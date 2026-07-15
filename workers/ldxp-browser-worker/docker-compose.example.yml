@@ -12,6 +12,7 @@ services:
       QQ_IMAP_PORT: "993"
       QQ_IMAP_USER: 10256345@qq.com
       LDXP_CONTACT_EMAIL: support@yunbay.xyz
+      LDXP_BROWSER_PROXY_SERVER: ${LDXP_BROWSER_PROXY_SERVER:-}
       LDXP_BROWSER_SNAPSHOT_DIR: /app/snapshots
     secrets:
       - ldxp_worker_token

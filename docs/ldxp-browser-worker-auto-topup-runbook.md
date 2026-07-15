@@ -1,6 +1,6 @@
 # LDXP browser worker auto top-up runbook
 
-Last updated: 2026-06-30
+Last updated: 2026-07-15
 
 This runbook records the public, non-secret operational contract for the Yunbay LDXP browser-worker top-up flow. Do not put SSH keys, worker tokens, mailbox passwords, cookies, payment credentials, or full private server coordinates in this file.
 
@@ -33,6 +33,20 @@ Operational notes:
 - If production sets `LDXP_TOPUP_PRODUCTS_JSON`, that environment value overrides the code default. Back up `/opt/new-api/secrets/prod.env` before changing it and do not print secrets while editing.
 - Frontend amount options must stay aligned with the backend allowed tiers: `10, 20, 30, 50, 100, 500`.
 - LinkPay/card-network service fees are paid by the user on the cashier page. For example, the 10 CNY product may show `10.30` on Alipay, but Yunbay business money, `ldxp_topup_sessions.money`, `top_ups.money`, VIP accumulation, and affiliate commission base remain `10.00`.
+
+## Payment-browser proxy
+
+`LDXP_BROWSER_PROXY_SERVER` optionally routes only Playwright Chromium traffic through a proxy. Backend polling, worker callbacks, IMAP, the main API, and other containers continue using their normal network path.
+
+Production constraints:
+
+- Accepted URLs are `socks5://`, `http://`, or `https://` with an explicit host and port. Credentials, paths, query strings, and fragments are rejected at worker startup so proxy secrets cannot be embedded in process arguments or error logs.
+- The production sidecar should share its network namespace with the worker and listen only on loopback. The current production value is `socks5://127.0.0.1:7891`; no proxy port should be published on the host or application bridge network.
+- Keep the Mihomo subscription URL, token, selected node credentials, and provider cache under `/opt/new-api/secrets` or `/opt/new-api/data` with restrictive permissions. Never add them to this repository, `prod.env`, screenshots, or shared logs.
+- Select only an exit that has passed both checks: zero ESA challenge elements and a visible LDXP contact input. HTTP 200 by itself is not sufficient because the ESA challenge also returns 200.
+- If ESA returns after an exit change or subscription expiry, the worker classifies the page as `waf_challenge` immediately instead of consuming the full product-load timeout.
+
+Before recreating the production worker, validate the private Mihomo configuration and run three consecutive read-only product-page probes through the candidate exit. After recreation, verify the proxy exit, `new-api` health, worker claim polling, and the absence of new `waf_challenge` failures.
 
 ## Affiliate commission behavior for paid top-ups
 
