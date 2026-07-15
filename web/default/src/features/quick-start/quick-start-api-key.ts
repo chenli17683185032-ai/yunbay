@@ -24,6 +24,8 @@ type ApiResult = {
   message?: string
 }
 
+export const QUICK_START_API_KEY_NAME_PREFIX = 'yunbay-quick-start-'
+
 export type QuickStartApiKeyResult = {
   name: string
   fullKey: string
@@ -48,6 +50,26 @@ type QuickStartApiKeyDependencies = {
   copyToClipboard: (text: string) => Promise<boolean>
 }
 
+type QuickStartApiKeyCandidate = {
+  id: number
+  name: string
+  created_time?: number
+  status?: number
+}
+
+type RecoverQuickStartApiKeyDependencies = {
+  searchApiKeys: (params: {
+    keyword: string
+    p: number
+    size: number
+  }) => Promise<
+    ApiResult & {
+      data?: { items: QuickStartApiKeyCandidate[] }
+    }
+  >
+  fetchTokenKey: (id: number) => Promise<ApiResult & { data?: { key: string } }>
+}
+
 export function getQuickStartApiKeyGroup(options: {
   defaultUseAutoGroup: boolean
   availableGroups: string[]
@@ -67,11 +89,59 @@ export function getQuickStartApiKeyGroup(options: {
   }
 }
 
+function normalizeFullApiKey(key: string): string {
+  const normalized = key.trim()
+  if (!normalized) return ''
+  return normalized.startsWith('sk-') ? normalized : `sk-${normalized}`
+}
+
+function getQuickStartKeyTimestamp(
+  candidate: QuickStartApiKeyCandidate
+): number {
+  const suffix = candidate.name.slice(QUICK_START_API_KEY_NAME_PREFIX.length)
+  const timestampFromName = Number(suffix)
+  if (Number.isFinite(timestampFromName)) return timestampFromName
+  return Number(candidate.created_time || 0)
+}
+
+export async function recoverLatestQuickStartApiKey(
+  dependencies: RecoverQuickStartApiKeyDependencies
+): Promise<QuickStartApiKeyResult | null> {
+  const searched = await dependencies.searchApiKeys({
+    keyword: QUICK_START_API_KEY_NAME_PREFIX,
+    p: 1,
+    size: 50,
+  })
+  if (!searched.success) return null
+
+  const candidate = (searched.data?.items ?? [])
+    .filter(
+      (item) =>
+        item.name.startsWith(QUICK_START_API_KEY_NAME_PREFIX) &&
+        item.status === 1
+    )
+    .sort(
+      (left, right) =>
+        getQuickStartKeyTimestamp(right) - getQuickStartKeyTimestamp(left)
+    )[0]
+  if (!candidate) return null
+
+  const revealed = await dependencies.fetchTokenKey(candidate.id)
+  const fullKey = normalizeFullApiKey(revealed.data?.key || '')
+  if (!revealed.success || !fullKey) return null
+
+  return {
+    name: candidate.name,
+    fullKey,
+    copied: false,
+  }
+}
+
 export async function generateAndCopyQuickStartApiKey(
   dependencies: QuickStartApiKeyDependencies
 ): Promise<QuickStartApiKeyResult> {
   const now = dependencies.now || Date.now
-  const name = `yunbay-quick-start-${now()}`
+  const name = `${QUICK_START_API_KEY_NAME_PREFIX}${now()}`
   const group = dependencies.defaultGroup.trim()
   if (!group) {
     throw new Error('No available group for the new API key')
@@ -110,8 +180,8 @@ export async function generateAndCopyQuickStartApiKey(
     throw new Error(revealed.message || 'Failed to reveal the new API key')
   }
 
-  const fullKey = key.startsWith('sk-') ? key : `sk-${key}`
-  let copied = false
+  const fullKey = normalizeFullApiKey(key)
+  let copied: boolean
 
   try {
     copied = await dependencies.copyToClipboard(fullKey)

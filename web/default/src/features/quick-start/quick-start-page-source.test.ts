@@ -28,26 +28,45 @@ const ccSwitchSource = readFileSync(
   resolve(currentDir, 'quick-start-cc-switch.ts'),
   'utf8'
 )
+const dataSource = readFileSync(
+  resolve(currentDir, 'quick-start-data.ts'),
+  'utf8'
+)
+const completionDialogSource = readFileSync(
+  resolve(currentDir, 'quick-start-completion-dialog.tsx'),
+  'utf8'
+)
+const appHeaderSource = readFileSync(
+  resolve(currentDir, '../../components/layout/components/app-header.tsx'),
+  'utf8'
+)
 
-test('quick start bottom controls make the primary CTA more prominent without changing flow logic', () => {
-  assert.match(pageSource, /shadow-\[0_18px_60px_rgba\(255,255,255,0\.22\)\]/)
+test('quick start controls are centered, enlarged, and keep one primary action', () => {
+  assert.match(pageSource, /left-1\/2/)
+  assert.match(pageSource, /-translate-x-1\/2/)
+  assert.match(pageSource, /h-12 min-w-12/)
+  assert.match(pageSource, /h-12 min-w-32/)
+  assert.match(pageSource, /shadow-\[0_16px_48px_rgba\(255,255,255,0\.2\)\]/)
   assert.match(pageSource, /ring-1 ring-white\/30/)
   assert.match(pageSource, /font-black/)
   assert.match(pageSource, /hover:-translate-y-0\.5/)
-  assert.match(pageSource, /const nextLabel = props\.api\.canGoNext \? t\('Next'\) : t\('Enter dashboard'\)/)
-  assert.match(
-    pageSource,
-    /const handleNext = props\.api\.canGoNext\s*\?\s*props\.api\.goNext\s*:\s*props\.onEnterDashboard/
-  )
+  assert.match(pageSource, /isFinalPage\s*\?\s*props\.onEnterDashboard/)
+  assert.equal(pageSource.match(/t\('Enter dashboard'\)/g)?.length, 1)
 })
 
-test('quick start secondary dashboard CTA remains visible but lower priority', () => {
-  assert.match(pageSource, /border-white\/18/)
-  assert.match(pageSource, /bg-white\/\[0\.07\]/)
-  assert.match(pageSource, /text-white\/82/)
-  assert.match(pageSource, /hover:bg-white\/\[0\.11\]/)
-  assert.match(pageSource, /onClick=\{props\.onEnterDashboard\}/)
-  assert.match(pageSource, /onClick=\{handleNext\}/)
+test('quick start keeps DOM content above the WebGL background in filtered app shells', () => {
+  assert.match(pageSource, /fixed inset-0 h-\[100dvh\] w-full overflow-hidden/)
+  assert.match(
+    pageSource,
+    /PointCloudMorphCanvas[\s\S]*className='absolute z-0'/
+  )
+  assert.match(pageSource, /LandingSnapFrame[\s\S]*className='relative z-10'/)
+})
+
+test('quick start keeps skip as a low-priority text action', () => {
+  assert.match(pageSource, /Set up later and enter dashboard/)
+  assert.match(pageSource, /text-white\/44/)
+  assert.doesNotMatch(pageSource, /secondary dashboard CTA/)
 })
 
 test('quick start keeps generated API key when clipboard copy fails', () => {
@@ -60,24 +79,61 @@ test('quick start keeps generated API key when clipboard copy fails', () => {
   assert.match(pageSource, /setGeneratedApiKeyCopied\(result\.copied\)/)
 })
 
+test('quick start uses the corrected model slug and keeps reasoning as a separate setting', () => {
+  assert.match(dataSource, /QUICK_START_PREFERRED_MODEL = 'gpt-5\.6-sol'/)
+  assert.match(dataSource, /QUICK_START_REASONING_EFFORT = 'xhigh'/)
+  assert.doesNotMatch(dataSource, /gpt-5\.6-sol-thinking/)
+  assert.match(pageSource, /QUICK_START_REASONING_EFFORT_LABEL_KEY/)
+})
 
-test('quick start fifth page keeps Codex downloads, software guide, and CC Switch one-click import', () => {
-  assert.match(pageSource, /Codex one-click launcher/)
-  assert.match(pageSource, /Codex one-click setup/)
-  assert.match(pageSource, /Download the Codex one-click launcher and connect it to your Yunbay API key\./)
-  assert.match(pageSource, /card\.guideTitleKey/)
-  assert.match(pageSource, /card\.guideDescriptionKey/)
-  assert.match(pageSource, /card\.guideStepKeys/)
+test('quick start software and account steps match the new five-page flow', () => {
+  assert.match(pageSource, /Download CC Switch/)
+  assert.match(pageSource, /codexDownloadCards\.map/)
+  assert.match(
+    dataSource,
+    /CC-Switch-\$\{CC_SWITCH_RELEASE_VERSION\}-macOS\.dmg/
+  )
+  assert.match(
+    dataSource,
+    /CC-Switch-\$\{CC_SWITCH_RELEASE_VERSION\}-Windows\.msi/
+  )
+  assert.match(pageSource, /Add balance or redeem a code/)
+  assert.match(pageSource, /Create your API key/)
+  assert.match(pageSource, /recoverLatestQuickStartApiKey/)
+  assert.match(pageSource, /queryClient\.setQueryData/)
+  assert.match(pageSource, /const balanceReady = currentBalance > 0/)
+})
+
+test('quick start final page confirms prerequisites before one-click import and guarded exit', () => {
+  assert.match(pageSource, /Have you finished installing CC Switch\?/)
   assert.match(pageSource, /Import current setup to CC Switch/)
-  assert.match(pageSource, /Launch CC Switch from your browser with this API and model prefilled\./)
   assert.match(pageSource, /buildQuickStartCCSwitchImportURL/)
   assert.match(pageSource, /handleImportToCCSwitch/)
-  assert.match(pageSource, /QuickStartConfigPill/)
   assert.match(pageSource, /Configured API/)
   assert.match(pageSource, /Configured model/)
   assert.match(pageSource, /Generated API key/)
+  assert.match(pageSource, /importConfirmed/)
+  assert.match(pageSource, /navigationCompletedRef/)
+  assert.match(pageSource, /importAttempted\s*\?\s*importStatusRef\.current/)
+  assert.match(pageSource, /target\?\.scrollIntoView/)
+  assert.match(pageSource, /exitSurface\.animate\(keyframes/)
+  assert.match(pageSource, /fill: 'forwards'/)
+  assert.match(pageSource, /scroll-mb-4 sm:scroll-mb-\[8rem\]/)
+  assert.match(
+    pageSource,
+    /h-\[calc\(100dvh-7\.75rem-env\(safe-area-inset-bottom\)\)\][\s\S]*sm:h-full/
+  )
+  assert.match(pageSource, /window\.setTimeout/)
+  assert.match(pageSource, /clipPath/)
   assert.match(ccSwitchSource, /ccswitch:\/\/v1\/import/)
-  assert.match(pageSource, /CC Switch/)
-  assert.doesNotMatch(pageSource, /Official Codex/)
-  assert.doesNotMatch(pageSource, /Download Codex/)
+})
+
+test('console completion guide waits for required announcements and offers both outcomes', () => {
+  assert.match(appHeaderSource, /quickStartSession\.completionPromptPending/)
+  assert.match(appHeaderSource, /!notifications\.loading/)
+  assert.match(appHeaderSource, /!notifications\.requiredDialogOpen/)
+  assert.match(appHeaderSource, /to: '\/quick-start', hash: 'readiness'/)
+  assert.match(completionDialogSource, /I need to review it again/)
+  assert.match(completionDialogSource, /No, start now/)
+  assert.match(completionDialogSource, /showCloseButton=\{false\}/)
 })

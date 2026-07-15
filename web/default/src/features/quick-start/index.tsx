@@ -18,16 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   useCallback,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ElementType,
   type ReactNode,
 } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { AnimatePresence, motion } from 'motion/react'
 import {
+  Apple,
+  ArrowLeft,
   ArrowRight,
   ArrowUpRight,
+  Check,
   CheckCircle2,
   Code2,
   Copy,
@@ -37,9 +42,11 @@ import {
   Loader2,
   MessageSquare,
   MonitorCog,
+  RotateCcw,
   Sparkles,
   WalletCards,
 } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
@@ -68,6 +75,7 @@ import { redeemTopupCode } from '@/features/wallet/api'
 import {
   generateAndCopyQuickStartApiKey,
   getQuickStartApiKeyGroup,
+  recoverLatestQuickStartApiKey,
 } from './quick-start-api-key'
 import {
   buildQuickStartCCSwitchImportURL,
@@ -79,24 +87,36 @@ import {
 import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
+  QUICK_START_REASONING_EFFORT_LABEL_KEY,
   codexDownloadCards,
-  codexSetupOptions,
   getDefaultQuickStartModelName,
   getModelRateLabels,
   getModelTags,
+  getQuickStartModelDisplayName,
+  isPreferredQuickStartModel,
   nextStepGuideKeys,
+  orderQuickStartModels,
   purposeOptions,
   quickStartFullscreenPages,
   type CodexDownloadCard,
-  type CodexSetupOptionId,
   type QuickStartEnterDashboardPath,
+  type QuickStartFullscreenPageId,
   type QuickStartModelLike,
   type QuickStartPurposeId,
 } from './quick-start-data'
 import { redeemQuickStartCode } from './quick-start-redemption'
+import {
+  readQuickStartSession,
+  writeQuickStartSession,
+  type QuickStartPlatform,
+} from './quick-start-session'
 
 const QUICK_START_API_KEY_COPY_FAILED_MESSAGE =
   'API key was generated but clipboard copy failed. You can copy it again or continue setup.'
+const QUICK_START_API_KEY_QUERY_KEY = [
+  'quick-start',
+  'existing-api-key',
+] as const
 
 const PURPOSE_ICONS = {
   'web-coding': Code2,
@@ -120,30 +140,58 @@ function extractQuickStartServerAddress(
     (status?.data as Record<string, unknown> | undefined)?.server_address ??
     (status?.data as Record<string, unknown> | undefined)?.serverAddress
 
-  if (typeof fromStatus === 'string' && fromStatus) {
-    return fromStatus
-  }
-
+  if (typeof fromStatus === 'string' && fromStatus) return fromStatus
   return typeof window === 'undefined' ? '' : window.location.origin
+}
+
+function navigateToQuickStartPage(pageId: QuickStartFullscreenPageId): void {
+  window.dispatchEvent(
+    new CustomEvent('quick-start:navigate', {
+      detail: { hash: `#${pageId}` },
+    })
+  )
 }
 
 export function QuickStart() {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const reducedMotion = useReducedMotion()
   const user = useAuthStore((state) => state.auth.user)
   const setUser = useAuthStore((state) => state.auth.setUser)
+  const [initialSession] = useState(readQuickStartSession)
   const [selectedPurposeId, setSelectedPurposeId] =
     useState<QuickStartPurposeId>(QUICK_START_DEFAULT_PURPOSE)
-  const [selectedModelName, setSelectedModelName] = useState<string>('')
+  const [selectedModelName, setSelectedModelName] = useState(
+    initialSession.modelName
+  )
+  const [downloadedPlatform, setDownloadedPlatform] =
+    useState<QuickStartPlatform | null>(initialSession.platform)
+  const [softwareConfirmed, setSoftwareConfirmed] = useState(
+    initialSession.softwareConfirmed
+  )
+  const [importAttempted, setImportAttempted] = useState(
+    initialSession.importAttempted
+  )
+  const [importConfirmed, setImportConfirmed] = useState(
+    initialSession.importConfirmed
+  )
   const [generatedApiKey, setGeneratedApiKey] = useState('')
-  const [generatedApiKeyCopied, setGeneratedApiKeyCopied] =
-    useState<boolean | null>(null)
+  const [generatedApiKeyCopied, setGeneratedApiKeyCopied] = useState<
+    boolean | null
+  >(null)
   const [isGeneratingApiKey, setIsGeneratingApiKey] = useState(false)
   const [redemptionCode, setRedemptionCode] = useState('')
   const [isRedeemingCode, setIsRedeemingCode] = useState(false)
-  const [expandedCodexSetupId, setExpandedCodexSetupId] =
-    useState<CodexSetupOptionId | null>(null)
   const [morphSignal, setMorphSignal] = useState(0)
+  const [isExiting, setIsExiting] = useState(false)
+  const exitTimerRef = useRef<number | null>(null)
+  const exitAnimationRef = useRef<Animation | null>(null)
+  const exitSurfaceRef = useRef<HTMLElement>(null)
+  const exitStartedRef = useRef(false)
+  const navigationCompletedRef = useRef(false)
+  const importPanelRef = useRef<HTMLDivElement>(null)
+  const importStatusRef = useRef<HTMLDivElement>(null)
   const { status } = useStatus()
   const pricing = usePricingData()
 
@@ -151,10 +199,6 @@ export function QuickStart() {
     () => pricing.models as QuickStartModelLike[],
     [pricing.models]
   )
-
-  const selectedPurpose =
-    purposeOptions.find((item) => item.id === selectedPurposeId) ||
-    purposeOptions[0]
   const defaultModelName = useMemo(
     () => getDefaultQuickStartModelName(modelList),
     [modelList]
@@ -167,12 +211,41 @@ export function QuickStart() {
   const selectedModel =
     modelList.find((model) => model.model_name === activeModelName) ||
     modelList[0]
-  const macosDownloadCard = codexDownloadCards.find(
-    (card) => card.platform === 'macOS'
+  const orderedModelList = useMemo(
+    () => orderQuickStartModels(modelList, activeModelName),
+    [activeModelName, modelList]
   )
-  const windowsDownloadCard = codexDownloadCards.find(
-    (card) => card.platform === 'Windows'
+  const selectedModelDisplayName = selectedModel
+    ? t(getQuickStartModelDisplayName(selectedModel.model_name))
+    : t('No model selected')
+  const selectedModelIsPreferred = selectedModel
+    ? isPreferredQuickStartModel(selectedModel.model_name)
+    : false
+  const selectedModelSummary = selectedModelIsPreferred
+    ? `${selectedModelDisplayName} · ${t(QUICK_START_REASONING_EFFORT_LABEL_KEY)}`
+    : selectedModelDisplayName
+  const preferredModelAvailable = modelList.some((model) =>
+    isPreferredQuickStartModel(model.model_name)
   )
+  let modelPageDescription = t(
+    'Your recommended model is pinned first with its live rate.'
+  )
+  if (!pricing.isLoading && modelList.length > 0 && !preferredModelAvailable) {
+    modelPageDescription = t(
+      'GPT 5.6 Sol is unavailable. The first enabled model is selected instead.'
+    )
+  }
+
+  const existingApiKeyQuery = useQuery({
+    queryKey: QUICK_START_API_KEY_QUERY_KEY,
+    queryFn: () =>
+      recoverLatestQuickStartApiKey({ searchApiKeys, fetchTokenKey }),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  })
+  const effectiveApiKey =
+    generatedApiKey || existingApiKeyQuery.data?.fullKey || ''
+
   const quickStartServerAddress = normalizeQuickStartServerAddress(
     extractQuickStartServerAddress(status as Record<string, unknown> | null)
   )
@@ -180,17 +253,176 @@ export function QuickStart() {
     quickStartServerAddress
   )
   const quickStartCCSwitchState = getQuickStartCCSwitchImportState({
-    apiKey: generatedApiKey,
+    apiKey: effectiveApiKey,
     model: selectedModel?.model_name || '',
   })
-  const quickStartCCSwitchDisabledReason =
-    quickStartCCSwitchState.reason === 'api-key'
-      ? t('Generate an API key first')
-      : quickStartCCSwitchState.reason === 'model'
-        ? t('No model selected')
-        : null
   const currentBalance = Math.max(Number(user?.quota) || 0, 0)
+  const balanceReady = currentBalance > 0
   const faceState = getFaceStateForQuota(user?.quota)
+  const apiKeyActionPending =
+    isGeneratingApiKey || existingApiKeyQuery.isLoading
+  let apiKeyStepDescription = t(
+    'Create one reusable key and copy it automatically.'
+  )
+  if (effectiveApiKey) {
+    if (generatedApiKeyCopied === false) {
+      apiKeyStepDescription = t(QUICK_START_API_KEY_COPY_FAILED_MESSAGE)
+    } else if (existingApiKeyQuery.data) {
+      apiKeyStepDescription = t(
+        'Your existing quick-start key was restored securely.'
+      )
+    } else {
+      apiKeyStepDescription = t('Already copied to clipboard')
+    }
+  }
+
+  let apiKeyActionLabel = t('Generate API key')
+  let ApiKeyActionIcon = KeyRound
+  if (effectiveApiKey) {
+    apiKeyActionLabel = t('Copy API key')
+    ApiKeyActionIcon = Copy
+  }
+  if (apiKeyActionPending) {
+    apiKeyActionLabel = t('Preparing...')
+    ApiKeyActionIcon = Loader2
+  }
+
+  let importStatusTitle = t('Did CC Switch open?')
+  let importStatusDescription = t(
+    'Confirm only after CC Switch shows the imported Yunbay provider.'
+  )
+  if (selectedModelIsPreferred) {
+    importStatusDescription = t(
+      'Confirm after CC Switch shows the Yunbay provider and Extreme reasoning.'
+    )
+  }
+  if (importConfirmed) {
+    importStatusTitle = t('Import confirmed')
+    importStatusDescription = t(
+      'Everything is ready. Enter the console when you are ready.'
+    )
+  }
+
+  const navigateToPath = useCallback(
+    (path: QuickStartNavigationPath) => {
+      if (path === '/wallet') {
+        navigate({ to: '/wallet' })
+        return
+      }
+      navigate({
+        to: '/dashboard/$section',
+        params: { section: 'overview' },
+      })
+    },
+    [navigate]
+  )
+
+  const completeDashboardNavigation = useCallback(() => {
+    if (navigationCompletedRef.current) return
+    navigationCompletedRef.current = true
+    navigateToPath(QUICK_START_ENTER_DASHBOARD_PATH)
+  }, [navigateToPath])
+
+  useEffect(
+    () => () => {
+      if (exitTimerRef.current !== null) {
+        window.clearTimeout(exitTimerRef.current)
+      }
+      exitAnimationRef.current?.cancel()
+    },
+    []
+  )
+
+  useEffect(() => {
+    if (!softwareConfirmed || !effectiveApiKey) return
+    const frame = window.requestAnimationFrame(() => {
+      const target = importAttempted
+        ? importStatusRef.current
+        : importPanelRef.current
+      target?.scrollIntoView({
+        behavior: reducedMotion ? 'auto' : 'smooth',
+        block: 'nearest',
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    effectiveApiKey,
+    importAttempted,
+    importConfirmed,
+    reducedMotion,
+    softwareConfirmed,
+  ])
+
+  const beginDashboardExit = useCallback(
+    (showCompletionPrompt: boolean) => {
+      if (exitStartedRef.current) return
+      exitStartedRef.current = true
+      writeQuickStartSession({
+        modelName: selectedModel?.model_name || '',
+        platform: downloadedPlatform,
+        softwareConfirmed,
+        importAttempted,
+        importConfirmed,
+        completionPromptPending: showCompletionPrompt,
+      })
+      setMorphSignal((signal) => signal + 1)
+      setIsExiting(true)
+
+      const exitSurface = exitSurfaceRef.current
+      if (exitSurface?.animate) {
+        const keyframes: Keyframe[] = reducedMotion
+          ? [{ opacity: 1 }, { opacity: 0 }]
+          : [
+              {
+                clipPath: 'polygon(0 0, 100% 0, 100% 100%, 0 100%)',
+                filter: 'blur(0px)',
+                opacity: 1,
+                transform: 'translate3d(0, 0, 0) scale(1)',
+                offset: 0,
+                easing: 'cubic-bezier(0.32, 0, 0.24, 1)',
+              },
+              {
+                clipPath:
+                  'polygon(0 0, 100% 0, 100% 72%, 88% 77%, 74% 69%, 60% 75%, 46% 68%, 31% 76%, 16% 70%, 0 75%)',
+                filter: 'blur(2px)',
+                opacity: 0.92,
+                transform: 'translate3d(0, 5px, 0) scale(0.995)',
+                offset: 0.58,
+                easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+              },
+              {
+                clipPath: 'polygon(0 0, 100% 0, 100% 0, 0 0)',
+                filter: 'blur(14px)',
+                opacity: 0,
+                transform: 'translate3d(0, 24px, 0) scale(0.975)',
+                offset: 1,
+              },
+            ]
+        const animation = exitSurface.animate(keyframes, {
+          duration: reducedMotion ? 180 : 1050,
+          easing: reducedMotion ? 'ease-out' : 'linear',
+          fill: 'forwards',
+        })
+        exitAnimationRef.current = animation
+        animation.onfinish = completeDashboardNavigation
+      }
+
+      exitTimerRef.current = window.setTimeout(
+        completeDashboardNavigation,
+        reducedMotion ? 240 : 1250
+      )
+    },
+    [
+      completeDashboardNavigation,
+      downloadedPlatform,
+      importAttempted,
+      importConfirmed,
+      reducedMotion,
+      selectedModel?.model_name,
+      softwareConfirmed,
+    ]
+  )
+
   const handlePageChange = useCallback(
     (activeIndex: number, previousIndex: number) => {
       setMorphSignal((signal) =>
@@ -200,37 +432,34 @@ export function QuickStart() {
     []
   )
 
-  const navigateToPath = useCallback(
-    (path: QuickStartNavigationPath) => {
-      switch (path) {
-        case QUICK_START_ENTER_DASHBOARD_PATH:
-          navigate({
-            to: '/dashboard/$section',
-            params: { section: 'overview' },
-          })
-          return
-        case '/wallet':
-          navigate({ to: '/wallet' })
-          return
-      }
-    },
-    [navigate]
-  )
+  const handleSelectModel = (modelName: string) => {
+    setSelectedModelName(modelName)
+    setImportAttempted(false)
+    setImportConfirmed(false)
+    writeQuickStartSession({
+      modelName,
+      importAttempted: false,
+      importConfirmed: false,
+    })
+  }
 
-  const enterDashboard = useCallback(() => {
-    navigateToPath(QUICK_START_ENTER_DASHBOARD_PATH)
-  }, [navigateToPath])
-
-  const QuickStartControlsComponent = useCallback(
-    (api: LandingSnapControlsApi) => (
-      <QuickStartControls api={api} onEnterDashboard={enterDashboard} />
-    ),
-    [enterDashboard]
-  )
+  const handleDownload = (card: CodexDownloadCard) => {
+    setDownloadedPlatform(card.platform)
+    setSoftwareConfirmed(false)
+    setImportAttempted(false)
+    setImportConfirmed(false)
+    writeQuickStartSession({
+      modelName: selectedModel?.model_name || '',
+      platform: card.platform,
+      softwareConfirmed: false,
+      importAttempted: false,
+      importConfirmed: false,
+    })
+  }
 
   const handleGenerateApiKey = async () => {
-    if (generatedApiKey) {
-      const copied = await copyToClipboard(generatedApiKey)
+    if (effectiveApiKey) {
+      const copied = await copyToClipboard(effectiveApiKey)
       setGeneratedApiKeyCopied(copied)
       if (copied) {
         toast.success(t('Already copied to clipboard'))
@@ -268,6 +497,7 @@ export function QuickStart() {
       })
       setGeneratedApiKey(result.fullKey)
       setGeneratedApiKeyCopied(result.copied)
+      queryClient.setQueryData(QUICK_START_API_KEY_QUERY_KEY, result)
       if (result.copied) {
         toast.success(t('Already copied to clipboard'))
       } else {
@@ -293,12 +523,9 @@ export function QuickStart() {
           }),
         refreshSelf: async () => {
           const response = await getSelf()
-          if (response?.success && response.data) {
-            setUser(response.data)
-          }
+          if (response?.success && response.data) setUser(response.data)
         },
       })
-
       toast.success(
         t('Redemption successful! Added: {{quota}}', {
           quota: formatQuota(result.quotaAdded),
@@ -314,508 +541,654 @@ export function QuickStart() {
     }
   }
 
-  const handleDownload = (card: CodexDownloadCard) => {
-    window.location.assign(card.downloadHref)
+  const handleConfirmSoftware = () => {
+    setSoftwareConfirmed(true)
+    writeQuickStartSession({
+      modelName: selectedModel?.model_name || '',
+      platform: downloadedPlatform,
+      softwareConfirmed: true,
+    })
+  }
+
+  const handleReturnToSoftware = () => {
+    setSoftwareConfirmed(false)
+    setImportAttempted(false)
+    setImportConfirmed(false)
+    writeQuickStartSession({
+      softwareConfirmed: false,
+      importAttempted: false,
+      importConfirmed: false,
+    })
+    navigateToQuickStartPage('software')
   }
 
   const handleImportToCCSwitch = () => {
     if (!quickStartCCSwitchState.canImport || !selectedModel?.model_name) {
-      toast.warning(quickStartCCSwitchDisabledReason || t('No model selected'))
+      const message =
+        quickStartCCSwitchState.reason === 'api-key'
+          ? t('Generate an API key first')
+          : t('No model selected')
+      toast.warning(message)
       return
     }
 
+    setImportAttempted(true)
+    setImportConfirmed(false)
+    writeQuickStartSession({
+      modelName: selectedModel.model_name,
+      platform: downloadedPlatform,
+      softwareConfirmed,
+      importAttempted: true,
+      importConfirmed: false,
+    })
     const url = buildQuickStartCCSwitchImportURL({
       serverAddress: quickStartServerAddress,
-      apiKey: generatedApiKey,
+      apiKey: effectiveApiKey,
       model: selectedModel.model_name,
     })
-
     window.open(url, '_blank')
     toast.message(t('Trying to open CC Switch'))
   }
 
-  const handleToggleCodexSetup = (optionId: CodexSetupOptionId) => {
-    setExpandedCodexSetupId((current) =>
-      current === optionId ? null : optionId
-    )
+  const handleConfirmImport = () => {
+    setImportConfirmed(true)
+    writeQuickStartSession({
+      modelName: selectedModel?.model_name || '',
+      platform: downloadedPlatform,
+      softwareConfirmed,
+      importAttempted: true,
+      importConfirmed: true,
+    })
+    toast.success(t('CC Switch setup confirmed'))
   }
 
-  const handleCopyCommand = async (command: string) => {
-    const copied = await copyToClipboard(command)
-    if (copied) {
-      toast.success(t('Terminal command copied'))
-    } else {
-      toast.error(t('Failed to copy terminal command'))
-    }
-  }
+  const QuickStartControlsComponent = useCallback(
+    (api: LandingSnapControlsApi) => (
+      <QuickStartControls
+        api={api}
+        canFinish={importConfirmed}
+        disabled={isExiting}
+        onEnterDashboard={() => beginDashboardExit(true)}
+        onSkip={() => beginDashboardExit(false)}
+      />
+    ),
+    [beginDashboardExit, importConfirmed, isExiting]
+  )
 
   return (
-    <main
-      className={`${COSMIC_AUTH_SURFACE_CLASS} relative h-[100dvh] overflow-hidden`}
-    >
-      <PointCloudMorphCanvas
-        faceState={faceState}
-        variant='background'
-        pointSize={2.55}
-        morphSignal={morphSignal}
-        className='z-0'
-      />
-      <div className='pointer-events-none fixed inset-0 z-[1] bg-[linear-gradient(180deg,rgba(3,4,9,0)_0%,rgba(3,4,9,0.2)_42%,rgba(3,4,9,0.9)_100%)]' />
-      <div className='absolute top-5 left-4 z-30 flex items-center gap-3 sm:left-6'>
-        <YunbayLogo />
-        <div>
-          <div className='text-sm font-semibold tracking-tight text-white'>
-            {t('Quick Start Yunbay')}
-          </div>
-          <div className='font-mono text-[10px] tracking-[0.14em] text-white/42 uppercase'>
-            {t('Quick Start')}
+    <div className='fixed inset-0 h-[100dvh] w-full overflow-hidden bg-[#030409]'>
+      <main
+        ref={exitSurfaceRef}
+        className={`${COSMIC_AUTH_SURFACE_CLASS} relative h-[100dvh] overflow-hidden`}
+      >
+        <PointCloudMorphCanvas
+          faceState={faceState}
+          variant='background'
+          pointSize={2.55}
+          morphSignal={morphSignal}
+          className='absolute z-0'
+        />
+        <div className='pointer-events-none fixed inset-0 z-[1] bg-black/20' />
+        <div className='absolute top-5 left-4 z-30 flex items-center gap-3 sm:left-6'>
+          <YunbayLogo />
+          <div>
+            <div className='text-sm font-semibold text-white'>
+              {t('Quick Start Yunbay')}
+            </div>
+            <div className='font-mono text-[10px] text-white/42 uppercase'>
+              {t('Quick Start')}
+            </div>
           </div>
         </div>
-      </div>
 
-      <LandingSnapFrame
-        sectionIds={QUICK_START_SECTION_IDS}
-        navigateEventName='quick-start:navigate'
-        className='relative z-10'
-        onActiveIndexChange={handlePageChange}
-        controlsComponent={QuickStartControlsComponent}
-      >
-        <QuickStartPage
-          eyebrow={t('Quick Start')}
-          title={t('Choose how you will use AI')}
-          description={t('This helps Yunbay recommend a practical first path.')}
-          nextGuide={t(nextStepGuideKeys.purpose)}
+        <LandingSnapFrame
+          sectionIds={QUICK_START_SECTION_IDS}
+          navigateEventName='quick-start:navigate'
+          className='relative z-10'
+          allowContentScroll
+          onActiveIndexChange={handlePageChange}
+          controlsComponent={QuickStartControlsComponent}
         >
-          <div className='grid gap-3 md:grid-cols-3'>
-            {purposeOptions.map((purpose) => {
-              const Icon = PURPOSE_ICONS[purpose.id]
-              const selected = selectedPurposeId === purpose.id
-              return (
-                <button
-                  key={purpose.id}
-                  type='button'
-                  onClick={() => setSelectedPurposeId(purpose.id)}
-                  className={cn(
-                    'min-h-44 rounded-[1.5rem] border p-5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-all duration-300 active:scale-[0.98]',
-                    selected
-                      ? 'border-white/32 bg-white/[0.12] text-white'
-                      : 'border-white/10 bg-[#030409]/50 text-white/72 hover:border-white/22 hover:bg-white/[0.07] hover:text-white'
-                  )}
-                >
-                  <div className='flex items-center justify-between gap-3'>
-                    <span className='flex size-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
-                      <Icon className='size-5' />
-                    </span>
-                    {selected ? <CheckCircle2 className='size-5' /> : null}
-                  </div>
-                  <div className='mt-6 text-lg font-semibold tracking-tight'>
-                    {t(purpose.titleKey)}
-                  </div>
-                  <p className='mt-3 text-sm leading-7 text-white/54'>
-                    {t(purpose.descriptionKey)}
-                  </p>
-                </button>
-              )
-            })}
-          </div>
-        </QuickStartPage>
-
-        <QuickStartPage
-          eyebrow={t('Model routes')}
-          title={t('Choose a model')}
-          description={t(
-            'All supported models are listed with OpenRouter-style rates.'
-          )}
-          nextGuide={t(nextStepGuideKeys.model)}
-        >
-          {pricing.isLoading ? (
-            <div className='grid max-h-[52vh] gap-3 overflow-hidden md:grid-cols-2 xl:grid-cols-3'>
-              {Array.from({ length: 6 }).map((_, index) => (
-                <Skeleton
-                  key={index}
-                  className='h-36 rounded-[1.5rem] bg-white/10'
-                />
-              ))}
-            </div>
-          ) : modelList.length === 0 ? (
-            <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/50 p-6 text-sm leading-7 text-white/54 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-              {t(
-                'No models are currently enabled in the model square. Configure backend channels and model access first.'
-              )}
-            </div>
-          ) : (
-            <div className='grid max-h-[52vh] gap-3 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3'>
-              {modelList.map((model) => {
-                const selected = activeModelName === model.model_name
-                const rate = getModelRateLabels(model)
+          <QuickStartPage
+            eyebrow={t('Quick Start')}
+            title={t('Choose how you will use AI')}
+            description={t(
+              'This helps Yunbay recommend a practical first path.'
+            )}
+            nextGuide={t(nextStepGuideKeys.purpose)}
+          >
+            <div className='grid gap-3 md:grid-cols-3'>
+              {purposeOptions.map((purpose) => {
+                const Icon = PURPOSE_ICONS[purpose.id]
+                const selected = selectedPurposeId === purpose.id
                 return (
                   <button
-                    key={model.model_name}
+                    key={purpose.id}
                     type='button'
-                    aria-pressed={selected}
-                    onClick={() => setSelectedModelName(model.model_name)}
+                    onClick={() => setSelectedPurposeId(purpose.id)}
                     className={cn(
-                      'rounded-[1.5rem] border p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-all duration-300 active:scale-[0.98]',
+                      'min-h-40 rounded-[1.5rem] border p-5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-all duration-300 active:scale-[0.98] md:min-h-44',
                       selected
-                        ? 'border-white/30 bg-white/[0.12] text-white'
+                        ? 'border-white/32 bg-white/[0.12] text-white'
                         : 'border-white/10 bg-[#030409]/50 text-white/72 hover:border-white/22 hover:bg-white/[0.07] hover:text-white'
                     )}
                   >
-                    <div className='flex items-start justify-between gap-3'>
-                      <div className='min-w-0'>
-                        <div className='truncate font-semibold tracking-tight'>
-                          {model.model_name}
-                        </div>
-                        <div className='mt-1 text-xs text-white/42'>
-                          {model.vendor_name || t('Model provider')}
-                        </div>
-                      </div>
+                    <div className='flex items-center justify-between gap-3'>
+                      <span className='flex size-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
+                        <Icon className='size-5' aria-hidden='true' />
+                      </span>
                       {selected ? (
-                        <CheckCircle2 className='size-4 shrink-0 text-white' />
+                        <CheckCircle2 className='size-5' aria-hidden='true' />
                       ) : null}
                     </div>
-                    <div className='mt-3 flex flex-wrap gap-1.5'>
-                      {getModelTags(model).map((tag) => (
-                        <Badge
-                          key={tag}
-                          variant='outline'
-                          className='border-white/12 bg-white/[0.03] text-white/62'
-                        >
-                          {t(tag)}
-                        </Badge>
-                      ))}
+                    <div className='mt-5 text-lg font-semibold'>
+                      {t(purpose.titleKey)}
                     </div>
-                    <div className='mt-4 grid gap-1 font-mono text-[11px] text-white/46'>
-                      <span>
-                        {t('Input')}: {rate.input}
-                      </span>
-                      <span>
-                        {t('Output')}: {rate.output}
-                      </span>
-                    </div>
+                    <p className='mt-2 text-sm leading-6 text-white/54'>
+                      {t(purpose.descriptionKey)}
+                    </p>
                   </button>
                 )
               })}
             </div>
-          )}
-        </QuickStartPage>
+          </QuickStartPage>
 
-        <QuickStartPage
-          eyebrow={t('Wallet')}
-          title={t('Wallet and redemption code')}
-          description={t(
-            'Add balance in the wallet or redeem a code before you begin.'
-          )}
-          nextGuide={t(nextStepGuideKeys.wallet)}
-        >
-          <div className='grid gap-3 md:grid-cols-2'>
-            <Metric
-              label={t('Current Balance')}
-              value={formatQuota(currentBalance)}
-            />
-            <Metric
-              label={t('Selected model')}
-              value={selectedModel?.model_name || '-'}
-            />
-          </div>
-          <div className='mt-5 grid gap-3 md:grid-cols-2'>
-            <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-              <WalletCards className='size-5 text-white/50' />
-              <h2 className='mt-5 text-lg font-semibold tracking-tight'>
-                {t('Open wallet')}
-              </h2>
-              <p className='mt-2 text-sm leading-7 text-white/54'>
-                {t('View your balance and choose a top-up method.')}
-              </p>
-              <Button
-                className='mt-6 w-full gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88'
-                onClick={() => navigateToPath('/wallet')}
-              >
-                <WalletCards className='size-4' />
-                {t('Top up')}
-              </Button>
-            </div>
-            <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-              <Sparkles className='size-5 text-white/50' />
-              <h2 className='mt-5 text-lg font-semibold tracking-tight'>
-                {t('Redeem a code')}
-              </h2>
-              <p className='mt-2 text-sm leading-7 text-white/54'>
-                {t('Use a redemption code to add balance to your account.')}
-              </p>
-              <div className='mt-6 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]'>
-                <Input
-                  value={redemptionCode}
-                  onChange={(event) => setRedemptionCode(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && !isRedeemingCode) {
-                      void handleRedeemCode()
-                    }
-                  }}
-                  placeholder={t('Enter your redemption code')}
-                  className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white placeholder:text-white/34 focus-visible:border-white/28 focus-visible:ring-white/18'
-                />
-                <Button
-                  variant='outline'
-                  className='gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-                  disabled={isRedeemingCode}
-                  onClick={handleRedeemCode}
-                >
-                  {isRedeemingCode ? (
-                    <Loader2 className='size-4 animate-spin' />
-                  ) : (
-                    <Sparkles className='size-4' />
-                  )}
-                  {t('Use redemption code')}
-                </Button>
+          <QuickStartPage
+            eyebrow={t('Model routes')}
+            title={t('Choose a model')}
+            description={modelPageDescription}
+            nextGuide={t(nextStepGuideKeys.model)}
+          >
+            {pricing.isLoading ? (
+              <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-3'>
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <Skeleton
+                    key={index}
+                    className='h-36 rounded-[1.5rem] bg-white/10'
+                  />
+                ))}
               </div>
-            </div>
-          </div>
-        </QuickStartPage>
+            ) : modelList.length === 0 ? (
+              <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/50 p-6 text-sm leading-7 text-white/54 backdrop-blur-2xl'>
+                {t(
+                  'No models are currently enabled in the model square. Configure backend channels and model access first.'
+                )}
+              </div>
+            ) : (
+              <div className='grid max-h-[52vh] gap-3 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3'>
+                {orderedModelList.map((model) => {
+                  const selected = activeModelName === model.model_name
+                  const preferred = isPreferredQuickStartModel(model.model_name)
+                  const rate = getModelRateLabels(model)
+                  return (
+                    <button
+                      key={model.model_name}
+                      type='button'
+                      aria-pressed={selected}
+                      onClick={() => handleSelectModel(model.model_name)}
+                      className={cn(
+                        'rounded-[1.5rem] border p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-all duration-300 active:scale-[0.98]',
+                        selected
+                          ? 'border-white/30 bg-white/[0.12] text-white'
+                          : 'border-white/10 bg-[#030409]/50 text-white/72 hover:border-white/22 hover:bg-white/[0.07] hover:text-white'
+                      )}
+                    >
+                      <div className='flex items-start justify-between gap-3'>
+                        <div className='min-w-0'>
+                          <div className='truncate font-semibold'>
+                            {t(getQuickStartModelDisplayName(model.model_name))}
+                          </div>
+                          <div className='mt-1 text-xs text-white/42'>
+                            {model.vendor_name || t('Model provider')}
+                          </div>
+                        </div>
+                        {selected ? (
+                          <CheckCircle2
+                            className='size-4 shrink-0 text-white'
+                            aria-hidden='true'
+                          />
+                        ) : null}
+                      </div>
+                      <div className='mt-3 flex flex-wrap gap-1.5'>
+                        {preferred ? (
+                          <Badge className='border-white/20 bg-white text-[#030409]'>
+                            {t('Recommended')}
+                          </Badge>
+                        ) : null}
+                        {preferred ? (
+                          <Badge
+                            variant='outline'
+                            className='border-white/18 bg-white/[0.05] text-white/72'
+                          >
+                            {t(QUICK_START_REASONING_EFFORT_LABEL_KEY)}
+                          </Badge>
+                        ) : null}
+                        {getModelTags(model).map((tag) => (
+                          <Badge
+                            key={tag}
+                            variant='outline'
+                            className='border-white/12 bg-white/[0.03] text-white/62'
+                          >
+                            {t(tag)}
+                          </Badge>
+                        ))}
+                      </div>
+                      <div className='mt-4 grid gap-1 font-mono text-[11px] text-white/46'>
+                        <span>
+                          {t('Input')}: {rate.input}
+                        </span>
+                        <span>
+                          {t('Output')}: {rate.output}
+                        </span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </QuickStartPage>
 
-        <QuickStartPage
-          eyebrow='API KEY'
-          title={t('Generate your first API key')}
-          description={t(
-            'Create a ready-to-use key with one click. Yunbay copies it automatically.'
-          )}
-          nextGuide={t(nextStepGuideKeys['api-key'])}
-        >
-          <div className='rounded-[1.75rem] border border-white/10 bg-[#030409]/58 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-            <div className='grid gap-3 md:grid-cols-2'>
+          <QuickStartPage
+            eyebrow='CC SWITCH'
+            title={t('Download CC Switch')}
+            description={t(
+              'Choose your computer. The official installer opens directly from GitHub.'
+            )}
+            nextGuide={t(nextStepGuideKeys.software)}
+          >
+            <div className='flex flex-col gap-3'>
+              {codexDownloadCards.map((card) => (
+                <SoftwareDownloadRow
+                  key={card.platform}
+                  card={card}
+                  selected={downloadedPlatform === card.platform}
+                  onDownload={handleDownload}
+                />
+              ))}
+            </div>
+            <div className='mt-4 flex items-start gap-3 rounded-[1.25rem] border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-white/56 backdrop-blur-xl'>
+              <CheckCircle2
+                className='mt-0.5 size-4 shrink-0 text-white/64'
+                aria-hidden='true'
+              />
+              <span>
+                {t(
+                  'Your browser keeps this guide open while GitHub starts the download in a new tab.'
+                )}
+              </span>
+            </div>
+          </QuickStartPage>
+
+          <QuickStartPage
+            eyebrow={t('Account setup')}
+            title={t('Prepare your account')}
+            description={t(
+              'Add balance if needed, then create or reuse one API key.'
+            )}
+            nextGuide={t(nextStepGuideKeys.account)}
+          >
+            <div className='grid gap-3 sm:grid-cols-3'>
               <Metric
-                label={t('Selected purpose')}
-                value={t(selectedPurpose.titleKey)}
+                label={t('Current Balance')}
+                value={formatQuota(currentBalance)}
               />
               <Metric
                 label={t('Selected model')}
-                value={selectedModel?.model_name || '-'}
+                value={selectedModelSummary}
+              />
+              <Metric
+                label={t('API key')}
+                value={effectiveApiKey ? t('Ready') : t('Not ready')}
               />
             </div>
-            <div className='mt-5 flex flex-col gap-5 rounded-[1.5rem] border border-white/10 bg-white/[0.035] p-5 sm:flex-row sm:items-center sm:justify-between'>
-              <div className='flex min-w-0 items-start gap-4'>
-                <span className='flex size-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
-                  {generatedApiKey ? (
-                    <CheckCircle2 className='size-5 text-emerald-300' />
-                  ) : (
-                    <KeyRound className='size-5 text-white/72' />
-                  )}
-                </span>
-                <div className='min-w-0'>
-                  <h2 className='font-semibold tracking-tight text-white'>
-                    {generatedApiKey
-                      ? t('API key is ready')
-                      : t('One-click API key')}
-                  </h2>
-                  <p className='mt-2 text-sm leading-7 text-white/54'>
-                    {generatedApiKey
-                      ? generatedApiKeyCopied === false
-                        ? t(QUICK_START_API_KEY_COPY_FAILED_MESSAGE)
-                        : t('Already copied to clipboard')
-                      : t(
-                          'Click generate. The new API key will be copied to your clipboard.'
-                        )}
-                  </p>
-                </div>
-              </div>
-              <Button
-                className='shrink-0 gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88'
-                disabled={isGeneratingApiKey}
-                onClick={handleGenerateApiKey}
+            <div className='mt-4 flex flex-col gap-3'>
+              <AccountStepCard
+                step='01'
+                title={t('Add balance or redeem a code')}
+                description={
+                  balanceReady
+                    ? t(
+                        'Your balance is ready. You can still add more at any time.'
+                      )
+                    : t(
+                        'Top up or use a redemption code before your first request.'
+                      )
+                }
+                complete={balanceReady}
               >
-                {isGeneratingApiKey ? (
-                  <Loader2 className='size-4 animate-spin' />
-                ) : generatedApiKey ? (
-                  <Copy className='size-4' />
-                ) : (
-                  <KeyRound className='size-4' />
-                )}
-                {isGeneratingApiKey
-                  ? t('Generating...')
-                  : generatedApiKey
-                    ? t('Copy API key again')
-                    : t('Generate API key')}
-              </Button>
-            </div>
-          </div>
-        </QuickStartPage>
-
-        <QuickStartPage
-          eyebrow={t('Codex one-click launcher')}
-          title={t('Codex one-click setup')}
-          description={t(
-            'Download the Codex one-click launcher and connect it to your Yunbay API key.'
-          )}
-        >
-          <div className='max-h-[62vh] overflow-y-auto pr-1'>
-            <div className='flex flex-col gap-3'>
-              {codexSetupOptions.map((option) => {
-                const expanded = expandedCodexSetupId === option.id
-                return (
-                  <CodexSetupOptionCard
-                    key={option.id}
-                    id={option.id}
-                    title={t(option.titleKey)}
-                    expanded={expanded}
-                    onToggle={handleToggleCodexSetup}
+                <div className='grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]'>
+                  <Button
+                    className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
+                    onClick={() => navigateToPath('/wallet')}
                   >
-                    {option.id === 'macos-new-user' && macosDownloadCard ? (
-                      <CodexDownloadPanel
-                        card={macosDownloadCard}
-                        onDownload={handleDownload}
-                        onCopyCommand={handleCopyCommand}
+                    <WalletCards data-icon='inline-start' />
+                    {t('Top up')}
+                  </Button>
+                  <Input
+                    value={redemptionCode}
+                    onChange={(event) => setRedemptionCode(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !isRedeemingCode) {
+                        void handleRedeemCode()
+                      }
+                    }}
+                    placeholder={t('Enter your redemption code')}
+                    className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white placeholder:text-white/34 focus-visible:border-white/28 focus-visible:ring-white/18'
+                  />
+                  <Button
+                    variant='outline'
+                    className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                    disabled={isRedeemingCode}
+                    onClick={handleRedeemCode}
+                  >
+                    {isRedeemingCode ? (
+                      <Loader2
+                        data-icon='inline-start'
+                        className='animate-spin'
                       />
-                    ) : null}
-                    {option.id === 'windows-new-user' && windowsDownloadCard ? (
-                      <CodexDownloadPanel
-                        card={windowsDownloadCard}
-                        onDownload={handleDownload}
-                        onCopyCommand={handleCopyCommand}
-                      />
-                    ) : null}
-                    {option.id === 'ccswitch-existing-user' ? (
-                      <CCSwitchImportPanel
-                        endpoint={quickStartCodexEndpoint}
-                        modelName={
-                          selectedModel?.model_name || t('No model selected')
-                        }
-                        apiKey={generatedApiKey}
-                        disabled={!quickStartCCSwitchState.canImport}
-                        disabledReason={quickStartCCSwitchDisabledReason}
-                        onImport={handleImportToCCSwitch}
-                      />
-                    ) : null}
-                  </CodexSetupOptionCard>
-                )
-              })}
+                    ) : (
+                      <Sparkles data-icon='inline-start' />
+                    )}
+                    {t('Redeem')}
+                  </Button>
+                </div>
+              </AccountStepCard>
+
+              <AccountStepCard
+                step='02'
+                title={
+                  effectiveApiKey
+                    ? t('API key is ready')
+                    : t('Create your API key')
+                }
+                description={apiKeyStepDescription}
+                complete={Boolean(effectiveApiKey)}
+              >
+                <Button
+                  className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
+                  disabled={apiKeyActionPending}
+                  onClick={handleGenerateApiKey}
+                >
+                  <ApiKeyActionIcon
+                    data-icon='inline-start'
+                    className={apiKeyActionPending ? 'animate-spin' : undefined}
+                  />
+                  {apiKeyActionLabel}
+                </Button>
+              </AccountStepCard>
             </div>
-          </div>
-        </QuickStartPage>
-      </LandingSnapFrame>
-    </main>
-  )
-}
+          </QuickStartPage>
 
-
-function CodexSetupOptionCard(props: {
-  id: CodexSetupOptionId
-  title: string
-  expanded: boolean
-  onToggle: (id: CodexSetupOptionId) => void
-  children: ReactNode
-}) {
-  return (
-    <div className='overflow-hidden rounded-[1.5rem] border border-white/10 bg-[#030409]/54 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-      <button
-        type='button'
-        aria-expanded={props.expanded}
-        onClick={() => props.onToggle(props.id)}
-        className='flex w-full items-center justify-between gap-3 px-5 py-4 text-left text-white transition-colors duration-300 hover:bg-white/[0.045]'
-      >
-        <span className='text-sm font-semibold tracking-tight sm:text-base'>
-          {props.title}
-        </span>
-        <ArrowRight
-          className={cn(
-            'size-4 shrink-0 text-white/46 transition-transform duration-300',
-            props.expanded && 'rotate-90 text-white/80'
-          )}
-        />
-      </button>
-      <AnimatePresence initial={false}>
-        {props.expanded ? (
-          <motion.div
-            key='content'
-            initial={{ height: 0, opacity: 0, y: -8 }}
-            animate={{ height: 'auto', opacity: 1, y: 0 }}
-            exit={{ height: 0, opacity: 0, y: -8 }}
-            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
-            className='overflow-hidden'
+          <QuickStartPage
+            eyebrow={t('Ready check')}
+            title={t('Review and import')}
+            description={t(
+              'Confirm the last device step, then import your prepared setup.'
+            )}
           >
-            <div className='border-t border-white/10 p-5'>{props.children}</div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+            <div className='flex flex-col gap-3'>
+              <ReadinessRow
+                step='01'
+                title={t('Model selected')}
+                description={selectedModelSummary}
+                complete={Boolean(selectedModel)}
+              />
+              <ReadinessRow
+                step='02'
+                title={t('CC Switch installed')}
+                description={
+                  softwareConfirmed
+                    ? t('Installation confirmed on this device.')
+                    : t('Have you finished installing CC Switch?')
+                }
+                complete={softwareConfirmed}
+              >
+                {!softwareConfirmed ? (
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
+                      onClick={handleConfirmSoftware}
+                    >
+                      <Check data-icon='inline-start' />
+                      {t('Already installed')}
+                    </Button>
+                    <Button
+                      variant='outline'
+                      className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                      onClick={handleReturnToSoftware}
+                    >
+                      {t('Not yet')}
+                    </Button>
+                  </div>
+                ) : null}
+              </ReadinessRow>
+              <ReadinessRow
+                step='03'
+                title={t('API key ready')}
+                description={
+                  effectiveApiKey
+                    ? maskQuickStartApiKey(effectiveApiKey)
+                    : t('Generate an API key before importing.')
+                }
+                complete={Boolean(effectiveApiKey)}
+              >
+                {!effectiveApiKey ? (
+                  <Button
+                    variant='outline'
+                    className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                    onClick={() => navigateToQuickStartPage('account')}
+                  >
+                    {t('Return to account setup')}
+                  </Button>
+                ) : null}
+              </ReadinessRow>
+            </div>
+
+            <AnimatePresence initial={false}>
+              {softwareConfirmed && effectiveApiKey ? (
+                <motion.div
+                  ref={importPanelRef}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 8 }}
+                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+                  className='mt-3 scroll-mb-4 sm:scroll-mb-[8rem]'
+                >
+                  <CCSwitchImportPanel
+                    endpoint={quickStartCodexEndpoint}
+                    modelName={selectedModelDisplayName}
+                    reasoningTarget={
+                      selectedModelIsPreferred
+                        ? t(QUICK_START_REASONING_EFFORT_LABEL_KEY)
+                        : null
+                    }
+                    apiKey={effectiveApiKey}
+                    imported={importConfirmed}
+                    onImport={handleImportToCCSwitch}
+                  />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence initial={false}>
+              {importAttempted ? (
+                <motion.div
+                  ref={importStatusRef}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 8 }}
+                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+                  className='mt-3 scroll-mb-4 rounded-[1.25rem] border border-white/12 bg-white/[0.055] p-4 backdrop-blur-xl sm:scroll-mb-[8rem]'
+                >
+                  <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+                    <div>
+                      <div className='font-semibold text-white'>
+                        {importStatusTitle}
+                      </div>
+                      <p className='mt-1 text-sm leading-6 text-white/54'>
+                        {importStatusDescription}
+                      </p>
+                    </div>
+                    <div className='flex flex-wrap gap-2'>
+                      {!importConfirmed ? (
+                        <Button
+                          className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
+                          onClick={handleConfirmImport}
+                        >
+                          <Check data-icon='inline-start' />
+                          {t('It opened')}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant='outline'
+                        className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                        onClick={handleImportToCCSwitch}
+                      >
+                        <RotateCcw data-icon='inline-start' />
+                        {t('Try again')}
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </QuickStartPage>
+        </LandingSnapFrame>
+      </main>
     </div>
   )
 }
 
-function CodexDownloadPanel(props: {
+function SoftwareDownloadRow(props: {
   card: CodexDownloadCard
+  selected: boolean
   onDownload: (card: CodexDownloadCard) => void
-  onCopyCommand: (command: string) => void
 }) {
   const { t } = useTranslation()
+  const Icon = props.card.platform === 'macOS' ? Apple : MonitorCog
 
   return (
-    <div className='rounded-[1.25rem] border border-white/10 bg-white/[0.035] p-4'>
-      <div className='flex items-start justify-between gap-3'>
-        <div>
-          <div className='text-lg font-semibold tracking-tight text-white'>
-            {props.card.platform}
+    <div
+      className={cn(
+        'flex flex-col gap-5 rounded-[1.5rem] border p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between',
+        props.selected
+          ? 'border-white/28 bg-white/[0.1]'
+          : 'border-white/10 bg-[#030409]/54'
+      )}
+    >
+      <div className='flex min-w-0 items-start gap-4'>
+        <span className='flex size-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
+          <Icon className='size-5 text-white/76' aria-hidden='true' />
+        </span>
+        <div className='min-w-0'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <h2 className='text-lg font-semibold text-white'>
+              {t(props.card.titleKey)}
+            </h2>
+            {props.selected ? (
+              <Badge className='border-white/20 bg-white text-[#030409]'>
+                {t('Download opened')}
+              </Badge>
+            ) : null}
           </div>
-          <p className='mt-2 text-sm text-white/54'>
+          <p className='mt-1 text-sm leading-6 text-white/56'>
             {t(props.card.descriptionKey)}
           </p>
+          <p className='mt-2 font-mono text-[11px] text-white/38'>
+            {t(props.card.detailKey)}
+          </p>
         </div>
-        <Download className='size-5 text-white/44' />
       </div>
-      {props.card.supportNoteKey ? (
-        <div className='mt-4 rounded-2xl border border-white/10 bg-white/[0.045] p-3 text-xs leading-6 text-white/66'>
-          {t(props.card.supportNoteKey)}
-        </div>
-      ) : null}
       <Button
-        variant='outline'
-        className='mt-5 w-full gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
+        className='h-11 shrink-0 rounded-full bg-white px-5 text-[#030409] hover:bg-white/88'
+        render={
+          <a
+            href={props.card.downloadHref}
+            target='_blank'
+            rel='noopener noreferrer'
+          />
+        }
         onClick={() => props.onDownload(props.card)}
       >
-        <Download className='size-4' />
+        <Download data-icon='inline-start' />
         {t(props.card.buttonLabelKey)}
       </Button>
-      {props.card.platform === 'macOS' && props.card.quarantineFixCommand ? (
-        <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
-          <div className='font-semibold text-amber-50/90'>
-            {t('If macOS says the app is damaged')}
-          </div>
-          <p className='mt-1'>
-            {t(
-              'This build is not notarized by Apple yet. If Gatekeeper blocks it, run the terminal command below after downloading.'
+    </div>
+  )
+}
+
+function AccountStepCard(props: {
+  step: string
+  title: string
+  description: string
+  complete: boolean
+  children: ReactNode
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+      <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
+        <div className='flex min-w-0 items-start gap-4'>
+          <span
+            className={cn(
+              'flex size-10 shrink-0 items-center justify-center rounded-2xl border font-mono text-xs font-semibold',
+              props.complete
+                ? 'border-white/24 bg-white text-[#030409]'
+                : 'border-white/12 bg-white/[0.04] text-white/52'
             )}
-          </p>
-          <code className='mt-3 block overflow-x-auto rounded-xl border border-white/10 bg-black/36 px-3 py-2 font-mono text-[11px] leading-5 text-white/78'>
-            {props.card.quarantineFixCommand}
-          </code>
-          <Button
-            variant='outline'
-            size='sm'
-            className='mt-3 w-full gap-2 rounded-full border-white/14 bg-white/[0.035] text-white hover:bg-white/[0.08] hover:text-white'
-            onClick={() =>
-              props.onCopyCommand(props.card.quarantineFixCommand || '')
-            }
           >
-            <Copy className='size-3.5' />
-            {t('Copy repair command')}
-          </Button>
-        </div>
-      ) : null}
-      {props.card.platform === 'Windows' && props.card.guideTitleKey ? (
-        <div className='mt-4 rounded-2xl border border-amber-300/18 bg-amber-300/[0.055] p-4 text-xs leading-6 text-amber-50/74'>
-          <div className='font-semibold text-amber-50/90'>
-            {t(props.card.guideTitleKey)}
+            {props.complete ? <Check className='size-4' /> : props.step}
+          </span>
+          <div>
+            <div className='flex flex-wrap items-center gap-2'>
+              <h2 className='font-semibold text-white'>{props.title}</h2>
+              {props.complete ? (
+                <span className='text-xs text-white/52'>{t('Complete')}</span>
+              ) : null}
+            </div>
+            <p className='mt-1 text-sm leading-6 text-white/52'>
+              {props.description}
+            </p>
           </div>
-          {props.card.guideDescriptionKey ? (
-            <p className='mt-1'>{t(props.card.guideDescriptionKey)}</p>
-          ) : null}
-          {props.card.guideStepKeys?.length ? (
-            <ol className='mt-3 flex list-decimal flex-col gap-1 pl-4'>
-              {props.card.guideStepKeys.map((step) => (
-                <li key={step}>{t(step)}</li>
-              ))}
-            </ol>
-          ) : null}
         </div>
-      ) : null}
+        <div className='shrink-0'>{props.children}</div>
+      </div>
+    </div>
+  )
+}
+
+function ReadinessRow(props: {
+  step: string
+  title: string
+  description: string
+  complete: boolean
+  children?: ReactNode
+}) {
+  return (
+    <div className='rounded-[1.25rem] border border-white/10 bg-[#030409]/54 p-4 backdrop-blur-xl'>
+      <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+        <div className='flex min-w-0 items-start gap-3'>
+          <span
+            className={cn(
+              'flex size-9 shrink-0 items-center justify-center rounded-xl border font-mono text-[11px] font-semibold',
+              props.complete
+                ? 'border-white/24 bg-white text-[#030409]'
+                : 'border-white/12 bg-white/[0.04] text-white/46'
+            )}
+          >
+            {props.complete ? <Check className='size-4' /> : props.step}
+          </span>
+          <div className='min-w-0'>
+            <div className='font-semibold text-white'>{props.title}</div>
+            <p className='mt-1 text-sm leading-6 break-words text-white/52'>
+              {props.description}
+            </p>
+          </div>
+        </div>
+        {props.children ? (
+          <div className='shrink-0'>{props.children}</div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -823,77 +1196,68 @@ function CodexDownloadPanel(props: {
 function CCSwitchImportPanel(props: {
   endpoint: string
   modelName: string
+  reasoningTarget: string | null
   apiKey: string
-  disabled: boolean
-  disabledReason: string | null
+  imported: boolean
   onImport: () => void
 }) {
   const { t } = useTranslation()
-
   return (
-    <div className='overflow-hidden rounded-[1.25rem] border border-white/10 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'>
+    <div className='overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'>
       <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
         <div className='flex items-center gap-2'>
           <span className='size-2.5 rounded-full bg-[#ff5f57]' />
           <span className='size-2.5 rounded-full bg-[#febc2e]' />
           <span className='size-2.5 rounded-full bg-[#28c840]' />
         </div>
-        <div className='font-mono text-[10px] font-semibold tracking-[0.18em] text-white/36 uppercase'>
+        <div className='font-mono text-[10px] text-white/36 uppercase'>
           CC Switch
         </div>
       </div>
       <div className='grid gap-4 p-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-center'>
         <div className='min-w-0'>
-          <div className='flex items-center gap-3'>
-            <div className='grid size-10 place-items-center rounded-2xl border border-white/10 bg-white/[0.07]'>
-              <MonitorCog className='size-5 text-white/72' />
-            </div>
-            <div className='min-w-0'>
-              <h2 className='text-lg font-semibold tracking-tight text-white'>
-                {t('Import current setup to CC Switch')}
-              </h2>
-              <p className='mt-1 text-sm leading-6 text-white/52'>
-                {t(
-                  'Launch CC Switch from your browser with this API and model prefilled.'
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className='mt-5 grid gap-2 sm:grid-cols-3'>
-            <QuickStartConfigPill
+          <h2 className='text-lg font-semibold text-white'>
+            {t('Import current setup to CC Switch')}
+          </h2>
+          <p className='mt-1 text-sm leading-6 text-white/52'>
+            {t('The API, model, and key are prepared for one-click import.')}
+          </p>
+          <div className='mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4'>
+            <Metric
               label={t('Configured API')}
               value={props.endpoint}
+              compact
             />
-            <QuickStartConfigPill
+            <Metric
               label={t('Configured model')}
               value={props.modelName}
+              compact
             />
-            <QuickStartConfigPill
+            <Metric
               label={t('Generated API key')}
               value={maskQuickStartApiKey(props.apiKey)}
+              compact
             />
+            {props.reasoningTarget ? (
+              <Metric
+                label={t('Reasoning target')}
+                value={props.reasoningTarget}
+                compact
+              />
+            ) : null}
           </div>
         </div>
-
-        <div className='rounded-2xl border border-white/10 bg-black/20 p-4'>
-          <div className='flex items-start gap-3 text-xs leading-6 text-white/52'>
-            <CheckCircle2 className='mt-0.5 size-4 shrink-0 text-white/58' />
-            <p>
-              {t(
-                'CC Switch will import this Codex provider and enable it automatically.'
-              )}
-            </p>
-          </div>
-          <Button
-            className='mt-4 w-full gap-2 rounded-full bg-white text-[#030409] hover:bg-white/88 disabled:bg-white/22 disabled:text-white/42'
-            disabled={props.disabled}
-            onClick={props.onImport}
-          >
-            <ArrowUpRight className='size-4' />
-            {props.disabledReason || t('One-click import')}
-          </Button>
-        </div>
+        <Button
+          className='h-12 w-full rounded-full bg-white px-5 text-[#030409] hover:bg-white/88'
+          onClick={props.onImport}
+        >
+          {props.imported ? (
+            <RotateCcw data-icon='inline-start' />
+          ) : (
+            <ArrowUpRight data-icon='inline-start' />
+          )}
+          {props.imported ? t('Import again') : t('One-click import')}
+        </Button>
       </div>
     </div>
   )
@@ -907,27 +1271,35 @@ function QuickStartPage(props: {
   children: ReactNode
 }) {
   return (
-    <section className='relative h-[100dvh] overflow-hidden px-4 pt-24 pb-24 text-white sm:px-6 lg:pt-28'>
-      <div className='mx-auto grid h-full max-w-7xl grid-cols-1 gap-8 lg:grid-cols-12 lg:items-center'>
-        <div className='lg:col-span-5'>
-          <div className='mb-5 font-mono text-[10px] font-semibold tracking-[0.18em] text-white/42 uppercase'>
-            {props.eyebrow}
-          </div>
-          <h1 className='max-w-[8.4em] text-[clamp(2.25rem,4.8vw,4.9rem)] leading-[0.95] font-black tracking-[-0.055em] text-balance text-white'>
-            {props.title}
-          </h1>
-          <p className='mt-6 max-w-md text-sm leading-7 text-white/58 sm:text-base sm:leading-8'>
-            {props.description}
-          </p>
-          {props.nextGuide ? (
-            <div className='mt-6 flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.045] p-4 text-sm leading-6 text-white/66 backdrop-blur-xl'>
-              <ArrowRight className='mt-0.5 size-4 shrink-0 text-white/48' />
-              <span>{props.nextGuide}</span>
+    <section className='relative h-[100dvh] overflow-hidden text-white'>
+      <div
+        data-landing-snap-scroll
+        className='h-[calc(100dvh-7.75rem-env(safe-area-inset-bottom))] overflow-y-auto overscroll-contain px-4 pt-24 pb-6 sm:h-full sm:px-6 sm:pb-[calc(9.5rem+env(safe-area-inset-bottom))] lg:pt-28'
+      >
+        <div className='mx-auto grid min-h-full max-w-7xl grid-cols-1 content-center gap-8 py-4 lg:grid-cols-12 lg:items-center'>
+          <div className='lg:col-span-5'>
+            <div className='mb-4 font-mono text-[10px] font-semibold text-white/42 uppercase'>
+              {props.eyebrow}
             </div>
-          ) : null}
-        </div>
-        <div className='min-h-0 lg:col-span-6 lg:col-start-7'>
-          {props.children}
+            <h1 className='max-w-[9em] text-4xl leading-none font-black tracking-normal text-balance text-white sm:text-5xl lg:text-7xl'>
+              {props.title}
+            </h1>
+            <p className='mt-5 max-w-md text-sm leading-7 text-white/58 sm:text-base sm:leading-8'>
+              {props.description}
+            </p>
+            {props.nextGuide ? (
+              <div className='mt-5 flex max-w-md items-start gap-3 rounded-[1.25rem] border border-white/10 bg-white/[0.045] p-4 text-sm leading-6 text-white/66 backdrop-blur-xl'>
+                <ArrowRight
+                  className='mt-0.5 size-4 shrink-0 text-white/48'
+                  aria-hidden='true'
+                />
+                <span>{props.nextGuide}</span>
+              </div>
+            ) : null}
+          </div>
+          <div className='min-h-0 lg:col-span-6 lg:col-start-7'>
+            {props.children}
+          </div>
         </div>
       </div>
     </section>
@@ -936,69 +1308,88 @@ function QuickStartPage(props: {
 
 function QuickStartControls(props: {
   api: LandingSnapControlsApi
+  canFinish: boolean
+  disabled: boolean
   onEnterDashboard: () => void
+  onSkip: () => void
 }) {
   const { t } = useTranslation()
-  const nextLabel = props.api.canGoNext ? t('Next') : t('Enter dashboard')
-  const handleNext = props.api.canGoNext
-    ? props.api.goNext
-    : props.onEnterDashboard
+  const isFinalPage = !props.api.canGoNext
+  const primaryDisabled = props.disabled || (isFinalPage && !props.canFinish)
+  const handlePrimary = isFinalPage ? props.onEnterDashboard : props.api.goNext
+  let secondaryControl: ReactNode = null
+  if (!isFinalPage) {
+    secondaryControl = (
+      <button
+        type='button'
+        onClick={props.onSkip}
+        disabled={props.disabled}
+        className='rounded-full px-4 py-1 text-xs font-medium text-white/44 transition-colors hover:text-white/76 disabled:pointer-events-none disabled:opacity-30'
+      >
+        {t('Set up later and enter dashboard')}
+      </button>
+    )
+  } else if (!props.canFinish) {
+    secondaryControl = (
+      <div className='rounded-full px-4 py-1 text-xs font-medium text-white/44'>
+        {t('Confirm the CC Switch import to continue')}
+      </div>
+    )
+  }
 
   return (
     <div
       data-point-cloud-ignore
-      className='absolute right-4 bottom-5 left-4 z-30 flex flex-wrap items-center justify-between gap-3 sm:right-6 sm:left-6 lg:left-auto'
+      className='absolute bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-30 flex w-[min(calc(100%-1.5rem),34rem)] -translate-x-1/2 flex-col items-center gap-2'
     >
-      <button
-        type='button'
-        onClick={props.api.goPrevious}
-        disabled={!props.api.canGoPrevious}
-        className='h-10 rounded-full border border-white/12 bg-[#030409]/58 px-4 text-xs font-semibold text-white/72 backdrop-blur-xl transition-all duration-300 hover:border-white/24 hover:text-white active:scale-[0.98] disabled:pointer-events-none disabled:opacity-35'
-      >
-        {t('Previous')}
-      </button>
-      <div className='rounded-full border border-white/10 bg-[#030409]/58 px-3 py-2 font-mono text-[10px] font-semibold tracking-[0.16em] text-white/48 backdrop-blur-xl'>
-        {String(props.api.activeIndex + 1).padStart(2, '0')} /{' '}
-        {String(props.api.totalPages).padStart(2, '0')}
+      <div className='flex w-full items-center gap-1.5 rounded-full border border-white/12 bg-[#030409]/72 p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
+        <button
+          type='button'
+          aria-label={t('Previous')}
+          onClick={props.api.goPrevious}
+          disabled={!props.api.canGoPrevious || props.disabled}
+          className='flex h-12 min-w-12 items-center justify-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-white/72 transition-all duration-300 hover:border-white/12 hover:bg-white/[0.06] hover:text-white active:scale-[0.98] disabled:pointer-events-none disabled:opacity-28 sm:min-w-28'
+        >
+          <ArrowLeft className='size-4' aria-hidden='true' />
+          <span className='hidden sm:inline'>{t('Previous')}</span>
+        </button>
+        <div className='min-w-16 flex-1 text-center font-mono text-[10px] font-semibold text-white/44 tabular-nums'>
+          {String(props.api.activeIndex + 1).padStart(2, '0')} /{' '}
+          {String(props.api.totalPages).padStart(2, '0')}
+        </div>
+        <button
+          type='button'
+          onClick={handlePrimary}
+          disabled={primaryDisabled}
+          className='flex h-12 min-w-32 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-black text-[#030409] shadow-[0_16px_48px_rgba(255,255,255,0.2)] ring-1 ring-white/30 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_20px_58px_rgba(255,255,255,0.28)] active:scale-[0.98] disabled:pointer-events-none disabled:translate-y-0 disabled:bg-white/20 disabled:text-white/42 disabled:shadow-none sm:min-w-40'
+        >
+          <span>{isFinalPage ? t('Enter dashboard') : t('Next')}</span>
+          <ArrowRight className='size-4' aria-hidden='true' />
+        </button>
       </div>
-      <button
-        type='button'
-        onClick={props.onEnterDashboard}
-        className='h-10 rounded-full border border-white/18 bg-white/[0.07] px-4 text-xs font-semibold text-white/82 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl transition-all duration-300 hover:border-white/32 hover:bg-white/[0.11] hover:text-white active:scale-[0.98]'
-      >
-        {t('Enter dashboard')}
-      </button>
-      <button
-        type='button'
-        onClick={handleNext}
-        className='h-11 rounded-full bg-white px-5 text-xs font-black tracking-[0.04em] text-[#030409] shadow-[0_18px_60px_rgba(255,255,255,0.22)] ring-1 ring-white/30 transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_22px_70px_rgba(255,255,255,0.28)] active:scale-[0.98]'
-      >
-        {nextLabel}
-      </button>
+      {secondaryControl}
     </div>
   )
 }
 
-function QuickStartConfigPill(props: { label: string; value: string }) {
+function Metric(props: { label: string; value: string; compact?: boolean }) {
   return (
-    <div className='min-w-0 rounded-2xl border border-white/10 bg-black/18 px-3 py-2'>
-      <div className='font-mono text-[10px] font-semibold tracking-[0.14em] text-white/34 uppercase'>
+    <div
+      className={cn(
+        'min-w-0 rounded-[1.25rem] border border-white/10 bg-white/[0.045] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]',
+        props.compact ? 'px-3 py-2' : 'p-4'
+      )}
+    >
+      <div className='font-mono text-[10px] font-semibold text-white/38 uppercase'>
         {props.label}
       </div>
-      <div className='mt-1 truncate text-sm font-medium text-white/76'>
-        {props.value}
-      </div>
-    </div>
-  )
-}
-
-function Metric(props: { label: string; value: string }) {
-  return (
-    <div className='min-w-0 rounded-[1.25rem] border border-white/10 bg-white/[0.045] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'>
-      <div className='font-mono text-[10px] font-semibold tracking-[0.16em] text-white/38 uppercase'>
-        {props.label}
-      </div>
-      <div className='mt-3 truncate text-sm font-semibold text-white/82'>
+      <div
+        className={cn(
+          'truncate font-semibold text-white/82',
+          props.compact ? 'mt-1 text-xs' : 'mt-3 text-sm'
+        )}
+        title={props.value}
+      >
         {props.value}
       </div>
     </div>

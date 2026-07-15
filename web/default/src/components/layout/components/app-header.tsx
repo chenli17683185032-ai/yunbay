@@ -16,14 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useState } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 import { ConfigDrawer } from '@/components/config-drawer'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
-import { RequiredAnnouncementDialog } from '@/components/required-announcement-dialog'
 import { ProfileDropdown } from '@/components/profile-dropdown'
+import { RequiredAnnouncementDialog } from '@/components/required-announcement-dialog'
 import { Search } from '@/components/search'
+import { QuickStartCompletionDialog } from '@/features/quick-start/quick-start-completion-dialog'
+import {
+  readQuickStartSession,
+  writeQuickStartSession,
+} from '@/features/quick-start/quick-start-session'
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import { type TopNavLink } from '../types'
 import { Header } from './header'
@@ -103,12 +110,32 @@ export function AppHeader({
   showConfigDrawer = true,
   showProfileDropdown = true,
 }: AppHeaderProps) {
+  const navigate = useNavigate()
   // Prioritize dynamically generated links from backend
   const dynamicLinks = useTopNavLinks()
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
 
   // Notifications hook
   const notifications = useNotifications()
+  const [quickStartSession, setQuickStartSession] = useState(
+    readQuickStartSession
+  )
+  const completionDialogOpen =
+    quickStartSession.completionPromptPending &&
+    (!showNotifications ||
+      (!notifications.loading && !notifications.requiredDialogOpen))
+
+  const clearCompletionPrompt = () => {
+    const nextSession = writeQuickStartSession({
+      completionPromptPending: false,
+    })
+    setQuickStartSession(nextSession)
+  }
+
+  const handleReviewQuickStart = () => {
+    clearCompletionPrompt()
+    void navigate({ to: '/quick-start', hash: 'readiness' })
+  }
 
   return (
     <>
@@ -157,6 +184,12 @@ export function AppHeader({
           onConfirmRead={notifications.confirmRead}
         />
       )}
+      <QuickStartCompletionDialog
+        open={completionDialogOpen}
+        session={quickStartSession}
+        onReview={handleReviewQuickStart}
+        onStart={clearCompletionPrompt}
+      />
     </>
   )
 }
