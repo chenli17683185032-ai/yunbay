@@ -28,7 +28,6 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
-  Apple,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
@@ -41,13 +40,19 @@ import {
   KeyRound,
   Loader2,
   MessageSquare,
-  MonitorCog,
   RotateCcw,
   Sparkles,
   WalletCards,
 } from 'lucide-react'
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import {
+  AnimatePresence,
+  LayoutGroup,
+  motion,
+  useReducedMotion,
+} from 'motion/react'
 import { useTranslation } from 'react-i18next'
+import { FaWindows } from 'react-icons/fa6'
+import { SiApple } from 'react-icons/si'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { getSelf, getUserGroups } from '@/lib/api'
@@ -104,6 +109,15 @@ import {
   type QuickStartModelLike,
   type QuickStartPurposeId,
 } from './quick-start-data'
+import {
+  QuickStartSelectionCheck,
+  QuickStartSelectionSurface,
+  QuickStartStepMarker,
+} from './quick-start-motion'
+import {
+  QUICK_START_REDUCED_TRANSITION,
+  QUICK_START_SPRING_TRANSITION,
+} from './quick-start-motion-config'
 import { redeemQuickStartCode } from './quick-start-redemption'
 import {
   readQuickStartSession,
@@ -128,6 +142,10 @@ const QUICK_START_SECTION_IDS = quickStartFullscreenPages.map((page) => page.id)
 
 const COSMIC_AUTH_SURFACE_CLASS =
   'bg-[#030409] text-white [--accent:#121827] [--accent-foreground:#eef4ff] [--background:#030409] [--border:#1e2638] [--card:#070a14] [--card-foreground:#f7fbff] [--foreground:#f7fbff] [--muted:#0c1020] [--muted-foreground:#8f9bb8] [--primary:#eef4ff] [--primary-foreground:#030409] [--secondary:#121827] [--secondary-foreground:#eef4ff]'
+const QUICK_START_PRIMARY_ACTION_CLASS =
+  'h-11 min-w-28 rounded-full bg-white px-5 text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
+const QUICK_START_SECONDARY_ACTION_CLASS =
+  'h-11 min-w-28 rounded-full border-white/14 bg-white/[0.035] px-5 text-white transition-[transform,background-color,border-color] duration-300 hover:bg-white/[0.08] hover:text-white active:scale-[0.98]'
 
 type QuickStartNavigationPath = QuickStartEnterDashboardPath | '/wallet'
 
@@ -608,11 +626,12 @@ export function QuickStart() {
         api={api}
         canFinish={importConfirmed}
         disabled={isExiting}
+        reducedMotion={Boolean(reducedMotion)}
         onEnterDashboard={() => beginDashboardExit(true)}
         onSkip={() => beginDashboardExit(false)}
       />
     ),
-    [beginDashboardExit, importConfirmed, isExiting]
+    [beginDashboardExit, importConfirmed, isExiting, reducedMotion]
   )
 
   return (
@@ -657,40 +676,61 @@ export function QuickStart() {
             )}
             nextGuide={t(nextStepGuideKeys.purpose)}
           >
-            <div className='grid gap-3 md:grid-cols-3'>
-              {purposeOptions.map((purpose) => {
-                const Icon = PURPOSE_ICONS[purpose.id]
-                const selected = selectedPurposeId === purpose.id
-                return (
-                  <button
-                    key={purpose.id}
-                    type='button'
-                    onClick={() => setSelectedPurposeId(purpose.id)}
-                    className={cn(
-                      'min-h-40 rounded-[1.5rem] border p-5 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-all duration-300 active:scale-[0.98] md:min-h-44',
-                      selected
-                        ? 'border-white/32 bg-white/[0.12] text-white'
-                        : 'border-white/10 bg-[#030409]/50 text-white/72 hover:border-white/22 hover:bg-white/[0.07] hover:text-white'
-                    )}
-                  >
-                    <div className='flex items-center justify-between gap-3'>
-                      <span className='flex size-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
-                        <Icon className='size-5' aria-hidden='true' />
-                      </span>
+            <LayoutGroup id='quick-start-purpose-selection'>
+              <div className='grid gap-3 md:grid-cols-3'>
+                {purposeOptions.map((purpose) => {
+                  const Icon = PURPOSE_ICONS[purpose.id]
+                  const selected = selectedPurposeId === purpose.id
+                  return (
+                    <motion.button
+                      key={purpose.id}
+                      data-quick-start-purpose={purpose.id}
+                      layout={reducedMotion ? false : 'position'}
+                      type='button'
+                      aria-pressed={selected}
+                      onClick={() => setSelectedPurposeId(purpose.id)}
+                      whileTap={reducedMotion ? undefined : { scale: 0.985 }}
+                      transition={
+                        reducedMotion
+                          ? QUICK_START_REDUCED_TRANSITION
+                          : QUICK_START_SPRING_TRANSITION
+                      }
+                      className={cn(
+                        'relative isolate min-h-40 overflow-hidden rounded-[1.5rem] border p-5 text-left backdrop-blur-2xl transition-[border-color,color,background-color] duration-300 md:min-h-44',
+                        selected
+                          ? 'border-transparent bg-transparent text-white'
+                          : 'border-white/10 bg-[#030409]/50 text-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:border-white/22 hover:bg-white/[0.07] hover:text-white'
+                      )}
+                    >
                       {selected ? (
-                        <CheckCircle2 className='size-5' aria-hidden='true' />
+                        <QuickStartSelectionSurface
+                          layoutId='quick-start-purpose-selected'
+                          reducedMotion={Boolean(reducedMotion)}
+                        />
                       ) : null}
-                    </div>
-                    <div className='mt-5 text-lg font-semibold'>
-                      {t(purpose.titleKey)}
-                    </div>
-                    <p className='mt-2 text-sm leading-6 text-white/54'>
-                      {t(purpose.descriptionKey)}
-                    </p>
-                  </button>
-                )
-              })}
-            </div>
+                      <div className='relative z-10'>
+                        <div className='flex items-center justify-between gap-3'>
+                          <span className='flex size-11 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
+                            <Icon className='size-5' aria-hidden='true' />
+                          </span>
+                          <QuickStartSelectionCheck
+                            visible={selected}
+                            reducedMotion={Boolean(reducedMotion)}
+                            className='size-5'
+                          />
+                        </div>
+                        <div className='mt-5 text-lg font-semibold'>
+                          {t(purpose.titleKey)}
+                        </div>
+                        <p className='mt-2 text-sm leading-6 text-white/54'>
+                          {t(purpose.descriptionKey)}
+                        </p>
+                      </div>
+                    </motion.button>
+                  )
+                })}
+              </div>
+            </LayoutGroup>
           </QuickStartPage>
 
           <QuickStartPage
@@ -715,76 +755,99 @@ export function QuickStart() {
                 )}
               </div>
             ) : (
-              <div className='grid max-h-[52vh] gap-3 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3'>
-                {orderedModelList.map((model) => {
-                  const selected = activeModelName === model.model_name
-                  const preferred = isPreferredQuickStartModel(model.model_name)
-                  const rate = getModelRateLabels(model)
-                  return (
-                    <button
-                      key={model.model_name}
-                      type='button'
-                      aria-pressed={selected}
-                      onClick={() => handleSelectModel(model.model_name)}
-                      className={cn(
-                        'rounded-[1.5rem] border p-4 text-left shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-all duration-300 active:scale-[0.98]',
-                        selected
-                          ? 'border-white/30 bg-white/[0.12] text-white'
-                          : 'border-white/10 bg-[#030409]/50 text-white/72 hover:border-white/22 hover:bg-white/[0.07] hover:text-white'
-                      )}
-                    >
-                      <div className='flex items-start justify-between gap-3'>
-                        <div className='min-w-0'>
-                          <div className='truncate font-semibold'>
-                            {t(getQuickStartModelDisplayName(model.model_name))}
-                          </div>
-                          <div className='mt-1 text-xs text-white/42'>
-                            {model.vendor_name || t('Model provider')}
-                          </div>
-                        </div>
+              <LayoutGroup id='quick-start-model-selection'>
+                <div className='grid max-h-[52vh] gap-3 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3'>
+                  {orderedModelList.map((model) => {
+                    const selected = activeModelName === model.model_name
+                    const preferred = isPreferredQuickStartModel(
+                      model.model_name
+                    )
+                    const rate = getModelRateLabels(model)
+                    return (
+                      <motion.button
+                        key={model.model_name}
+                        data-quick-start-model={model.model_name}
+                        layout={reducedMotion ? false : 'position'}
+                        type='button'
+                        aria-pressed={selected}
+                        onClick={() => handleSelectModel(model.model_name)}
+                        whileTap={reducedMotion ? undefined : { scale: 0.985 }}
+                        transition={
+                          reducedMotion
+                            ? QUICK_START_REDUCED_TRANSITION
+                            : QUICK_START_SPRING_TRANSITION
+                        }
+                        className={cn(
+                          'relative isolate overflow-hidden rounded-[1.5rem] border p-4 text-left backdrop-blur-2xl transition-[border-color,color,background-color] duration-300',
+                          selected
+                            ? 'border-transparent bg-transparent text-white'
+                            : 'border-white/10 bg-[#030409]/50 text-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:border-white/22 hover:bg-white/[0.07] hover:text-white'
+                        )}
+                      >
                         {selected ? (
-                          <CheckCircle2
-                            className='size-4 shrink-0 text-white'
-                            aria-hidden='true'
+                          <QuickStartSelectionSurface
+                            layoutId='quick-start-model-selected'
+                            reducedMotion={Boolean(reducedMotion)}
                           />
                         ) : null}
-                      </div>
-                      <div className='mt-3 flex flex-wrap gap-1.5'>
-                        {preferred ? (
-                          <Badge className='border-white/20 bg-white text-[#030409]'>
-                            {t('Recommended')}
-                          </Badge>
-                        ) : null}
-                        {preferred ? (
-                          <Badge
-                            variant='outline'
-                            className='border-white/18 bg-white/[0.05] text-white/72'
-                          >
-                            {t(QUICK_START_REASONING_EFFORT_LABEL_KEY)}
-                          </Badge>
-                        ) : null}
-                        {getModelTags(model).map((tag) => (
-                          <Badge
-                            key={tag}
-                            variant='outline'
-                            className='border-white/12 bg-white/[0.03] text-white/62'
-                          >
-                            {t(tag)}
-                          </Badge>
-                        ))}
-                      </div>
-                      <div className='mt-4 grid gap-1 font-mono text-[11px] text-white/46'>
-                        <span>
-                          {t('Input')}: {rate.input}
-                        </span>
-                        <span>
-                          {t('Output')}: {rate.output}
-                        </span>
-                      </div>
-                    </button>
-                  )
-                })}
-              </div>
+                        <div className='relative z-10'>
+                          <div className='flex items-start justify-between gap-3'>
+                            <div className='min-w-0'>
+                              <div className='truncate font-semibold'>
+                                {t(
+                                  getQuickStartModelDisplayName(
+                                    model.model_name
+                                  )
+                                )}
+                              </div>
+                              <div className='mt-1 text-xs text-white/42'>
+                                {model.vendor_name || t('Model provider')}
+                              </div>
+                            </div>
+                            <QuickStartSelectionCheck
+                              visible={selected}
+                              reducedMotion={Boolean(reducedMotion)}
+                              className='size-4 text-white'
+                            />
+                          </div>
+                          <div className='mt-3 flex flex-wrap gap-1.5'>
+                            {preferred ? (
+                              <Badge className='border-white/20 bg-white text-[#030409]'>
+                                {t('Recommended')}
+                              </Badge>
+                            ) : null}
+                            {preferred ? (
+                              <Badge
+                                variant='outline'
+                                className='border-white/18 bg-white/[0.05] text-white/72'
+                              >
+                                {t(QUICK_START_REASONING_EFFORT_LABEL_KEY)}
+                              </Badge>
+                            ) : null}
+                            {getModelTags(model).map((tag) => (
+                              <Badge
+                                key={tag}
+                                variant='outline'
+                                className='border-white/12 bg-white/[0.03] text-white/62'
+                              >
+                                {t(tag)}
+                              </Badge>
+                            ))}
+                          </div>
+                          <div className='mt-4 grid gap-1 font-mono text-[11px] text-white/46'>
+                            <span>
+                              {t('Input')}: {rate.input}
+                            </span>
+                            <span>
+                              {t('Output')}: {rate.output}
+                            </span>
+                          </div>
+                        </div>
+                      </motion.button>
+                    )
+                  })}
+                </div>
+              </LayoutGroup>
             )}
           </QuickStartPage>
 
@@ -796,16 +859,19 @@ export function QuickStart() {
             )}
             nextGuide={t(nextStepGuideKeys.software)}
           >
-            <div className='flex flex-col gap-3'>
-              {codexDownloadCards.map((card) => (
-                <SoftwareDownloadRow
-                  key={card.platform}
-                  card={card}
-                  selected={downloadedPlatform === card.platform}
-                  onDownload={handleDownload}
-                />
-              ))}
-            </div>
+            <LayoutGroup id='quick-start-software-selection'>
+              <div className='flex flex-col gap-3'>
+                {codexDownloadCards.map((card) => (
+                  <SoftwareDownloadRow
+                    key={card.platform}
+                    card={card}
+                    selected={downloadedPlatform === card.platform}
+                    reducedMotion={Boolean(reducedMotion)}
+                    onDownload={handleDownload}
+                  />
+                ))}
+              </div>
+            </LayoutGroup>
             <div className='mt-4 flex items-start gap-3 rounded-[1.25rem] border border-white/10 bg-white/[0.035] p-4 text-sm leading-6 text-white/56 backdrop-blur-xl'>
               <CheckCircle2
                 className='mt-0.5 size-4 shrink-0 text-white/64'
@@ -855,10 +921,11 @@ export function QuickStart() {
                       )
                 }
                 complete={balanceReady}
+                reducedMotion={Boolean(reducedMotion)}
               >
-                <div className='grid gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]'>
+                <div className='grid w-full gap-2 sm:grid-cols-[11rem_minmax(0,1fr)_11rem]'>
                   <Button
-                    className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
+                    className={QUICK_START_PRIMARY_ACTION_CLASS}
                     onClick={() => navigateToPath('/wallet')}
                   >
                     <WalletCards data-icon='inline-start' />
@@ -873,11 +940,11 @@ export function QuickStart() {
                       }
                     }}
                     placeholder={t('Enter your redemption code')}
-                    className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white placeholder:text-white/34 focus-visible:border-white/28 focus-visible:ring-white/18'
+                    className='h-11 rounded-full border-white/14 bg-white/[0.035] px-4 text-white placeholder:text-white/34 focus-visible:border-white/28 focus-visible:ring-white/18'
                   />
                   <Button
                     variant='outline'
-                    className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                    className={QUICK_START_SECONDARY_ACTION_CLASS}
                     disabled={isRedeemingCode}
                     onClick={handleRedeemCode}
                   >
@@ -903,18 +970,27 @@ export function QuickStart() {
                 }
                 description={apiKeyStepDescription}
                 complete={Boolean(effectiveApiKey)}
+                reducedMotion={Boolean(reducedMotion)}
+                inlineActions
               >
-                <Button
-                  className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
-                  disabled={apiKeyActionPending}
-                  onClick={handleGenerateApiKey}
-                >
-                  <ApiKeyActionIcon
-                    data-icon='inline-start'
-                    className={apiKeyActionPending ? 'animate-spin' : undefined}
-                  />
-                  {apiKeyActionLabel}
-                </Button>
+                <div className='flex justify-end'>
+                  <Button
+                    className={cn(
+                      QUICK_START_PRIMARY_ACTION_CLASS,
+                      'w-full sm:w-auto'
+                    )}
+                    disabled={apiKeyActionPending}
+                    onClick={handleGenerateApiKey}
+                  >
+                    <ApiKeyActionIcon
+                      data-icon='inline-start'
+                      className={
+                        apiKeyActionPending ? 'animate-spin' : undefined
+                      }
+                    />
+                    {apiKeyActionLabel}
+                  </Button>
+                </div>
               </AccountStepCard>
             </div>
           </QuickStartPage>
@@ -932,6 +1008,7 @@ export function QuickStart() {
                 title={t('Model selected')}
                 description={selectedModelSummary}
                 complete={Boolean(selectedModel)}
+                reducedMotion={Boolean(reducedMotion)}
               />
               <ReadinessRow
                 step='02'
@@ -942,11 +1019,12 @@ export function QuickStart() {
                     : t('Have you finished installing CC Switch?')
                 }
                 complete={softwareConfirmed}
+                reducedMotion={Boolean(reducedMotion)}
               >
                 {!softwareConfirmed ? (
                   <div className='flex flex-wrap gap-2'>
                     <Button
-                      className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
+                      className={QUICK_START_PRIMARY_ACTION_CLASS}
                       onClick={handleConfirmSoftware}
                     >
                       <Check data-icon='inline-start' />
@@ -954,7 +1032,7 @@ export function QuickStart() {
                     </Button>
                     <Button
                       variant='outline'
-                      className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                      className={QUICK_START_SECONDARY_ACTION_CLASS}
                       onClick={handleReturnToSoftware}
                     >
                       {t('Not yet')}
@@ -971,11 +1049,12 @@ export function QuickStart() {
                     : t('Generate an API key before importing.')
                 }
                 complete={Boolean(effectiveApiKey)}
+                reducedMotion={Boolean(reducedMotion)}
               >
                 {!effectiveApiKey ? (
                   <Button
                     variant='outline'
-                    className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                    className={QUICK_START_SECONDARY_ACTION_CLASS}
                     onClick={() => navigateToQuickStartPage('account')}
                   >
                     {t('Return to account setup')}
@@ -1032,7 +1111,7 @@ export function QuickStart() {
                     <div className='flex flex-wrap gap-2'>
                       {!importConfirmed ? (
                         <Button
-                          className='h-10 rounded-full bg-white px-4 text-[#030409] hover:bg-white/88'
+                          className={QUICK_START_PRIMARY_ACTION_CLASS}
                           onClick={handleConfirmImport}
                         >
                           <Check data-icon='inline-start' />
@@ -1041,7 +1120,7 @@ export function QuickStart() {
                       ) : null}
                       <Button
                         variant='outline'
-                        className='h-10 rounded-full border-white/14 bg-white/[0.035] px-4 text-white hover:bg-white/[0.08] hover:text-white'
+                        className={QUICK_START_SECONDARY_ACTION_CLASS}
                         onClick={handleImportToCCSwitch}
                       >
                         <RotateCcw data-icon='inline-start' />
@@ -1062,34 +1141,70 @@ export function QuickStart() {
 function SoftwareDownloadRow(props: {
   card: CodexDownloadCard
   selected: boolean
+  reducedMotion: boolean
   onDownload: (card: CodexDownloadCard) => void
 }) {
   const { t } = useTranslation()
-  const Icon = props.card.platform === 'macOS' ? Apple : MonitorCog
+  const Icon = props.card.platform === 'macOS' ? SiApple : FaWindows
 
   return (
-    <div
+    <motion.div
+      data-quick-start-platform={props.card.platform}
+      layout={props.reducedMotion ? false : 'position'}
+      transition={
+        props.reducedMotion
+          ? QUICK_START_REDUCED_TRANSITION
+          : QUICK_START_SPRING_TRANSITION
+      }
       className={cn(
-        'flex flex-col gap-5 rounded-[1.5rem] border p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl transition-colors duration-300 sm:flex-row sm:items-center sm:justify-between',
+        'relative isolate grid grid-cols-1 gap-5 overflow-hidden rounded-[1.5rem] border p-5 backdrop-blur-2xl transition-colors duration-300 sm:grid-cols-[minmax(0,1fr)_14rem] sm:items-center',
         props.selected
-          ? 'border-white/28 bg-white/[0.1]'
-          : 'border-white/10 bg-[#030409]/54'
+          ? 'border-transparent bg-transparent'
+          : 'border-white/10 bg-[#030409]/54 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
       )}
     >
-      <div className='flex min-w-0 items-start gap-4'>
+      {props.selected ? (
+        <QuickStartSelectionSurface
+          layoutId='quick-start-software-selected'
+          reducedMotion={props.reducedMotion}
+        />
+      ) : null}
+      <div className='relative z-10 flex min-w-0 items-start gap-4'>
         <span className='flex size-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.05]'>
-          <Icon className='size-5 text-white/76' aria-hidden='true' />
+          <Icon className='size-5 text-white/82' aria-hidden='true' />
         </span>
         <div className='min-w-0'>
           <div className='flex flex-wrap items-center gap-2'>
             <h2 className='text-lg font-semibold text-white'>
               {t(props.card.titleKey)}
             </h2>
-            {props.selected ? (
-              <Badge className='border-white/20 bg-white text-[#030409]'>
-                {t('Download opened')}
-              </Badge>
-            ) : null}
+            <AnimatePresence initial={false}>
+              {props.selected ? (
+                <motion.span
+                  key='download-opened'
+                  initial={
+                    props.reducedMotion
+                      ? { opacity: 0 }
+                      : { opacity: 0, scale: 0.86, x: -5 }
+                  }
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={
+                    props.reducedMotion
+                      ? { opacity: 0 }
+                      : { opacity: 0, scale: 0.9, x: 4 }
+                  }
+                  transition={
+                    props.reducedMotion
+                      ? QUICK_START_REDUCED_TRANSITION
+                      : QUICK_START_SPRING_TRANSITION
+                  }
+                >
+                  <Badge className='border-white/20 bg-white text-[#030409]'>
+                    {t('Download opened')}
+                  </Badge>
+                </motion.span>
+              ) : null}
+            </AnimatePresence>
           </div>
           <p className='mt-1 text-sm leading-6 text-white/56'>
             {t(props.card.descriptionKey)}
@@ -1100,7 +1215,7 @@ function SoftwareDownloadRow(props: {
         </div>
       </div>
       <Button
-        className='h-11 shrink-0 rounded-full bg-white px-5 text-[#030409] hover:bg-white/88'
+        className='relative z-10 h-12 w-full rounded-full bg-white px-5 text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
         render={
           <a
             href={props.card.downloadHref}
@@ -1113,7 +1228,7 @@ function SoftwareDownloadRow(props: {
         <Download data-icon='inline-start' />
         {t(props.card.buttonLabelKey)}
       </Button>
-    </div>
+    </motion.div>
   )
 }
 
@@ -1122,23 +1237,27 @@ function AccountStepCard(props: {
   title: string
   description: string
   complete: boolean
+  reducedMotion: boolean
+  inlineActions?: boolean
   children: ReactNode
 }) {
   const { t } = useTranslation()
   return (
     <div className='rounded-[1.5rem] border border-white/10 bg-[#030409]/54 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-      <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
+      <div
+        className={cn(
+          'flex flex-col gap-5',
+          props.inlineActions &&
+            'sm:flex-row sm:items-center sm:justify-between'
+        )}
+      >
         <div className='flex min-w-0 items-start gap-4'>
-          <span
-            className={cn(
-              'flex size-10 shrink-0 items-center justify-center rounded-2xl border font-mono text-xs font-semibold',
-              props.complete
-                ? 'border-white/24 bg-white text-[#030409]'
-                : 'border-white/12 bg-white/[0.04] text-white/52'
-            )}
-          >
-            {props.complete ? <Check className='size-4' /> : props.step}
-          </span>
+          <QuickStartStepMarker
+            step={props.step}
+            complete={props.complete}
+            reducedMotion={props.reducedMotion}
+            className='size-10 rounded-2xl text-xs'
+          />
           <div>
             <div className='flex flex-wrap items-center gap-2'>
               <h2 className='font-semibold text-white'>{props.title}</h2>
@@ -1151,7 +1270,14 @@ function AccountStepCard(props: {
             </p>
           </div>
         </div>
-        <div className='shrink-0'>{props.children}</div>
+        <div
+          className={cn(
+            'w-full',
+            props.inlineActions && 'sm:w-auto sm:shrink-0'
+          )}
+        >
+          {props.children}
+        </div>
       </div>
     </div>
   )
@@ -1162,22 +1288,19 @@ function ReadinessRow(props: {
   title: string
   description: string
   complete: boolean
+  reducedMotion: boolean
   children?: ReactNode
 }) {
   return (
     <div className='rounded-[1.25rem] border border-white/10 bg-[#030409]/54 p-4 backdrop-blur-xl'>
       <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
         <div className='flex min-w-0 items-start gap-3'>
-          <span
-            className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-xl border font-mono text-[11px] font-semibold',
-              props.complete
-                ? 'border-white/24 bg-white text-[#030409]'
-                : 'border-white/12 bg-white/[0.04] text-white/46'
-            )}
-          >
-            {props.complete ? <Check className='size-4' /> : props.step}
-          </span>
+          <QuickStartStepMarker
+            step={props.step}
+            complete={props.complete}
+            reducedMotion={props.reducedMotion}
+            className='size-9 rounded-xl text-[11px]'
+          />
           <div className='min-w-0'>
             <div className='font-semibold text-white'>{props.title}</div>
             <p className='mt-1 text-sm leading-6 break-words text-white/52'>
@@ -1248,7 +1371,7 @@ function CCSwitchImportPanel(props: {
           </div>
         </div>
         <Button
-          className='h-12 w-full rounded-full bg-white px-5 text-[#030409] hover:bg-white/88'
+          className='h-12 w-full rounded-full bg-white px-5 text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
           onClick={props.onImport}
         >
           {props.imported ? (
@@ -1310,6 +1433,7 @@ function QuickStartControls(props: {
   api: LandingSnapControlsApi
   canFinish: boolean
   disabled: boolean
+  reducedMotion: boolean
   onEnterDashboard: () => void
   onSkip: () => void
 }) {
@@ -1320,14 +1444,20 @@ function QuickStartControls(props: {
   let secondaryControl: ReactNode = null
   if (!isFinalPage) {
     secondaryControl = (
-      <button
+      <motion.button
         type='button'
         onClick={props.onSkip}
         disabled={props.disabled}
+        whileTap={props.reducedMotion ? undefined : { scale: 0.98 }}
+        transition={
+          props.reducedMotion
+            ? QUICK_START_REDUCED_TRANSITION
+            : QUICK_START_SPRING_TRANSITION
+        }
         className='rounded-full px-4 py-1 text-xs font-medium text-white/44 transition-colors hover:text-white/76 disabled:pointer-events-none disabled:opacity-30'
       >
         {t('Set up later and enter dashboard')}
-      </button>
+      </motion.button>
     )
   } else if (!props.canFinish) {
     secondaryControl = (
@@ -1342,30 +1472,55 @@ function QuickStartControls(props: {
       data-point-cloud-ignore
       className='absolute bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-30 flex w-[min(calc(100%-1.5rem),34rem)] -translate-x-1/2 flex-col items-center gap-2'
     >
-      <div className='flex w-full items-center gap-1.5 rounded-full border border-white/12 bg-[#030409]/72 p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl'>
-        <button
+      <div
+        className={cn(
+          'grid w-full items-center gap-1.5 rounded-full border border-white/12 bg-[#030409]/72 p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl',
+          isFinalPage
+            ? 'grid-cols-[3rem_auto_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+            : 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+        )}
+      >
+        <motion.button
           type='button'
           aria-label={t('Previous')}
           onClick={props.api.goPrevious}
           disabled={!props.api.canGoPrevious || props.disabled}
-          className='flex h-12 min-w-12 items-center justify-center gap-2 rounded-full border border-transparent px-3 text-sm font-semibold text-white/72 transition-all duration-300 hover:border-white/12 hover:bg-white/[0.06] hover:text-white active:scale-[0.98] disabled:pointer-events-none disabled:opacity-28 sm:min-w-28'
+          whileTap={props.reducedMotion ? undefined : { scale: 0.96 }}
+          transition={
+            props.reducedMotion
+              ? QUICK_START_REDUCED_TRANSITION
+              : QUICK_START_SPRING_TRANSITION
+          }
+          className='flex h-12 min-w-12 items-center justify-center gap-2 justify-self-start rounded-full border border-transparent px-3 text-sm font-semibold text-white/72 transition-[border-color,background-color,color] duration-300 hover:border-white/12 hover:bg-white/[0.06] hover:text-white disabled:pointer-events-none disabled:opacity-28 sm:min-w-28'
         >
           <ArrowLeft className='size-4' aria-hidden='true' />
           <span className='hidden sm:inline'>{t('Previous')}</span>
-        </button>
-        <div className='min-w-16 flex-1 text-center font-mono text-[10px] font-semibold text-white/44 tabular-nums'>
+        </motion.button>
+        <div className='min-w-16 text-center font-mono text-[10px] font-semibold text-white/44 tabular-nums'>
           {String(props.api.activeIndex + 1).padStart(2, '0')} /{' '}
           {String(props.api.totalPages).padStart(2, '0')}
         </div>
-        <button
+        <motion.button
           type='button'
           onClick={handlePrimary}
           disabled={primaryDisabled}
-          className='flex h-12 min-w-32 items-center justify-center gap-2 rounded-full bg-white px-4 text-sm font-black text-[#030409] shadow-[0_16px_48px_rgba(255,255,255,0.2)] ring-1 ring-white/30 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_20px_58px_rgba(255,255,255,0.28)] active:scale-[0.98] disabled:pointer-events-none disabled:translate-y-0 disabled:bg-white/20 disabled:text-white/42 disabled:shadow-none sm:min-w-40'
+          whileHover={props.reducedMotion ? undefined : { y: -2 }}
+          whileTap={props.reducedMotion ? undefined : { scale: 0.97, y: 0 }}
+          transition={
+            props.reducedMotion
+              ? QUICK_START_REDUCED_TRANSITION
+              : QUICK_START_SPRING_TRANSITION
+          }
+          className={cn(
+            'flex h-12 max-w-full min-w-32 items-center justify-center gap-2 justify-self-end rounded-full bg-white px-3 text-xs leading-tight font-black whitespace-normal text-[#030409] shadow-[0_16px_48px_rgba(255,255,255,0.2)] ring-1 ring-white/30 transition-[background-color,color,box-shadow] duration-300 hover:shadow-[0_20px_58px_rgba(255,255,255,0.28)] disabled:pointer-events-none disabled:bg-white/20 disabled:text-white/42 disabled:shadow-none sm:min-w-40 sm:px-4 sm:text-sm sm:whitespace-nowrap',
+            isFinalPage && 'w-full sm:w-auto'
+          )}
         >
-          <span>{isFinalPage ? t('Enter dashboard') : t('Next')}</span>
+          <span className='min-w-0 text-balance'>
+            {isFinalPage ? t('Enter dashboard') : t('Next')}
+          </span>
           <ArrowRight className='size-4' aria-hidden='true' />
-        </button>
+        </motion.button>
       </div>
       {secondaryControl}
     </div>

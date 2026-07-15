@@ -32,6 +32,14 @@ const dataSource = readFileSync(
   resolve(currentDir, 'quick-start-data.ts'),
   'utf8'
 )
+const motionSource = readFileSync(
+  resolve(currentDir, 'quick-start-motion.tsx'),
+  'utf8'
+)
+const motionConfigSource = readFileSync(
+  resolve(currentDir, 'quick-start-motion-config.ts'),
+  'utf8'
+)
 const completionDialogSource = readFileSync(
   resolve(currentDir, 'quick-start-completion-dialog.tsx'),
   'utf8'
@@ -45,13 +53,47 @@ test('quick start controls are centered, enlarged, and keep one primary action',
   assert.match(pageSource, /left-1\/2/)
   assert.match(pageSource, /-translate-x-1\/2/)
   assert.match(pageSource, /h-12 min-w-12/)
-  assert.match(pageSource, /h-12 min-w-32/)
+  assert.match(pageSource, /h-12[^\n]*min-w-32/)
   assert.match(pageSource, /shadow-\[0_16px_48px_rgba\(255,255,255,0\.2\)\]/)
   assert.match(pageSource, /ring-1 ring-white\/30/)
   assert.match(pageSource, /font-black/)
-  assert.match(pageSource, /hover:-translate-y-0\.5/)
+  assert.match(
+    pageSource,
+    /whileHover=\{props\.reducedMotion \? undefined : \{ y: -2 \}\}/
+  )
+  assert.match(pageSource, /grid-cols-\[minmax\(0,1fr\)_auto_minmax\(0,1fr\)\]/)
+  assert.match(pageSource, /justify-self-start/)
+  assert.match(pageSource, /justify-self-end/)
+  assert.match(pageSource, /grid-cols-\[3rem_auto_minmax\(0,1fr\)\]/)
+  assert.match(pageSource, /isFinalPage && 'w-full sm:w-auto'/)
   assert.match(pageSource, /isFinalPage\s*\?\s*props\.onEnterDashboard/)
   assert.equal(pageSource.match(/t\('Enter dashboard'\)/g)?.length, 1)
+})
+
+test('quick start uses guided in-page motion with reduced-motion fallbacks', () => {
+  assert.match(pageSource, /LayoutGroup id='quick-start-purpose-selection'/)
+  assert.match(pageSource, /LayoutGroup id='quick-start-model-selection'/)
+  assert.match(pageSource, /LayoutGroup id='quick-start-software-selection'/)
+  assert.match(pageSource, /layout=\{reducedMotion \? false : 'position'\}/)
+  assert.match(pageSource, /QuickStartSelectionSurface/)
+  assert.match(pageSource, /QuickStartSelectionCheck/)
+  assert.match(pageSource, /QuickStartStepMarker/)
+  assert.match(motionConfigSource, /QUICK_START_SPRING_TRANSITION/)
+  assert.match(motionConfigSource, /QUICK_START_REDUCED_TRANSITION/)
+  assert.match(motionSource, /props\.reducedMotion/)
+})
+
+test('software download rows use accurate platform marks and aligned actions', () => {
+  assert.match(pageSource, /import \{ FaWindows \} from 'react-icons\/fa6'/)
+  assert.match(pageSource, /import \{ SiApple \} from 'react-icons\/si'/)
+  assert.match(
+    pageSource,
+    /props\.card\.platform === 'macOS' \? SiApple : FaWindows/
+  )
+  assert.doesNotMatch(pageSource, /\n\s*Apple,\n/)
+  assert.match(pageSource, /sm:grid-cols-\[minmax\(0,1fr\)_14rem\]/)
+  assert.match(pageSource, /sm:grid-cols-\[11rem_minmax\(0,1fr\)_11rem\]/)
+  assert.match(pageSource, /className='relative z-10 h-12 w-full/)
 })
 
 test('quick start keeps DOM content above the WebGL background in filtered app shells', () => {
