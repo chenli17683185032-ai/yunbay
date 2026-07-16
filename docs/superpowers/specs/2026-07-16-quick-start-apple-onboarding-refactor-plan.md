@@ -474,7 +474,7 @@
 
 ### 13.5 发布闭环
 
-- 用户明确说“部署”前，生产发布保持暂停；不得停止、重建或重启服务器服务。当前只允许提交并推送 GitHub `main`。
+- 2026-07-16 用户已明确说“部署”，本轮生产发布获准开始；仍必须在构建期间保持旧服务，正式切换只允许有 watchdog 保护的标准 `new-api` 单服务重建。
 - 先只读确认生产标准实例 healthy、Caddy 文件与运行时 upstream 都是 `new-api:3000`，并固定当前运行镜像为不可变回滚标签。
 - 获取 `/var/lock/yunbay-new-api-deploy.lock` 后同步精确文件并构建；构建期间旧标准容器继续服务。发布前启动独立于 SSH 的 60 秒 watchdog。
 - 正式切换只重建标准 `new-api`，不创建绿实例、不生成临时 Caddyfile、不调用 Caddy Admin API或 `caddy reload`。45 秒内未恢复时 watchdog 自动标回旧镜像并重建。
@@ -489,7 +489,7 @@
 | 圆形完成标记、反馈顺序与测试 | 已完成 | 同源圆形标记、状态优先滚动和顺序断言通过 |
 | 自动化与双视口浏览器验收 | 已完成 | 工程检查、交互、测量、截图和 reduced-motion 通过 |
 | GitHub main | 已完成 | 本轮三个文件已随 `f7839a9d` 普通推送 main |
-| 固定 upstream 生产发布 | 等待用户授权 | 用户明确说“部署”前不停止、重建或重启任何服务器服务 |
+| 固定 upstream 生产发布 | 已完成 | `f7839a9d` 已按固定 upstream 流程上线，最终实例 healthy，回滚点与运维记录已保留 |
 
 ### 13.7 实施验证记录
 
@@ -499,4 +499,25 @@
 - 桌面 `1280x720` 和移动端 `390x844` 均已通过：完成标记为 `36x36` 完整圆形，完成行在 Prompt 面板上方，无横向溢出。减少动态效果下同一交互顺序通过，页面 `scrollWidth=viewportWidth=1280`；开发模式仅有 Motion 检测到 reduced-motion 后输出的预期说明性 warning，控制台 error 为 0。
 - `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、定向 ESLint、六语言 i18n、Prettier、`bun run build` 与 `git diff --check` 均通过。最新本地生产入口为 `dist/static/js/index.5ef2da020e.js`。
 - 功能与计划提交 `f7839a9d5236130590df6c8044978a0f1c729382` 已普通 fast-forward 推送 GitHub `main`；提交范围只有本轮计划、快速启动实现与源码测试。
-- 本轮没有执行生产部署或任何服务器服务变更；生产继续运行现有版本，等待用户明确发布指令。
+- 本轮最初按用户要求暂停生产；收到明确“部署”指令后才进入第 13.8 节的固定 upstream 发布流程。
+
+### 13.8 生产执行计划
+
+- 目标功能基线固定为 `f7839a9d5236130590df6c8044978a0f1c729382`，不把后续纯文档提交当作镜像内容标记；从生产当前 `ee953c59` 到目标共精确同步 12 个 `web/default` 源码、测试和六语言文件，不同步仓库脏工作区或项目文档。
+- 先获取 `/var/lock/yunbay-new-api-deploy.lock` 并完成只读前置检查：标准 new-api/Caddy healthy、文件和运行时 upstream 均为 `new-api:3000`、首页与状态接口为 200、当前运行镜像可解析。
+- 在锁内备份 12 个目标文件及当前部署标记，以运行镜像 ID创建不可变 rollback tag；非删除式同步经过提交归档的精确文件，并校验本地/生产组合 SHA-256。
+- 服务器构建 `yunbay-new-api:prod` 时旧标准容器继续服务；构建成功后建立 release tag，静态核对镜像内新 bundle 与目标源码标记。
+- 切换前启动独立于 SSH 的 60 秒 watchdog；只执行 `docker compose ... up -d --no-deps --force-recreate --no-build new-api`。45 秒内未 healthy 或 HTTP 未恢复时，watchdog 自动把 rollback tag 重标为 `prod` 并只重建标准服务。
+- 发布成功须满足：new-api/Caddy healthy、Caddy upstream 仍为 `new-api:3000`、首页和 `/api/status` 连续 5 次 200、生产 bundle 含新提示词面板与圆形完成标记行为所对应的代码；随后原子更新部署标记，追加仓库与桌面唯一运维手册并清理临时发布文件。
+
+### 13.9 生产执行与验证记录
+
+- 生产从 `ee953c5954f85e61a4004f0df26f9043e696cc10` 精确、非删除式同步 12 个 `web/default` 文件到功能提交 `f7839a9d5236130590df6c8044978a0f1c729382`；文件清单 SHA-256 为 `3019659dddd3fb3a266ed24c5190983dfcb80393d867714c2809373eea2fcf05`。构建期间旧容器始终承担现网流量。
+- 最终新镜像为 `sha256:b7af515bac4bfc28de155fa08dfd4f15a2e7f6d2d36d74837c9fcd2b9955472c`，release tag 为 `yunbay-new-api:release-f7839a9d`；标准容器 `2791f8a56983f9556a362a06e99a7bfa683422a1e36ecddbad0436ec77575f3e` 为 `running / healthy / restart=0`。
+- 成功回滚目录为 `/opt/new-api/backups/quick-start-confirm-order-20260716T131718Z-f7839a9d`；旧运行镜像 `sha256:3db9cb74a065b3aec8dbfae5919c038739c96bdf728b43794491b2fb86dbb91a` 已固定为 `yunbay-new-api:rollback-quick-start-confirm-order-20260716T131718Z`。本轮没有数据库迁移。
+- 最终标准服务重建 19 秒完成；watchdog 状态为 `success`，没有触发最终回滚。Caddy 文件、挂载和运行时 upstream 始终为 `new-api:3000`；Caddy 容器 ID、启动时间和 restart=0 不变，PostgreSQL、Redis、Sub2API、CLI Proxy 与 LDXP 服务快照前后完全一致。
+- 生产入口为 `/static/js/index.5ef2da020e.js`，SHA-256 `fa94acad0ca79a476a0bb475205424124721e39995536865c03f7b866334b94d`，字节数 `3064387`，与本地已测试构建完全一致；四条新界面文案存在，旧“Continue importing the recommended prompt”文案不存在。
+- 独立验收中，源站 `/api/status`、公网 `/`、`/quick-start` 与 `/api/status` 连续 10 轮均为 200；新实例严重启动日志为 0，部署锁已释放，绿实例数量为 0，部署归档和重复解压目录已清理。
+- 首次正式 SSH 因本机 Clash 临时落到未放行出口而在 banner 前失败，远端脚本没有执行。随后一次预备备份因可选容器没有 Docker health 字段提前退出，也没有同步、构建或切换。
+- 第一次切换时 watchdog 把旧容器在 Compose 替换过程中的 `exited/unhealthy` 瞬态误判为新镜像失败，自动恢复旧镜像、旧源码和旧标记；修正为只有当前容器已使用新镜像时才即时判定 unhealthy。第二次切换中新实例已 healthy/200，但静态验证要求了被生产压缩器移除的源码字符串，因此主动请求自动回滚；最终改用入口、完整 bundle 哈希、字节数、稳定文案和旧文案缺失作为证据。
+- Caddy 在第二次切换、该次回滚和最终切换窗口共记录 30 个 HTTP 502，其中 27 个为标准容器重建期间的短暂连接失败；三个窗口分别约 10 秒、6 秒和 10 秒，主要影响 `/v1/responses`。没有 `new-api-green` DNS/lookup 错误，Caddy 没有重启；最终窗口之后全部探针恢复 200。该事实保留为后续进一步缩短固定 upstream 重建时间的基线。

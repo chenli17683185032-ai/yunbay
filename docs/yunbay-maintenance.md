@@ -1513,3 +1513,38 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ### 回滚
 
 源码回滚从 `/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59/source/` 恢复 `existing-files.txt` 中的 11 个文件；镜像回滚使用 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`。仍须先用旧镜像启动 healthy 绿实例、Caddy 平滑切流、重建标准 `new-api`，再切回正式 Caddyfile；禁止直接停止当前流量承载实例，也不要重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库迁移。
+
+## 2026-07-16 快速启动确认顺序与独立生图提示词预览上线
+
+本轮修正快速启动第五页的反馈顺序：Provider 确认后先显示与上方一致的圆形勾选和“已确认导入”，再在下方显示由真实 Prompt 构造器生成的脱敏生图设置预览；确认后的自动滚动也先落到完成状态。运维记录不包含真实 API Key、生产环境变量或用户会话。
+
+### 发布内容
+
+- 功能提交：`f7839a9d5236130590df6c8044978a0f1c729382`；后续 `bc7c3075` 只有计划闭环文档，不改变镜像内容。
+- 从生产 `ee953c5954f85e61a4004f0df26f9043e696cc10` 精确、非删除式同步 12 个 `web/default` 源码、测试和六语言文件；文件清单 SHA-256 为 `3019659dddd3fb3a266ed24c5190983dfcb80393d867714c2809373eea2fcf05`。
+- 生产入口：`/static/js/index.5ef2da020e.js`；bundle SHA-256 为 `fa94acad0ca79a476a0bb475205424124721e39995536865c03f7b866334b94d`，字节数 `3064387`，与本地测试构建完全一致。
+
+### 固定 upstream 发布结果
+
+- 发布全程没有创建绿实例、临时 Caddyfile或调用 Caddy reload/Admin API。Caddy 文件、容器挂载和运行时配置始终指向 `new-api:3000`。
+- 最终新镜像：`sha256:b7af515bac4bfc28de155fa08dfd4f15a2e7f6d2d36d74837c9fcd2b9955472c`；release tag：`yunbay-new-api:release-f7839a9d`。
+- 标准容器：`2791f8a56983f9556a362a06e99a7bfa683422a1e36ecddbad0436ec77575f3e`，`running / healthy / restart=0`；最终重建 19 秒完成。
+- 回滚目录：`/opt/new-api/backups/quick-start-confirm-order-20260716T131718Z-f7839a9d`；旧镜像 `sha256:3db9cb74a065b3aec8dbfae5919c038739c96bdf728b43794491b2fb86dbb91a`；固定回滚标签 `yunbay-new-api:rollback-quick-start-confirm-order-20260716T131718Z`。
+- `.yunbay-deploy-sha` 与 `.yunbay-source-manifest` 已原子更新到功能提交、12 文件清单、新镜像和部署时间。没有数据库迁移。
+
+### 反馈、回滚与中断审计
+
+- 第一次远程执行在 SSH banner 前因本机运维代理出口不在服务器白名单而失败，远端脚本没有执行。一次预备备份又因可选容器缺少 Docker health 字段提前退出；两者均未同步源码、构建或切换服务。
+- 第一次实际切换中，watchdog 把旧容器在 Compose 重建时的正常 `exited/unhealthy` 瞬态误判为新镜像失败并自动回滚。旧镜像、旧源码、旧部署标记和 `200/200` 全部确认恢复后，watchdog 改为只对已经运行新镜像的容器执行即时 unhealthy 判定。
+- 第二次实际切换中新实例已经 healthy/200，但静态验证使用了会被生产压缩器移除的源码字符串，因此主动请求自动回滚。静态门槛随后改为入口文件名、完整 bundle SHA-256、字节数、四条稳定新文案和旧动作文案缺失。
+- Caddy 在第二次切换、该次自动回滚和最终成功切换期间共记录 30 个 HTTP 502，其中 27 个为固定 upstream 下标准容器暂不可连接；三个窗口分别约 10 秒、6 秒和 10 秒，主要影响 `/v1/responses`。Caddy lookup/DNS 错误为 0，Caddy restart=0。最终切换后所有探针恢复 200。
+
+### 最终验收与清理
+
+- 脚本内连续 5 轮和独立连续 10 轮均确认：宿主机 `/api/status`、公网 `/`、`/quick-start` 与 `/api/status` 为 HTTP 200。
+- new-api 与 Caddy 均 healthy；Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 和 worker 的容器快照在最终切换前后不变，新实例严重启动日志为 0。
+- watchdog 最终状态为 `success`，部署锁已释放；`new-api-green` 数量为 0。远端发布归档、失败尝试的重复解压目录和本机临时验证文件均已清理，失败尝试的最小日志与源码备份保留用于审计。
+
+### 回滚
+
+回滚必须继续使用本文顶部唯一允许流程：获取 `/var/lock/yunbay-new-api-deploy.lock`，把 `yunbay-new-api:rollback-quick-start-confirm-order-20260716T131718Z` 重标为 `yunbay-new-api:prod`，从成功回滚目录恢复 `existing-files.txt` 中的 12 个文件，并在独立 watchdog 保护下只执行 Compose `--no-deps --force-recreate --no-build new-api`。Caddy upstream 始终保持 `new-api:3000`；禁止重启或修改 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP 服务。
