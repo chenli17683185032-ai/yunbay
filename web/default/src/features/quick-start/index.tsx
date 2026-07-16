@@ -85,6 +85,7 @@ import {
 import {
   buildQuickStartCCSwitchImportURL,
   buildQuickStartCCSwitchPromptImportURL,
+  buildQuickStartImagePromptPreview,
   getQuickStartCCSwitchImportState,
   maskQuickStartApiKey,
   normalizeQuickStartCodexEndpoint,
@@ -211,6 +212,7 @@ export function QuickStart() {
   const navigationCompletedRef = useRef(false)
   const importPanelRef = useRef<HTMLDivElement>(null)
   const importStatusRef = useRef<HTMLDivElement>(null)
+  const promptPanelRef = useRef<HTMLDivElement>(null)
   const { status } = useStatus()
   const pricing = usePricingData()
 
@@ -318,7 +320,7 @@ export function QuickStart() {
   if (importConfirmed) {
     importStatusTitle = t('Import confirmed')
     importStatusDescription = t(
-      'Everything is ready. Enter the console when you are ready.'
+      'Provider imported. Continue with the image settings.'
     )
   }
 
@@ -355,9 +357,11 @@ export function QuickStart() {
   useEffect(() => {
     if (!softwareConfirmed || !effectiveApiKey) return
     const frame = window.requestAnimationFrame(() => {
-      const target = importAttempted
-        ? importStatusRef.current
-        : importPanelRef.current
+      const target = importConfirmed
+        ? promptPanelRef.current
+        : importAttempted
+          ? importStatusRef.current
+          : importPanelRef.current
       target?.scrollIntoView({
         behavior: reducedMotion ? 'auto' : 'smooth',
         block: 'nearest',
@@ -619,7 +623,7 @@ export function QuickStart() {
       apiKey: effectiveApiKey,
     })
     window.open(url, '_blank')
-    toast.message(t('Trying to open the recommended prompt in CC Switch'))
+    toast.message(t('Trying to open image settings in CC Switch'))
   }
 
   const handleConfirmImport = () => {
@@ -1096,9 +1100,8 @@ export function QuickStart() {
                         : null
                     }
                     apiKey={effectiveApiKey}
-                    providerImportAttempted={importAttempted}
-                    onImportProvider={handleImportToCCSwitch}
-                    onImportPrompt={handleImportPromptToCCSwitch}
+                    imported={importAttempted}
+                    onImport={handleImportToCCSwitch}
                   />
                 </motion.div>
               ) : null}
@@ -1108,23 +1111,41 @@ export function QuickStart() {
               {importAttempted ? (
                 <motion.div
                   ref={importStatusRef}
+                  data-quick-start-provider-status={
+                    importConfirmed ? 'confirmed' : 'pending'
+                  }
+                  layout={reducedMotion ? false : true}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+                  transition={
+                    reducedMotion
+                      ? QUICK_START_REDUCED_TRANSITION
+                      : QUICK_START_SPRING_TRANSITION
+                  }
                   className='mt-3 scroll-mb-4 rounded-[1.25rem] border border-white/12 bg-white/[0.055] p-4 backdrop-blur-xl sm:scroll-mb-[8rem]'
                 >
                   <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-                    <div>
-                      <div className='font-semibold text-white'>
-                        {importStatusTitle}
+                    <div className='flex min-w-0 items-start gap-3'>
+                      {importConfirmed ? (
+                        <QuickStartStepMarker
+                          step='04'
+                          complete
+                          reducedMotion={Boolean(reducedMotion)}
+                          className='size-9 rounded-xl text-[11px]'
+                        />
+                      ) : null}
+                      <div className='min-w-0'>
+                        <div className='font-semibold text-white'>
+                          {importStatusTitle}
+                        </div>
+                        <p className='mt-1 text-sm leading-6 text-white/54'>
+                          {importStatusDescription}
+                        </p>
                       </div>
-                      <p className='mt-1 text-sm leading-6 text-white/54'>
-                        {importStatusDescription}
-                      </p>
                     </div>
-                    <div className='flex flex-wrap gap-2'>
-                      {!importConfirmed ? (
+                    {!importConfirmed ? (
+                      <div className='flex flex-wrap gap-2'>
                         <Button
                           className={QUICK_START_PRIMARY_ACTION_CLASS}
                           onClick={handleConfirmImport}
@@ -1132,17 +1153,39 @@ export function QuickStart() {
                           <Check data-icon='inline-start' />
                           {t('It opened')}
                         </Button>
-                      ) : null}
-                      <Button
-                        variant='outline'
-                        className={QUICK_START_SECONDARY_ACTION_CLASS}
-                        onClick={handleImportToCCSwitch}
-                      >
-                        <RotateCcw data-icon='inline-start' />
-                        {t('Try again')}
-                      </Button>
-                    </div>
+                        <Button
+                          variant='outline'
+                          className={QUICK_START_SECONDARY_ACTION_CLASS}
+                          onClick={handleImportToCCSwitch}
+                        >
+                          <RotateCcw data-icon='inline-start' />
+                          {t('Try again')}
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            <AnimatePresence initial={false}>
+              {importConfirmed ? (
+                <motion.div
+                  ref={promptPanelRef}
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 10 }}
+                  transition={
+                    reducedMotion
+                      ? QUICK_START_REDUCED_TRANSITION
+                      : { duration: 0.4, ease: [0.16, 1, 0.3, 1] }
+                  }
+                  className='mt-3 scroll-mb-4 sm:scroll-mb-[8rem]'
+                >
+                  <ImageSettingsImportPanel
+                    apiKey={effectiveApiKey}
+                    onImport={handleImportPromptToCCSwitch}
+                  />
                 </motion.div>
               ) : null}
             </AnimatePresence>
@@ -1336,18 +1379,10 @@ function CCSwitchImportPanel(props: {
   modelName: string
   reasoningTarget: string | null
   apiKey: string
-  providerImportAttempted: boolean
-  onImportProvider: () => void
-  onImportPrompt: () => void
+  imported: boolean
+  onImport: () => void
 }) {
   const { t } = useTranslation()
-  const handleImport = props.providerImportAttempted
-    ? props.onImportPrompt
-    : props.onImportProvider
-  const importLabel = props.providerImportAttempted
-    ? t('Continue importing recommended prompt')
-    : t('One-click import')
-  const ImportIcon = props.providerImportAttempted ? Sparkles : ArrowUpRight
 
   return (
     <div className='overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'>
@@ -1396,10 +1431,55 @@ function CCSwitchImportPanel(props: {
         </div>
         <Button
           className='h-12 w-full min-w-0 rounded-full bg-white px-4 text-center leading-tight whitespace-normal text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
-          onClick={handleImport}
+          onClick={props.onImport}
         >
-          <ImportIcon data-icon='inline-start' />
-          <span className='min-w-0 text-balance'>{importLabel}</span>
+          <ArrowUpRight data-icon='inline-start' />
+          <span className='min-w-0 text-balance'>
+            {props.imported ? t('Import again') : t('One-click import')}
+          </span>
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function ImageSettingsImportPanel(props: {
+  apiKey: string
+  onImport: () => void
+}) {
+  const { t } = useTranslation()
+  const promptPreview = buildQuickStartImagePromptPreview(props.apiKey)
+
+  return (
+    <div
+      data-quick-start-prompt-panel
+      className='overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'
+    >
+      <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
+        <div className='flex items-center gap-2'>
+          <span className='size-2.5 rounded-full bg-[#ff5f57]' />
+          <span className='size-2.5 rounded-full bg-[#febc2e]' />
+          <span className='size-2.5 rounded-full bg-[#28c840]' />
+        </div>
+        <div className='font-mono text-[10px] text-white/36 uppercase'>
+          Codex · AGENTS.md
+        </div>
+      </div>
+      <div className='p-5'>
+        <h2 className='text-lg font-semibold text-white'>
+          {t('Image generation settings')}
+        </h2>
+        <pre className='mt-4 max-h-56 overflow-y-auto border-y border-white/10 py-4 font-mono text-xs leading-6 break-words whitespace-pre-wrap text-white/66'>
+          {promptPreview}
+        </pre>
+        <Button
+          className='mt-5 h-12 w-full min-w-0 rounded-full bg-white px-4 text-center leading-tight whitespace-normal text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
+          onClick={props.onImport}
+        >
+          <Sparkles data-icon='inline-start' />
+          <span className='min-w-0 text-balance'>
+            {t('One-click import image settings')}
+          </span>
         </Button>
       </div>
     </div>

@@ -22,6 +22,7 @@ import {
   buildQuickStartCCSwitchImportURL,
   buildQuickStartCCSwitchPromptImportURL,
   buildQuickStartImagePrompt,
+  buildQuickStartImagePromptPreview,
   getQuickStartCCSwitchImportState,
   maskQuickStartApiKey,
   normalizeQuickStartApiKey,
@@ -68,6 +69,16 @@ test('quick start image prompt preserves the imported API key and required routi
     prompt,
     '当我提出生图请求时，必须直接 POST `https://yunbay.xyz/v1/images/generations`，模型固定使用 `gpt-image-2`。禁止把 `gpt-image-2` 配置为 Codex 主聊天模型，也禁止通过 `/v1/chat/completions` 或 `/v1/responses` 直接调用它。API Key为：sk-test-import-key\n收到图片的 Base64 数据后，先解码并将原图保存到当前工作区的 `outputs/` 目录；需要 4K 时再另外处理，并保留原始图片。'
   )
+})
+
+test('quick start image prompt preview masks the key without changing the rules', () => {
+  const preview = buildQuickStartImagePromptPreview('sk-test-import-key')
+
+  assert.match(preview, /API Key为：sk-••••••••-key/)
+  assert.doesNotMatch(preview, /sk-test-import-key/)
+  assert.match(preview, /https:\/\/yunbay\.xyz\/v1\/images\/generations/)
+  assert.match(preview, /gpt-image-2/)
+  assert.match(preview, /outputs\//)
 })
 
 test('quick start CC Switch prompt URL imports and enables the image prompt', () => {

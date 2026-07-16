@@ -365,3 +365,74 @@
 - 最终公网 `/`、`/quick-start`、`/api/status` 各 3/3 为 200；入口 `/static/js/index.04106f6b05.js`，bundle SHA-256 `211fdddf75fef5856d5f1288c8c6b96585d752d9d77d860d4c8ff3cc2196079c`、字节数 `3064077`。
 - 切换窗口本机公网探针 180 次中 177 次为 200，编号 8/80/152 的三次在 HTTP 状态前失败；同窗 Caddy 5xx=0、upstream error=0、应用严重日志=0，且三次间隔规律，按本机代理/Cloudflare 传输链路失败记录。最终独立探针 30/30 为 200。
 - 生产回滚目录为 `/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59`；旧镜像标签 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`，新镜像标签 `yunbay-new-api:release-ee953c59`。部署标记和 11 文件 manifest 已原子更新，绿实例与临时 Caddyfile 已清理。
+
+## 12. 第四轮：第五步向下推进与生图设置预览
+
+### 12.1 目标与性能指标
+
+把第五页抽象为单向状态链 `Provider 待导入 -> Provider 待确认 -> Provider 已确认 -> 生图设置待导入`。用户完成的动作留在上方，下一动作只在其下方出现，消除第二阶段回到旧按钮位置造成的时间倒置感。
+
+完成标准：
+
+- 上方 CC Switch Provider 面板只承担 Provider 首次导入和重新导入，不再按 `importAttempted` 切换为 Prompt 动作。
+- Provider Deep Link 发出后，紧随其后的确认框继续提供“已打开”和 Provider 重试。
+- 用户确认 Provider 后，确认框通过一次非线性布局动画收敛为与上方三个准备步骤同宽、同密度的完成行；不改变父级宽度、不产生横向跳动。
+- 收敛完成行下方展开一个与 Provider 导入面板同级的大面板，明确展示即将写入 Codex 的生图提示词，并提供“一键导入生图设置”。
+- 提示词预览展示完整规则，但 API Key 只显示掩码；实际 `resource=prompt` Deep Link 仍使用与 Provider 相同的内存中真实 Key。
+- 中文按钮严格显示“一键导入生图设置”；新增文案覆盖 en、zh、fr、ja、ru、vi。
+- 不修改 CC Switch 客户端、后端、数据库、Prompt 协议构造器或 Key 持久化边界。
+
+### 12.2 现状测量与根因
+
+- 当前 `CCSwitchImportPanel` 接收 `providerImportAttempted`，首次 Provider Deep Link 发出后把同一个上方面板按钮切换为 Prompt handler，导致视觉焦点逆流到已完成动作之前。
+- 当前下方状态框无论确认前后都保留大块说明与 Provider 重试按钮；确认成功后没有收敛，也没有承载明确的下一阶段。
+- Prompt 构造器已有唯一规则来源和同 Key 测试，可直接复用；新增预览只做展示层的掩码替换，不能另写一份容易漂移的提示词常量。
+
+### 12.3 GitHub 经验参考
+
+- `farion1231/cc-switch` 当前主分支 `f6e37ed9`：Deep Link parser 仍按单一 `resource` 分派 `provider` 与 `prompt`，因此保留两次明确用户动作。
+- `motiondivision/motion`：沿用项目已有 `layout` 与 `AnimatePresence`，用布局插值表达确认框从待确认态收敛到完成态，以及 Prompt 面板在后方进入；不引入新动画库。
+- `shadcn-ui/ui` 当前主分支 `6a5e6da7`：继续复用现有 Button 组合、Lucide 图标与项目语义样式，不新增或重装 UI 组件。
+
+### 12.4 最小充分实现
+
+- `CCSwitchImportPanel` 恢复 Provider-only props 与固定按钮：未尝试时“一键导入”，已尝试时“再次导入”，两者都调用 Provider handler。
+- 下方 Provider 状态容器启用 Motion layout；确认前保留现有说明、确认和重试，确认后渲染紧凑完成行并移除冗余 Provider 重试。
+- 新增快速启动专用 Prompt 预览组件：从现有 `buildQuickStartImagePrompt` 生成展示文本，再将真实 Key 替换为 `maskQuickStartApiKey` 结果；面板正文允许换行和滚动，但在桌面与移动端均不撑破页面。
+- Prompt 面板只在 `importConfirmed` 后出现，操作按钮使用 `Sparkles` 图标和“一键导入生图设置”，继续调用现有 `handleImportPromptToCCSwitch`。
+- 源码测试明确约束 Prompt 按钮位于下方确认分支之后，且 Provider 面板内不存在 Prompt handler；协议单测继续证明 Provider 与 Prompt 使用同一测试 Key。
+
+### 12.5 验证闭环
+
+- 自动化：快速启动全量测试、`bun run i18n:sync`、`bun run typecheck`、涉及文件 ESLint/Prettier、`bun run build`、`git diff --check`。
+- 动画采样：Provider 确认前后记录状态框高度与中间帧，确认最终与三个准备步骤同宽，且高度收敛、无残余 transform。
+- 桌面 1280x720：顺序必须是 Provider 面板、确认/完成行、Prompt 大面板；下一动作不回到上方。
+- 移动端 390x844：提示词长文可读、可滚动，按钮不溢出、不被底部控制器遮挡，页面无横向滚动。
+- 捕获测试 Deep Link：Provider 和 Prompt 使用同一假 Key，Prompt 预览只出现掩码，浏览器控制台不输出真实 Key。
+
+### 12.6 发布控制
+
+- 本地闭环通过后只提交本轮相关文件，推送 GitHub `main`，不纳入用户现有未跟踪设计稿或 `outputs/`。
+- 生产继续使用已验证的绿实例、内部健康检查、Caddy graceful reload 和标准实例切回流程；异常时保持当前健康实例，不让部署无限等待。
+- 发布结果、提交、镜像、回滚点、探针与切流结果追加到 `docs/yunbay-maintenance.md` 和桌面现有运维手册。
+
+### 12.7 实施节点
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 现状、协议与 GitHub 经验核验 | 已完成 | 已确认逆序根因、原版 CC Switch 单 resource 限制与可复用 Motion 路径 |
+| 完整计划与状态链 | 已完成 | 本节已追加到既有单一计划文件 |
+| Provider 完成收敛与 Prompt 大面板 | 已完成 | 下一动作只向下出现，预览脱敏且实际导入保持真实同 Key |
+| 六语言与工程验证 | 已完成 | 六语言无缺失，测试、类型、lint、format 与构建通过 |
+| 桌面与移动端浏览器验收 | 已完成 | 顺序、动画、长文预览、溢出和 Deep Link 捕获均通过 |
+| GitHub main、生产部署与运维记录 | 待开始 | main 与生产同步，双运维手册追加完成 |
+
+### 12.8 实施验证记录
+
+- `CCSwitchImportPanel` 已恢复为 Provider-only：首次显示“一键导入”，尝试后显示“再次导入”，两个状态都只调用 Provider handler；Prompt handler 只存在于下方 `ImageSettingsImportPanel`。
+- Provider 确认前状态框为 `600x130`；确认点击后 Motion layout 中间帧高度约 `86.42px` 且存在布局 transform，约 320ms 收敛为 `600x86` 并清除 transform。移动端完成行为 `358x86`，与上方准备步骤完全同宽同高。
+- Prompt 大面板在 DOM 与视觉位置上都排在 Provider 完成行之后；桌面为 `600x348`，移动端为 `358x418`。移动端正文区域仅纵向滚动，`scrollWidth == clientWidth == 316`，页面 `scrollWidth == viewport == 390`。
+- 中文操作文案为“一键导入生图设置”；六语言 `i18n:sync` 报告的 missing、extras、untranslated 均为 0。
+- Prompt 预览复用实际 Prompt 构造器并只传入掩码 Key；桌面与移动端可见正文均不包含完整测试 Key。捕获的 Provider URL 与 Prompt Base64 解码正文都包含同一个 `sk-test-browser-import-key`，Prompt 仍为 `resource=prompt`、`enabled=true` 并保留图片端点、模型限制和 `outputs/` 规则。
+- 1280x720 与 390x844 浏览器控制台 error/warning 均为 0；两张截图已保存到本次 Codex 可视化目录，没有写入项目 `outputs/`。
+- `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、涉及文件 ESLint、Prettier、`bun run build`、`git diff --check` 均通过。生产构建入口为 `dist/static/js/index.48c85fa5d3.js`。

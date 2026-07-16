@@ -48,6 +48,10 @@ const appHeaderSource = readFileSync(
   resolve(currentDir, '../../components/layout/components/app-header.tsx'),
   'utf8'
 )
+const providerPanelSource = pageSource.slice(
+  pageSource.indexOf('function CCSwitchImportPanel'),
+  pageSource.indexOf('function ImageSettingsImportPanel')
+)
 
 test('quick start controls are centered, enlarged, and keep one primary action', () => {
   assert.match(pageSource, /left-1\/2/)
@@ -153,18 +157,30 @@ test('quick start final page confirms prerequisites before one-click import and 
   assert.match(pageSource, /buildQuickStartCCSwitchPromptImportURL/)
   assert.match(pageSource, /handleImportToCCSwitch/)
   assert.match(pageSource, /handleImportPromptToCCSwitch/)
-  assert.match(pageSource, /providerImportAttempted=\{importAttempted\}/)
-  assert.match(
-    pageSource,
-    /props\.providerImportAttempted\s*\?\s*props\.onImportPrompt\s*:\s*props\.onImportProvider/
+  assert.match(pageSource, /imported=\{importAttempted\}/)
+  assert.match(pageSource, /onImport=\{handleImportToCCSwitch\}/)
+  assert.doesNotMatch(providerPanelSource, /onImportPrompt/)
+  assert.doesNotMatch(providerPanelSource, /handleImportPromptToCCSwitch/)
+  assert.match(providerPanelSource, /props\.imported \? t\('Import again'\)/)
+  assert.match(pageSource, /data-quick-start-provider-status/)
+  assert.match(pageSource, /layout=\{reducedMotion \? false : true\}/)
+  assert.match(pageSource, /step='04'/)
+  assert.match(pageSource, /data-quick-start-prompt-panel/)
+  assert.match(pageSource, /buildQuickStartImagePromptPreview/)
+  assert.match(pageSource, /One-click import image settings/)
+  const providerPanelPosition = pageSource.indexOf('<CCSwitchImportPanel')
+  const providerStatusPosition = pageSource.indexOf(
+    'data-quick-start-provider-status'
   )
-  assert.match(pageSource, /Continue importing recommended prompt/)
+  const promptPanelPosition = pageSource.indexOf('<ImageSettingsImportPanel')
+  assert.ok(providerPanelPosition < providerStatusPosition)
+  assert.ok(providerStatusPosition < promptPanelPosition)
   assert.match(pageSource, /Configured API/)
   assert.match(pageSource, /Configured model/)
   assert.match(pageSource, /Generated API key/)
   assert.match(pageSource, /importConfirmed/)
   assert.match(pageSource, /navigationCompletedRef/)
-  assert.match(pageSource, /importAttempted\s*\?\s*importStatusRef\.current/)
+  assert.match(pageSource, /importConfirmed\s*\?\s*promptPanelRef\.current/)
   assert.match(pageSource, /target\?\.scrollIntoView/)
   assert.match(pageSource, /exitSurface\.animate\(keyframes/)
   assert.match(pageSource, /fill: 'forwards'/)
