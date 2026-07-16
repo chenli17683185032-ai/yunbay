@@ -191,7 +191,7 @@ export function QuickStart() {
     initialSession.softwareConfirmed
   )
   const [importAttempted, setImportAttempted] = useState(
-    initialSession.importAttempted
+    initialSession.importAttempted || initialSession.importConfirmed
   )
   const [importConfirmed, setImportConfirmed] = useState(
     initialSession.importConfirmed
@@ -212,7 +212,7 @@ export function QuickStart() {
   const exitStartedRef = useRef(false)
   const navigationCompletedRef = useRef(false)
   const importPanelRef = useRef<HTMLDivElement>(null)
-  const importStatusRef = useRef<HTMLDivElement>(null)
+  const promptPanelRef = useRef<HTMLDivElement>(null)
   const { status } = useStatus()
   const pricing = usePricingData()
 
@@ -308,22 +308,6 @@ export function QuickStart() {
     ApiKeyActionIcon = Loader2
   }
 
-  let importStatusTitle = t('Did CC Switch open?')
-  let importStatusDescription = t(
-    'Confirm only after CC Switch shows the imported Yunbay provider.'
-  )
-  if (selectedModelIsPreferred) {
-    importStatusDescription = t(
-      'Confirm after CC Switch shows the Yunbay provider and Extreme reasoning.'
-    )
-  }
-  if (importConfirmed) {
-    importStatusTitle = t('Import confirmed')
-    importStatusDescription = t(
-      'Provider imported. Continue with the image settings.'
-    )
-  }
-
   const navigateToPath = useCallback(
     (path: QuickStartNavigationPath) => {
       if (path === '/wallet') {
@@ -357,23 +341,23 @@ export function QuickStart() {
   useEffect(() => {
     if (!softwareConfirmed || !effectiveApiKey) return
     const frame = window.requestAnimationFrame(() => {
-      const target =
-        importConfirmed || importAttempted
-          ? importStatusRef.current
-          : importPanelRef.current
+      const target = importAttempted
+        ? promptPanelRef.current
+        : importPanelRef.current
       target?.scrollIntoView({
         behavior: reducedMotion ? 'auto' : 'smooth',
         block: 'nearest',
       })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [
-    effectiveApiKey,
-    importAttempted,
-    importConfirmed,
-    reducedMotion,
-    softwareConfirmed,
-  ])
+  }, [effectiveApiKey, importAttempted, reducedMotion, softwareConfirmed])
+
+  const scrollPromptIntoView = useCallback(() => {
+    promptPanelRef.current?.scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'nearest',
+    })
+  }, [reducedMotion])
 
   const beginDashboardExit = useCallback(
     (showCompletionPrompt: boolean) => {
@@ -458,6 +442,7 @@ export function QuickStart() {
     setSelectedModelName(modelName)
     setImportAttempted(false)
     setImportConfirmed(false)
+    setProviderDetailsExpanded(false)
     writeQuickStartSession({
       modelName,
       importAttempted: false,
@@ -470,6 +455,7 @@ export function QuickStart() {
     setSoftwareConfirmed(false)
     setImportAttempted(false)
     setImportConfirmed(false)
+    setProviderDetailsExpanded(false)
     writeQuickStartSession({
       modelName: selectedModel?.model_name || '',
       platform: card.platform,
@@ -576,6 +562,7 @@ export function QuickStart() {
     setSoftwareConfirmed(false)
     setImportAttempted(false)
     setImportConfirmed(false)
+    setProviderDetailsExpanded(false)
     writeQuickStartSession({
       softwareConfirmed: false,
       importAttempted: false,
@@ -584,7 +571,7 @@ export function QuickStart() {
     navigateToQuickStartPage('software')
   }
 
-  const openCCSwitchProviderImport = (nextImportConfirmed: boolean) => {
+  const openCCSwitchProviderImport = () => {
     if (!quickStartCCSwitchState.canImport || !selectedModel?.model_name) {
       const message =
         quickStartCCSwitchState.reason === 'api-key'
@@ -595,13 +582,11 @@ export function QuickStart() {
     }
 
     setImportAttempted(true)
-    setImportConfirmed(nextImportConfirmed)
     writeQuickStartSession({
       modelName: selectedModel.model_name,
       platform: downloadedPlatform,
       softwareConfirmed,
       importAttempted: true,
-      importConfirmed: nextImportConfirmed,
     })
     const url = buildQuickStartCCSwitchImportURL({
       serverAddress: quickStartServerAddress,
@@ -612,9 +597,9 @@ export function QuickStart() {
     toast.message(t('Trying to open CC Switch'))
   }
 
-  const handleImportToCCSwitch = () => openCCSwitchProviderImport(false)
+  const handleImportToCCSwitch = () => openCCSwitchProviderImport()
 
-  const handleReimportToCCSwitch = () => openCCSwitchProviderImport(true)
+  const handleReimportToCCSwitch = () => openCCSwitchProviderImport()
 
   const handleImportPromptToCCSwitch = () => {
     if (!effectiveApiKey) {
@@ -626,10 +611,6 @@ export function QuickStart() {
       apiKey: effectiveApiKey,
     })
     window.open(url, '_blank')
-    toast.message(t('Trying to open image settings in CC Switch'))
-  }
-
-  const handleConfirmImport = () => {
     setImportConfirmed(true)
     writeQuickStartSession({
       modelName: selectedModel?.model_name || '',
@@ -638,7 +619,7 @@ export function QuickStart() {
       importAttempted: true,
       importConfirmed: true,
     })
-    toast.success(t('CC Switch setup confirmed'))
+    toast.message(t('Trying to open image settings in CC Switch'))
   }
 
   const QuickStartControlsComponent = useCallback(
@@ -1085,13 +1066,18 @@ export function QuickStart() {
             </div>
 
             <AnimatePresence initial={false}>
-              {softwareConfirmed && effectiveApiKey && !importConfirmed ? (
+              {softwareConfirmed && effectiveApiKey ? (
                 <motion.div
                   ref={importPanelRef}
+                  layout={reducedMotion ? false : true}
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+                  transition={
+                    reducedMotion
+                      ? QUICK_START_REDUCED_TRANSITION
+                      : QUICK_START_SPRING_TRANSITION
+                  }
                   className='mt-3 scroll-mb-4 sm:scroll-mb-[8rem]'
                 >
                   <CCSwitchImportPanel
@@ -1104,7 +1090,12 @@ export function QuickStart() {
                     }
                     apiKey={effectiveApiKey}
                     imported={importAttempted}
+                    detailsExpanded={providerDetailsExpanded}
+                    reducedMotion={Boolean(reducedMotion)}
+                    onDetailsExpandedChange={setProviderDetailsExpanded}
+                    onDetailsCollapsed={scrollPromptIntoView}
                     onImport={handleImportToCCSwitch}
+                    onReimport={handleReimportToCCSwitch}
                   />
                 </motion.div>
               ) : null}
@@ -1113,159 +1104,7 @@ export function QuickStart() {
             <AnimatePresence initial={false}>
               {importAttempted ? (
                 <motion.div
-                  ref={importStatusRef}
-                  data-quick-start-provider-status={
-                    importConfirmed ? 'confirmed' : 'pending'
-                  }
-                  layout={reducedMotion ? false : true}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={
-                    reducedMotion
-                      ? QUICK_START_REDUCED_TRANSITION
-                      : QUICK_START_SPRING_TRANSITION
-                  }
-                  className='mt-3 scroll-mb-4 rounded-[1.25rem] border border-white/12 bg-white/[0.055] p-4 backdrop-blur-xl sm:scroll-mb-[8rem]'
-                >
-                  <div
-                    onPointerLeave={() => setProviderDetailsExpanded(false)}
-                    onBlur={(event) => {
-                      if (
-                        !event.currentTarget.contains(
-                          event.relatedTarget as Node | null
-                        )
-                      ) {
-                        setProviderDetailsExpanded(false)
-                      }
-                    }}
-                  >
-                    <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-                      <div className='flex min-w-0 items-start gap-3'>
-                        {importConfirmed ? (
-                          <QuickStartStepMarker
-                            step='04'
-                            complete
-                            reducedMotion={Boolean(reducedMotion)}
-                            className='size-9 rounded-full text-[11px]'
-                          />
-                        ) : null}
-                        <div className='min-w-0'>
-                          <div className='font-semibold text-white'>
-                            {importStatusTitle}
-                          </div>
-                          <p className='mt-1 text-sm leading-6 text-white/54'>
-                            {importStatusDescription}
-                          </p>
-                        </div>
-                      </div>
-                      {importConfirmed ? (
-                        <Button
-                          data-quick-start-provider-reimport
-                          aria-expanded={providerDetailsExpanded}
-                          aria-controls='quick-start-provider-details'
-                          className={cn(
-                            'h-11 w-full min-w-28 rounded-full border px-5 transition-[transform,background-color,border-color,color,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.98] sm:w-auto',
-                            providerDetailsExpanded
-                              ? 'border-white bg-white text-[#030409] shadow-[0_14px_40px_rgba(255,255,255,0.16)]'
-                              : 'border-white/10 bg-white/[0.065] text-white/58 shadow-none hover:border-white hover:bg-white hover:text-[#030409] hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] focus-visible:border-white focus-visible:bg-white focus-visible:text-[#030409]'
-                          )}
-                          onPointerEnter={() =>
-                            setProviderDetailsExpanded(true)
-                          }
-                          onFocus={() => setProviderDetailsExpanded(true)}
-                          onClick={handleReimportToCCSwitch}
-                        >
-                          <RotateCcw data-icon='inline-start' />
-                          {t('Import again')}
-                        </Button>
-                      ) : (
-                        <div className='flex flex-wrap gap-2'>
-                          <Button
-                            className={QUICK_START_PRIMARY_ACTION_CLASS}
-                            onClick={handleConfirmImport}
-                          >
-                            <Check data-icon='inline-start' />
-                            {t('It opened')}
-                          </Button>
-                          <Button
-                            variant='outline'
-                            className={QUICK_START_SECONDARY_ACTION_CLASS}
-                            onClick={handleImportToCCSwitch}
-                          >
-                            <RotateCcw data-icon='inline-start' />
-                            {t('Try again')}
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-
-                    <AnimatePresence initial={false}>
-                      {importConfirmed && providerDetailsExpanded ? (
-                        <motion.div
-                          id='quick-start-provider-details'
-                          data-quick-start-provider-details
-                          initial={
-                            reducedMotion
-                              ? { height: 0, opacity: 0 }
-                              : { height: 0, opacity: 0, y: -10 }
-                          }
-                          animate={
-                            reducedMotion
-                              ? { height: 'auto', opacity: 1 }
-                              : { height: 'auto', opacity: 1, y: 0 }
-                          }
-                          exit={
-                            reducedMotion
-                              ? { height: 0, opacity: 0 }
-                              : { height: 0, opacity: 0, y: -8 }
-                          }
-                          transition={
-                            reducedMotion
-                              ? QUICK_START_REDUCED_TRANSITION
-                              : QUICK_START_SPRING_TRANSITION
-                          }
-                          onAnimationComplete={() => {
-                            const expandedButton =
-                              importStatusRef.current?.querySelector(
-                                '[data-quick-start-provider-reimport]'
-                              )
-                            if (
-                              expandedButton?.getAttribute('aria-expanded') !==
-                              'true'
-                            ) {
-                              return
-                            }
-                            importStatusRef.current?.scrollIntoView({
-                              behavior: reducedMotion ? 'auto' : 'smooth',
-                              block: 'nearest',
-                            })
-                          }}
-                          className='overflow-hidden'
-                        >
-                          <div className='mt-4 border-t border-white/10 pt-4'>
-                            <CCSwitchImportMetrics
-                              endpoint={quickStartCodexEndpoint}
-                              modelName={selectedModelDisplayName}
-                              reasoningTarget={
-                                selectedModelIsPreferred
-                                  ? t(QUICK_START_REASONING_EFFORT_LABEL_KEY)
-                                  : null
-                              }
-                              apiKey={effectiveApiKey}
-                            />
-                          </div>
-                        </motion.div>
-                      ) : null}
-                    </AnimatePresence>
-                  </div>
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
-
-            <AnimatePresence initial={false}>
-              {importConfirmed ? (
-                <motion.div
+                  ref={promptPanelRef}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
@@ -1274,10 +1113,12 @@ export function QuickStart() {
                       ? QUICK_START_REDUCED_TRANSITION
                       : { duration: 0.4, ease: [0.16, 1, 0.3, 1] }
                   }
+                  onAnimationComplete={scrollPromptIntoView}
                   className='mt-3 scroll-mb-4 sm:scroll-mb-[8rem]'
                 >
                   <ImageSettingsImportPanel
                     apiKey={effectiveApiKey}
+                    imported={importConfirmed}
                     onImport={handleImportPromptToCCSwitch}
                   />
                 </motion.div>
@@ -1474,49 +1315,211 @@ function CCSwitchImportPanel(props: {
   reasoningTarget: string | null
   apiKey: string
   imported: boolean
+  detailsExpanded: boolean
+  reducedMotion: boolean
+  onDetailsExpandedChange: (expanded: boolean) => void
+  onDetailsCollapsed: () => void
   onImport: () => void
+  onReimport: () => void
 }) {
   const { t } = useTranslation()
+  const panelRef = useRef<HTMLDivElement>(null)
 
   return (
-    <div className='overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'>
-      <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
-        <div className='flex items-center gap-2'>
-          <span className='size-2.5 rounded-full bg-[#ff5f57]' />
-          <span className='size-2.5 rounded-full bg-[#febc2e]' />
-          <span className='size-2.5 rounded-full bg-[#28c840]' />
-        </div>
-        <div className='font-mono text-[10px] text-white/36 uppercase'>
-          CC Switch
-        </div>
-      </div>
-      <div className='grid gap-4 p-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center'>
-        <div className='min-w-0'>
-          <h2 className='text-lg font-semibold text-white'>
-            {t('Import current setup to CC Switch')}
-          </h2>
-          <p className='mt-1 text-sm leading-6 text-white/52'>
-            {t('The API, model, and key are prepared for one-click import.')}
-          </p>
-          <CCSwitchImportMetrics
-            endpoint={props.endpoint}
-            modelName={props.modelName}
-            reasoningTarget={props.reasoningTarget}
-            apiKey={props.apiKey}
-            className='mt-4'
-          />
-        </div>
-        <Button
-          className='h-12 w-full min-w-0 rounded-full bg-white px-4 text-center leading-tight whitespace-normal text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
-          onClick={props.onImport}
-        >
-          <ArrowUpRight data-icon='inline-start' />
-          <span className='min-w-0 text-balance'>
-            {props.imported ? t('Import again') : t('One-click import')}
-          </span>
-        </Button>
-      </div>
-    </div>
+    <motion.div
+      ref={panelRef}
+      data-quick-start-provider-panel
+      data-quick-start-provider-status={props.imported ? 'confirmed' : 'ready'}
+      layout={props.reducedMotion ? false : true}
+      transition={
+        props.reducedMotion
+          ? QUICK_START_REDUCED_TRANSITION
+          : QUICK_START_SPRING_TRANSITION
+      }
+      onPointerLeave={() => props.onDetailsExpandedChange(false)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          props.onDetailsExpandedChange(false)
+        }
+      }}
+      className={cn(
+        'overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        props.imported && 'p-4 backdrop-blur-xl'
+      )}
+    >
+      <AnimatePresence initial={false} mode='popLayout'>
+        {props.imported ? (
+          <motion.div
+            key='provider-imported'
+            initial={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: 10, scale: 0.985 }
+            }
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: -8, scale: 0.985 }
+            }
+            transition={
+              props.reducedMotion
+                ? QUICK_START_REDUCED_TRANSITION
+                : QUICK_START_SPRING_TRANSITION
+            }
+          >
+            <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex min-w-0 items-start gap-3'>
+                <QuickStartStepMarker
+                  step='04'
+                  complete
+                  reducedMotion={props.reducedMotion}
+                  className='size-9 rounded-full text-[11px]'
+                />
+                <div className='min-w-0'>
+                  <div className='font-semibold text-white'>
+                    {t('Import confirmed')}
+                  </div>
+                  <p className='mt-1 text-sm leading-6 text-white/54'>
+                    {t('Provider imported. Continue with the image settings.')}
+                  </p>
+                </div>
+              </div>
+              <Button
+                data-quick-start-provider-reimport
+                aria-expanded={props.detailsExpanded}
+                aria-controls='quick-start-provider-details'
+                className={cn(
+                  'h-11 w-full min-w-28 rounded-full border px-5 transition-[transform,background-color,border-color,color,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] active:scale-[0.98] sm:w-auto',
+                  props.detailsExpanded
+                    ? 'border-white bg-white text-[#030409] shadow-[0_14px_40px_rgba(255,255,255,0.16)]'
+                    : 'border-white/10 bg-white/[0.065] text-white/58 shadow-none hover:border-white hover:bg-white hover:text-[#030409] hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] focus-visible:border-white focus-visible:bg-white focus-visible:text-[#030409]'
+                )}
+                onPointerEnter={() => props.onDetailsExpandedChange(true)}
+                onFocus={() => props.onDetailsExpandedChange(true)}
+                onClick={props.onReimport}
+              >
+                <RotateCcw data-icon='inline-start' />
+                {t('Import again')}
+              </Button>
+            </div>
+
+            <AnimatePresence initial={false}>
+              {props.detailsExpanded ? (
+                <motion.div
+                  id='quick-start-provider-details'
+                  data-quick-start-provider-details
+                  initial={
+                    props.reducedMotion
+                      ? { height: 0, opacity: 0 }
+                      : { height: 0, opacity: 0, y: -10 }
+                  }
+                  animate={
+                    props.reducedMotion
+                      ? { height: 'auto', opacity: 1 }
+                      : { height: 'auto', opacity: 1, y: 0 }
+                  }
+                  exit={
+                    props.reducedMotion
+                      ? { height: 0, opacity: 0 }
+                      : { height: 0, opacity: 0, y: -8 }
+                  }
+                  transition={
+                    props.reducedMotion
+                      ? QUICK_START_REDUCED_TRANSITION
+                      : QUICK_START_SPRING_TRANSITION
+                  }
+                  onAnimationComplete={() => {
+                    const expandedButton = panelRef.current?.querySelector(
+                      '[data-quick-start-provider-reimport]'
+                    )
+                    if (
+                      expandedButton?.getAttribute('aria-expanded') !== 'true'
+                    ) {
+                      props.onDetailsCollapsed()
+                      return
+                    }
+                    panelRef.current?.scrollIntoView({
+                      behavior: props.reducedMotion ? 'auto' : 'smooth',
+                      block: 'nearest',
+                    })
+                  }}
+                  className='overflow-hidden'
+                >
+                  <div className='mt-4 border-t border-white/10 pt-4'>
+                    <CCSwitchImportMetrics
+                      endpoint={props.endpoint}
+                      modelName={props.modelName}
+                      reasoningTarget={props.reasoningTarget}
+                      apiKey={props.apiKey}
+                    />
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </motion.div>
+        ) : (
+          <motion.div
+            key='provider-ready'
+            initial={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: 10, scale: 0.985 }
+            }
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: -8, scale: 0.985 }
+            }
+            transition={
+              props.reducedMotion
+                ? QUICK_START_REDUCED_TRANSITION
+                : QUICK_START_SPRING_TRANSITION
+            }
+          >
+            <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
+              <div className='flex items-center gap-2'>
+                <span className='size-2.5 rounded-full bg-[#ff5f57]' />
+                <span className='size-2.5 rounded-full bg-[#febc2e]' />
+                <span className='size-2.5 rounded-full bg-[#28c840]' />
+              </div>
+              <div className='font-mono text-[10px] text-white/36 uppercase'>
+                CC Switch
+              </div>
+            </div>
+            <div className='grid gap-4 p-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center'>
+              <div className='min-w-0'>
+                <h2 className='text-lg font-semibold text-white'>
+                  {t('Import current setup to CC Switch')}
+                </h2>
+                <p className='mt-1 text-sm leading-6 text-white/52'>
+                  {t(
+                    'The API, model, and key are prepared for one-click import.'
+                  )}
+                </p>
+                <CCSwitchImportMetrics
+                  endpoint={props.endpoint}
+                  modelName={props.modelName}
+                  reasoningTarget={props.reasoningTarget}
+                  apiKey={props.apiKey}
+                  className='mt-4'
+                />
+              </div>
+              <Button
+                className='h-12 w-full min-w-0 rounded-full bg-white px-4 text-center leading-tight whitespace-normal text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
+                onClick={props.onImport}
+              >
+                <ArrowUpRight data-icon='inline-start' />
+                <span className='min-w-0 text-balance'>
+                  {t('One-click import')}
+                </span>
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   )
 }
 
@@ -1556,6 +1559,7 @@ function CCSwitchImportMetrics(props: {
 
 function ImageSettingsImportPanel(props: {
   apiKey: string
+  imported: boolean
   onImport: () => void
 }) {
   const { t } = useTranslation()
@@ -1584,10 +1588,20 @@ function ImageSettingsImportPanel(props: {
           {promptPreview}
         </pre>
         <Button
-          className='mt-5 h-12 w-full min-w-0 rounded-full bg-white px-4 text-center leading-tight whitespace-normal text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
+          data-quick-start-prompt-imported={props.imported}
+          className={cn(
+            'mt-5 h-12 w-full min-w-0 rounded-full border px-4 text-center leading-tight whitespace-normal transition-[transform,background-color,border-color,color,box-shadow] duration-300 active:scale-[0.98]',
+            props.imported
+              ? 'border-white/10 bg-white/[0.065] text-white/58 hover:border-white/20 hover:bg-white/[0.1] hover:text-white'
+              : 'border-white bg-white text-[#030409] hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)]'
+          )}
           onClick={props.onImport}
         >
-          <Sparkles data-icon='inline-start' />
+          {props.imported ? (
+            <RotateCcw data-icon='inline-start' />
+          ) : (
+            <Sparkles data-icon='inline-start' />
+          )}
           <span className='min-w-0 text-balance'>
             {t('One-click import image settings')}
           </span>
@@ -1673,7 +1687,7 @@ function QuickStartControls(props: {
   } else if (!props.canFinish) {
     secondaryControl = (
       <div className='rounded-full px-4 py-1 text-xs font-medium text-white/44'>
-        {t('Confirm the CC Switch import to continue')}
+        {t('One-click import image settings')}
       </div>
     )
   }

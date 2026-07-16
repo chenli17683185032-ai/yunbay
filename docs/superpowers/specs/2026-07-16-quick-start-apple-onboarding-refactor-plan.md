@@ -567,8 +567,8 @@
 
 ### 14.6 发布控制与实施节点
 
-- 本轮按用户当前指示只完成本地闭环并普通推送 GitHub `main`；生产仍保持当前健康版本，不同步文件、不构建镜像、不停止、重建或重启任何服务器服务。
-- 只提交本轮计划、快速启动实现和对应测试；保留并排除工作区现有运维手册改动、旧规格文档和 `outputs/`。
+- 初始阶段按用户当时指示只完成本地闭环并普通推送 GitHub `main`；收到后续明确“部署”指令后，才进入第 14.8 节生产流程。
+- 代码提交只包含本轮计划、快速启动实现和对应测试；生产只精确同步两个 `web/default` 文件，继续保留并排除工作区现有其它改动、旧规格文档和 `outputs/`。
 
 | 节点 | 状态 | 验收条件 |
 | --- | --- | --- |
@@ -577,7 +577,7 @@
 | 完成组合块、悬停详情与再次导入状态 | 已完成 | 默认紧凑、hover/focus 展开、移出收起且业务确认态不回退 |
 | 自动化与双视口浏览器验收 | 已完成 | 工程检查、动效采样、键盘、reduced-motion 与双视口布局均通过 |
 | GitHub main | 已完成 | `7bc5e4e7` 已普通推送 main，只包含本轮三个相关文件 |
-| 生产部署 | 未授权 | 本轮不触碰生产，等待用户另行明确指令 |
+| 生产部署 | 已完成 | `7bc5e4e7` 已按固定 upstream 流程上线；最终实例 healthy，回滚点与三处运维记录已保留 |
 
 ### 14.7 实施验证记录
 
@@ -588,4 +588,97 @@
 - 移动端 `390x844` 默认组合条为 `358x146`，灰色按钮为 `324x44`；展开后组合条为 `358x415`，四项详情为 `324x269`。动画完成后活动滚动区自动最小滚动 `264px`，详情底部为 `687px`、底栏顶部为 `773px`，完整留出 `86px` 间距；页面和活动滚动区宽度均为 `390px`。桌面同一引导只产生 `2px` 的最小位置校正。
 - `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、涉及文件 ESLint、Prettier、`bun run i18n:sync`、`git diff --check` 与 `bun run build` 均通过。六语言 missing、extras、untranslated 均为 0，最终生产构建入口为 `dist/static/js/index.2f46b5d28b.js`。
 - 功能、测试与本节计划提交 `7bc5e4e7` 已普通 fast-forward 推送 GitHub `main`；提交范围只有本轮三个目标文件，工作区既有运维手册改动、旧规格文档和 `outputs/` 均未纳入。
-- 本轮没有同步生产文件、构建服务器镜像、修改 Caddy，也没有停止、重建或重启任何生产服务；生产继续运行既有健康版本。
+- 用户授权前没有触碰生产；授权后仅按第 14.8 节精确同步两文件、构建镜像并有界重建标准 `new-api`，没有修改或重启 Caddy、数据库、Redis、Sub2API、CLI Proxy 或 LDXP 服务。
+
+### 14.8 生产执行计划
+
+- 用户已明确发送“部署”，本轮生产发布自此获准。目标功能基线固定为 `7bc5e4e7`；`f49f680a` 只收尾计划，不作为镜像功能标记。
+- 生产当前功能基线预期为 `f7839a9d`。精确同步范围仅为 `web/default/src/features/quick-start/index.tsx` 与 `web/default/src/features/quick-start/quick-start-page-source.test.ts`；不使用删除式同步，不上传本地脏工作区、计划文档、运维手册或 `outputs/`。
+- 先获取非阻塞部署锁 `/var/lock/yunbay-new-api-deploy.lock` 并只读确认：标准 `new-api` 与 Caddy healthy、当前镜像可解析、正式 Caddyfile/挂载/运行时 upstream 都是 `new-api:3000`、公网首页与 `/api/status` 为 200、没有 `new-api-green`。
+- 锁内建立带 UTC 时间和 `7bc5e4e7` 标记的源码备份，记录部署前存在文件、当前 `.yunbay-deploy-sha` 与 `.yunbay-source-manifest`；把当前运行镜像固定为不可变 rollback tag。同步后逐文件核对本地与生产 SHA-256。
+- 在服务器构建 `yunbay-new-api:prod`，构建期间旧标准容器继续承担流量；构建成功后固定 `yunbay-new-api:release-7bc5e4e7`，并在切换前核对镜像内入口、bundle 哈希/字节数和目标稳定标记。
+- 正式切换前启动独立于 SSH 的 60 秒 watchdog。只允许执行 `docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate --no-build new-api`；不创建绿实例、不修改或 reload Caddy、不重启 PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 或 worker。
+- 新标准容器 45 秒内未达到目标镜像、Docker healthy 和容器内 HTTP 200，或最终公网验证失败时，watchdog/发布脚本必须把固定旧镜像重新标记为 `:prod`、恢复两文件源码与部署标记，并再次只重建标准 `new-api`；不能留下等待人工输入的中间态。
+- 发布成功须同时满足：`new-api`/Caddy healthy，Caddy upstream 仍为 `new-api:3000`，其它服务容器 ID、启动时间和 restart count 未变化，公网 `/`、`/quick-start`、`/api/status` 连续 5 次为 200，新 bundle 与本地构建一致且包含本轮稳定标记。随后原子更新部署标记、追加仓库与桌面唯一运维手册并清理临时传输、构建和 watchdog 文件；源码备份与 rollback/release 镜像标签保留。
+
+### 14.9 生产执行记录
+
+- 首次执行在固定 upstream 流程内完成两文件备份、精确同步与镜像构建；构建期间旧容器 ID、镜像、启动时间和 healthy 状态均未变化。新镜像 `sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d0e` 已固定为 `yunbay-new-api:release-7bc5e4e7`。
+- 首次标准服务切换后，新容器约 11 秒达到 healthy 并提供与本地完全一致的 `index.2f46b5d28b.js`：SHA-256 `e2d4051761dfc4a567343fca9cf4411edf125aaa2ddc9abaaf00584de8b7b3e3`、字节数 `3064387`。应用、镜像和主入口均通过，失败发生在后续静态验证器。
+- 静态验证器错误地从主入口搜索完整 `4963.<hash>.js`；Rsbuild 实际使用 chunk map `4963:"80d86e7db9"`，因此脚本无法组装 quick-start chunk 文件名并主动请求 watchdog 回滚。该失败是验证脚本解析错误，不是应用健康或资源内容错误。
+- watchdog 已把旧镜像重新标记为 `:prod`、恢复两文件源码与部署标记，并只重建标准 `new-api`。回滚后生产重新运行旧镜像 `sha256:b7af515bac4bfc28de155fa08dfd4f15a2e7f6d2d36d74837c9fcd2b9955472c` 且 healthy；`/`、`/quick-start`、`/api/status` 均为 200，Caddy runtime 仍只有 `new-api:3000`，无绿实例。
+- Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 与首次切换前逐项一致。首次切换与自动回滚的 1 秒公网探针各记录 9 次 502 与 9 次 200；没有 Caddy DNS/lookup 改写或依赖服务重启。
+- 第二次执行将 chunk map 解析修正为 `4963:"<hash>" -> 4963.<hash>.js`，重新获取部署锁、建立新备份并启动独立 watchdog，复用上述不可变 release 镜像且不重复构建。标准 `new-api` 约 12 秒达到 healthy，完整验证于 24 秒内完成，watchdog 结果为 `success`。
+- 最终运行容器为 `9d893d41557a2a33e32ee2e09ec45350eae349e600c46bf2915f9b06589ae81b`，镜像为 `sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d0e`，restart count 为 0。生产标记已原子更新到完整功能提交 `7bc5e4e7b5ad67969bae0961b0a580670d206382`；两文件清单 SHA-256 为 `67e721d3008b56be4e554cce3e586079c2000c8f696cbdf05c64ed9c0ba78a5c`。
+- 最终主入口 `/static/js/index.2f46b5d28b.js` 的 SHA-256 为 `e2d4051761dfc4a567343fca9cf4411edf125aaa2ddc9abaaf00584de8b7b3e3`、字节数 `3064387`；quick-start chunk `/static/js/async/4963.80d86e7db9.js` 的 SHA-256 为 `a095fd82e7bdd86a943d0b3e1ea8e45eccc0927e3f2db5c4b4bdb2308f095fea`、字节数 `46803`，并包含两个再次导入标记和三个详情标记。二者均与本地测试构建完全一致。
+- 成功切换的 1 秒公网探针记录 8 次 502、随后 12 次连续 200；Caddy 原始日志的 502 窗口为 `14:51:20.124Z` 至 `14:51:28.615Z`，约 8.49 秒，共 44 个请求：4 个 Docker DNS `lookup new-api` 瞬态、39 个新进程监听前的 connection refused、1 个旧连接关闭。Caddy 容器、文件、挂载和运行时 upstream 均未修改，最终仍只有 `new-api:3000`。
+- 最终远端 10 轮均确认宿主机 `/api/status` 与公网 `/`、`/quick-start`、`/api/status` 为 200；本机重新下载的两个生产 bundle 哈希和字节数均与本地一致。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 在最终切换前后逐项一致，应用严重启动日志为 0，无绿实例。
+- 成功回滚目录为 `/opt/new-api/backups/quick-start-reimport-hover-20260716T145117Z-7bc5e4e7`；固定旧镜像标签为 `yunbay-new-api:rollback-quick-start-reimport-20260716T145117Z`，旧镜像 ID 为 `sha256:b7af515bac4bfc28de155fa08dfd4f15a2e7f6d2d36d74837c9fcd2b9955472c`。首次验证器失败备份 `/opt/new-api/backups/quick-start-reimport-hover-20260716T144138Z-7bc5e4e7` 与对应 rollback 标签一并保留用于审计。
+
+## 15. 第七轮：合并 Provider 导入反馈并恢复生图设置下一步
+
+### 15.1 目标与性能指标
+
+把第五页 Provider 导入段收敛为一个随状态原位变化的控制对象，消除截图中“将当前设置导入 CC Switch”和“CC Switch 打开了吗”上下两个独立容器。用户点击 Provider 一键导入后，应立即看到同一容器收敛成完成条，并在其正下方看到生图设置导入，不再经过额外确认卡。
+
+- 初始态只显示一个完整 Provider 导入容器：真实 API、当前模型、脱敏 Key、思考强度和“一键导入”。
+- 点击“一键导入”后，同一容器以 layout/spring 动画原位收敛为“圆形完成勾 + 完成文案 + 灰色再次导入”，不得同时残留第二张确认卡。
+- “再次导入”保持上一轮交互：默认灰色；hover/focus 时变亮并在同一容器内向下展开 Provider 详情；移出/失焦后弹性收起；点击只重新打开 Provider Deep Link，不回退完成态、不隐藏生图设置。
+- Provider 完成条收敛后，`ImageSettingsImportPanel` 必须紧邻其下方进入，继续展示由真实 Prompt 构造器生成的脱敏预览，并保留“一键导入生图设置”。
+- 状态改变后自动滚动到生图面板的最近可见位置，使桌面 `1280x720` 和移动端 `390x844` 都能同时辨认上方 Provider 完成条与下方生图设置入口。
+- 不修改 `buildQuickStartCCSwitchImportURL`、`buildQuickStartCCSwitchPromptImportURL`、Prompt 正文、真实 Key 边界、默认 `gpt-5.6-sol`、`xhigh`、后端、数据库或翻译文本。
+
+### 15.2 最小充分状态模型
+
+- `softwareConfirmed && effectiveApiKey`：渲染唯一的 Provider 导入容器。
+- `importAttempted=false`：完整 Provider 配置和首次导入动作。
+- `importAttempted=true`：Provider 导入动作已经发出，容器进入完成条；生图设置面板立即成为下一控制对象。
+- `providerDetailsExpanded=true`：只影响完成条内部详情高度与再次导入按钮视觉，不改变 `importAttempted`，也不改变生图面板可见性。
+- `importConfirmed=true`：生图设置 Deep Link 已发出，完整两阶段导入完成，底部“进入控制台”才可用；继续复用现有持久化字段，不新增 session schema 或迁移。
+- 旧会话中 `importConfirmed=true` 但 `importAttempted=false` 时，将 Provider 视为已完成以兼容历史数据；旧会话中只有 `importAttempted=true` 时显示 Provider 完成条与生图设置，并继续等待用户导入生图设置。
+
+### 15.3 GitHub 经验参考
+
+- `motiondivision/motion@61833240`：继续复用项目已有 `AnimatePresence`、layout 与 spring transition，让同一个视觉对象在展开态和完成态之间连续变形，减少并行卡片造成的认知跳跃。
+- `farion1231/cc-switch@f6e37ed9`：项目文档明确 Provider 与 Prompts 都支持 `ccswitch://` Deep Link 导入；因此保留两个串行的真实动作，但在 Provider 动作发出后立刻把 Prompts 作为下一步显示。
+- 继续使用现有 shadcn Button、Lucide 图标和 `QuickStartStepMarker`，不引入新组件库或第二套动画配置。
+
+### 15.4 最小实施
+
+1. 将父组件中独立的 Provider 面板、确认状态面板合并为一个 `CCSwitchImportPanel` 调用和一个外层 ref；移除“CC Switch 打开了吗 / 已打开 / 重试”渲染分支及无用 handler。
+2. 让 `CCSwitchImportPanel` 自己根据 `imported` 在完整态与完成态之间做 `AnimatePresence`/layout 变形；完成态复用圆形 `QuickStartStepMarker`，内部保留 hover/focus 详情。
+3. 首次 Provider 导入只写入 `importAttempted=true`；再次导入不回退 `importConfirmed`。生图设置按钮发出 Prompt Deep Link 后才写入 `importConfirmed=true` 并开放进入控制台。
+4. 恢复生图面板 ref，并在 Provider 状态完成后滚动到该面板的 `nearest` 位置；DOM 顺序固定为 Provider 完成条在前、生图面板在后。
+5. 更新源码约束测试，明确只有一个 Provider 容器、没有独立打开确认卡、首次导入直接显示 Prompt、Prompt 导入后才可完成、再次导入不回退状态。
+
+### 15.5 验证闭环
+
+- 先运行快速启动全量测试，确认 Provider/Prompt URL、Prompt 内容、会话兼容和源码约束全部通过。
+- 运行 TypeScript、定向 ESLint、Prettier、六语言同步检查、生产构建与 `git diff --check`。
+- Browser 在 `1280x720` 与 `390x844` 从干净 session 走通：首次 Provider 导入 -> 单一完成条 -> 生图预览可见 -> 再次导入 hover/focus 展开与收起 -> 生图 Deep Link。
+- 验收容器数量、DOM/视觉先后、按钮对齐、完成圆圈尺寸、横向溢出、底栏遮挡、控制台 error/warn、键盘焦点与 reduced-motion。
+- 本轮先只完成本地代码、测试和 GitHub `main`；没有新的明确“部署”指令前，不同步生产文件、不构建服务器镜像、不停止、重建或重启任何生产服务。
+
+### 15.6 实施节点
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 截图、运行时与历史实现核验 | 已完成 | 已定位双容器来源和生图面板被额外确认态阻断的问题 |
+| GitHub 经验与完整闭环计划 | 已完成 | 本节已写入唯一计划文件，固定状态、反馈、验证和发布边界 |
+| 单容器状态机与 Prompt 下一步 | 已完成 | Provider 原位收敛，Prompt 紧邻出现，无独立确认卡 |
+| 自动化与双视口浏览器验收 | 已完成 | 工程检查、交互、布局、键盘和 reduced-motion 全通过 |
+| GitHub main | 未开始 | 仅提交本轮相关文件并普通推送，排除既有脏工作区 |
+| 生产部署 | 未授权 | 保持当前生产服务不变，等待新的明确部署指令 |
+
+### 15.7 实施验证记录
+
+- 父层只保留一个 `CCSwitchImportPanel`。初始态显示 Provider 配置与“一键导入”；动作发出后，同一组件通过 `AnimatePresence`/layout 原位收敛为圆形完成勾、完成文案和灰色“再次导入”。源码和浏览器中均不存在“CC Switch 打开了吗 / 已打开 / 重试”独立确认卡。
+- `importAttempted` 现在控制 Provider 完成条和 `ImageSettingsImportPanel` 可见性；`importConfirmed` 只在 Prompt Deep Link 发出后写入并解锁“进入控制台”。历史 `importConfirmed=true` 会归一为 Provider 已完成，旧 session 无需迁移。
+- 浏览器隔离捕获到两个 `resource=provider` 和一个 `resource=prompt` 的 `ccswitch://` 动作；全程用测试 Key 拦截 `window.open`，没有启动或修改本机 CC Switch，也没有写入真实 `~/.codex/AGENTS.md`。Prompt 仍由实际构造器生成，预览包含图片端点、`gpt-image-2`、禁止主聊天模型和 `outputs/` 规则，仅显示脱敏 Key。
+- 桌面 `1280x720` 完成态只有一个 `600x86` Provider 条和一个 `600x348` 生图面板，二者分别位于 `top=130` 与 `top=228`，生图面板底部为 `576px`；页面宽度与视口同为 `1280px`。Prompt 动作前“进入控制台”禁用，动作后启用；生图按钮转灰但继续明确显示“一键导入生图设置”，不与 Provider 的“再次导入”混淆。
+- Provider 详情展开后为四项真实 Provider 数据；按钮由低对比灰色变为亮白。移出/失焦后详情卸载，并在退出动画完成时把生图面板恢复到最近可见位置。一次完整展开/收起采样前后位置完全一致：Provider `top=146 / bottom=232 / height=86`，Prompt `top=244 / bottom=592 / height=348`。
+- 移动端 `390x844` 完成态 Provider 为 `358x146`，圆形完成标记 `36x36`，再次导入按钮 `324x44`；生图面板为 `358x418`，底部 `704px`，活动滚动区底部 `720px`，底栏从 `773px` 开始。页面、body 与活动滚动区宽度均为 `390px`，无横向溢出或底栏遮挡。
+- hover 与 focus 事件均验证可展开，pointer leave 与焦点移出均验证可收起；`prefers-reduced-motion: reduce` 下仍保持 1 个 Provider、1 个 Prompt 和完整展开/收起状态，宽度 `390px`。浏览器 error 为 0；唯一 warning 是 Motion 对主动模拟 reduced-motion 的说明性提示。
+- `bun test src/features/quick-start/*.test.ts` 为 54 pass / 0 fail；`bun run typecheck`、定向 ESLint、Prettier、`bun run i18n:sync`、`git diff --check` 与 `bun run build` 全部通过。六语言 missing、extras、untranslated 均为 0。
+- 最终本地生产入口为 `dist/static/js/index.e4374b86a3.js`，SHA-256 `cf673d3ea925820fbc18db9e0c6b55e24bdc2d8aa2f896c4ac5d0dc60573b3b3`、字节数 `3064387`；quick-start chunk 为 `dist/static/js/async/4963.937f71286d.js`，SHA-256 `1addc8ec05f0628f7f708f00dc4a93d5b9089ea74a60e603bcc98c710b83b4d9`、字节数 `47329`。
+- 本轮没有连接、同步、构建或重启生产服务器；现网继续运行上一轮健康版本。开发验收复用现有 `http://127.0.0.1:5173/quick-start`，没有停止本地后端或前端进程。

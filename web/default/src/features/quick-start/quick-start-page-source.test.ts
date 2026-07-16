@@ -52,9 +52,17 @@ const providerPanelSource = pageSource.slice(
   pageSource.indexOf('function CCSwitchImportPanel'),
   pageSource.indexOf('function ImageSettingsImportPanel')
 )
+const promptPanelSource = pageSource.slice(
+  pageSource.indexOf('function ImageSettingsImportPanel'),
+  pageSource.indexOf('function QuickStartPage')
+)
 const providerReimportHandlerSource = pageSource.slice(
   pageSource.indexOf('const handleReimportToCCSwitch'),
   pageSource.indexOf('const handleImportPromptToCCSwitch')
+)
+const promptImportHandlerSource = pageSource.slice(
+  pageSource.indexOf('const handleImportPromptToCCSwitch'),
+  pageSource.indexOf('const QuickStartControlsComponent')
 )
 
 test('quick start controls are centered, enlarged, and keep one primary action', () => {
@@ -154,7 +162,7 @@ test('quick start software and account steps match the new five-page flow', () =
   assert.match(pageSource, /const balanceReady = currentBalance > 0/)
 })
 
-test('quick start final page confirms prerequisites before one-click import and guarded exit', () => {
+test('quick start final page merges provider feedback and reveals image settings next', () => {
   assert.match(pageSource, /Have you finished installing CC Switch\?/)
   assert.match(pageSource, /Import current setup to CC Switch/)
   assert.match(pageSource, /buildQuickStartCCSwitchImportURL/)
@@ -163,26 +171,39 @@ test('quick start final page confirms prerequisites before one-click import and 
   assert.match(pageSource, /handleImportPromptToCCSwitch/)
   assert.match(pageSource, /imported=\{importAttempted\}/)
   assert.match(pageSource, /onImport=\{handleImportToCCSwitch\}/)
+  assert.match(pageSource, /onReimport=\{handleReimportToCCSwitch\}/)
+  assert.match(pageSource, /softwareConfirmed && effectiveApiKey/)
+  assert.doesNotMatch(pageSource, /effectiveApiKey && !importConfirmed/)
+  assert.equal(pageSource.match(/<CCSwitchImportPanel/g)?.length, 1)
+  assert.equal(pageSource.match(/data-quick-start-provider-status/g)?.length, 1)
+  assert.match(providerPanelSource, /data-quick-start-provider-panel/)
   assert.match(
-    pageSource,
-    /softwareConfirmed && effectiveApiKey && !importConfirmed/
+    providerPanelSource,
+    /data-quick-start-provider-status=\{props\.imported \? 'confirmed' : 'ready'\}/
   )
+  assert.doesNotMatch(pageSource, /Did CC Switch open\?/)
+  assert.doesNotMatch(pageSource, /handleConfirmImport/)
+  assert.doesNotMatch(pageSource, /t\('It opened'\)/)
+  assert.doesNotMatch(pageSource, /t\('Try again'\)/)
   assert.doesNotMatch(providerPanelSource, /onImportPrompt/)
   assert.doesNotMatch(providerPanelSource, /handleImportPromptToCCSwitch/)
-  assert.match(providerPanelSource, /props\.imported \? t\('Import again'\)/)
-  assert.match(pageSource, /data-quick-start-provider-status/)
   assert.match(pageSource, /data-quick-start-provider-reimport/)
   assert.match(pageSource, /data-quick-start-provider-details/)
-  assert.match(pageSource, /aria-expanded=\{providerDetailsExpanded\}/)
+  assert.match(pageSource, /onDetailsCollapsed=\{scrollPromptIntoView\}/)
+  assert.match(providerPanelSource, /props\.onDetailsCollapsed\(\)/)
+  assert.match(providerPanelSource, /aria-expanded=\{props\.detailsExpanded\}/)
   assert.match(pageSource, /aria-controls='quick-start-provider-details'/)
-  assert.match(pageSource, /onPointerEnter=\{\(\) =>/)
   assert.match(
-    pageSource,
-    /onPointerLeave=\{\(\) => setProviderDetailsExpanded\(false\)\}/
+    providerPanelSource,
+    /onPointerEnter=\{\(\) => props\.onDetailsExpandedChange\(true\)\}/
   )
   assert.match(
-    pageSource,
-    /onFocus=\{\(\) => setProviderDetailsExpanded\(true\)\}/
+    providerPanelSource,
+    /onPointerLeave=\{\(\) => props\.onDetailsExpandedChange\(false\)\}/
+  )
+  assert.match(
+    providerPanelSource,
+    /onFocus=\{\(\) => props\.onDetailsExpandedChange\(true\)\}/
   )
   assert.match(pageSource, /event\.currentTarget\.contains/)
   assert.match(pageSource, /height: 'auto'/)
@@ -192,14 +213,14 @@ test('quick start final page confirms prerequisites before one-click import and 
     /expandedButton\?\.getAttribute\('aria-expanded'\) !==\s*'true'/
   )
   assert.match(pageSource, /QUICK_START_REDUCED_TRANSITION/)
-  assert.match(
-    providerReimportHandlerSource,
-    /openCCSwitchProviderImport\(true\)/
-  )
+  assert.match(providerReimportHandlerSource, /openCCSwitchProviderImport\(\)/)
   assert.doesNotMatch(
     providerReimportHandlerSource,
     /setImportConfirmed\(false\)/
   )
+  assert.match(promptImportHandlerSource, /setImportConfirmed\(true\)/)
+  assert.match(promptImportHandlerSource, /importConfirmed: true/)
+  assert.match(pageSource, /canFinish=\{importConfirmed\}/)
   assert.match(pageSource, /layout=\{reducedMotion \? false : true\}/)
   assert.match(pageSource, /step='04'/)
   assert.equal(
@@ -207,15 +228,19 @@ test('quick start final page confirms prerequisites before one-click import and 
     2
   )
   assert.match(pageSource, /data-quick-start-prompt-panel/)
+  assert.match(
+    pageSource,
+    /data-quick-start-prompt-imported=\{props\.imported\}/
+  )
   assert.match(pageSource, /buildQuickStartImagePromptPreview/)
   assert.match(pageSource, /One-click import image settings/)
+  assert.doesNotMatch(promptPanelSource, /t\('Import again'\)/)
   const providerPanelPosition = pageSource.indexOf('<CCSwitchImportPanel')
-  const providerStatusPosition = pageSource.indexOf(
-    'data-quick-start-provider-status'
-  )
+  const promptConditionPosition = pageSource.indexOf('{importAttempted ? (')
   const promptPanelPosition = pageSource.indexOf('<ImageSettingsImportPanel')
-  assert.ok(providerPanelPosition < providerStatusPosition)
-  assert.ok(providerStatusPosition < promptPanelPosition)
+  assert.ok(providerPanelPosition < promptConditionPosition)
+  assert.ok(promptConditionPosition < promptPanelPosition)
+  assert.match(pageSource, /imported=\{importConfirmed\}/)
   assert.match(pageSource, /Configured API/)
   assert.match(pageSource, /Configured model/)
   assert.match(pageSource, /Generated API key/)
@@ -223,9 +248,13 @@ test('quick start final page confirms prerequisites before one-click import and 
   assert.match(pageSource, /navigationCompletedRef/)
   assert.match(
     pageSource,
-    /importConfirmed \|\| importAttempted[\s\S]*importStatusRef\.current/
+    /importAttempted[\s\S]*\? promptPanelRef\.current[\s\S]*: importPanelRef\.current/
   )
-  assert.doesNotMatch(pageSource, /promptPanelRef/)
+  assert.match(
+    pageSource,
+    /const promptPanelRef = useRef<HTMLDivElement>\(null\)/
+  )
+  assert.doesNotMatch(pageSource, /importStatusRef/)
   assert.match(pageSource, /target\?\.scrollIntoView/)
   assert.match(pageSource, /exitSurface\.animate\(keyframes/)
   assert.match(pageSource, /fill: 'forwards'/)
