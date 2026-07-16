@@ -488,7 +488,7 @@
 | 完整计划与控制指标 | 已完成 | 本节已追加到唯一实施计划文件 |
 | 圆形完成标记、反馈顺序与测试 | 已完成 | 同源圆形标记、状态优先滚动和顺序断言通过 |
 | 自动化与双视口浏览器验收 | 已完成 | 工程检查、交互、测量、截图和 reduced-motion 通过 |
-| GitHub main | 进行中 | 只提交本轮三个文件并普通推送 main |
+| GitHub main | 已完成 | 本轮三个文件已随 `f7839a9d` 普通推送 main |
 | 固定 upstream 生产发布 | 等待用户授权 | 用户明确说“部署”前不停止、重建或重启任何服务器服务 |
 
 ### 13.7 实施验证记录
@@ -498,4 +498,5 @@
 - 独立 Prompt 面板继续由 `buildQuickStartImagePromptPreview()` 生成，预览包含 `/v1/images/generations`、`gpt-image-2` 与 `outputs/` 规则，只显示掩码 Key；旧“继续导入推荐提示词”按钮数量为 0，“一键导入生图设置”按钮数量为 1。
 - 桌面 `1280x720` 和移动端 `390x844` 均已通过：完成标记为 `36x36` 完整圆形，完成行在 Prompt 面板上方，无横向溢出。减少动态效果下同一交互顺序通过，页面 `scrollWidth=viewportWidth=1280`；开发模式仅有 Motion 检测到 reduced-motion 后输出的预期说明性 warning，控制台 error 为 0。
 - `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、定向 ESLint、六语言 i18n、Prettier、`bun run build` 与 `git diff --check` 均通过。最新本地生产入口为 `dist/static/js/index.5ef2da020e.js`。
+- 功能与计划提交 `f7839a9d5236130590df6c8044978a0f1c729382` 已普通 fast-forward 推送 GitHub `main`；提交范围只有本轮计划、快速启动实现与源码测试。
 - 本轮没有执行生产部署或任何服务器服务变更；生产继续运行现有版本，等待用户明确发布指令。
