@@ -1392,7 +1392,7 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 
 ### 发布内容与验证
 
-- 发布提交：`a048627a338ca19b2ad7c4930bfae15ed798c61a`（`feat: refine quick start interactions`），本地 `main`、`origin/main` 与生产标记一致。
+- 功能发布基线：`a048627a338ca19b2ad7c4930bfae15ed798c61a`（`feat: refine quick start interactions`），已包含于 GitHub `main`；生产标记按设计指向这个实际参与构建的功能提交，后续纯运维文档提交不要求重新构建生产镜像。
 - 用途、模型和软件选择使用共享选中底板与弹簧反馈；模型选择后的重排使用 Motion position layout，步骤编号到完成勾选使用交叉淡入、缩放和位移。
 - `prefers-reduced-motion: reduce` 下取消空间位移与缩放；完整 reload 后选择前、中间帧和最终帧的 transform 均为 `none`。
 - Mac 使用 `SiApple` 品牌标识，Windows 使用 `FaWindows`；下载按钮桌面固定 `224x48`，移动端固定 `316x48`。账户操作和最终控制器也完成等宽、单行与最长法语/俄语文案验收。
@@ -1445,7 +1445,7 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 - 公网 `/`、`/quick-start`、`/api/status` 均为 HTTP 200；连续三次及最终复核均命中标准实例。公网 bundle 的文件名、字节数和 SHA-256 与本地一致，包含 `gpt-5.6-sol`，不含 `gpt-5.6-sol-thinking`。
 - 覆盖切绿与标准重建的公网持续探针 `159/159` 为 200。覆盖两次 Caddy reload 的源站探针共 2400 次，全部收到 HTTP 响应：718 次 200、1682 次由同一来源高频访问主动触发的 429，没有连接失败或 5xx；停止高频探针后 200 恢复。
 - 一次本机到 SOCKS5/Cloudflare 的 TLS 握手在收到 HTTP 状态前超时；服务端同时段无 5xx、容器无重启，随后最终请求为 200，故记录为客户端链路抖动，不是服务端 HTTP 错误。
-- `.yunbay-deploy-sha` 和 `.yunbay-source-manifest` 已原子更新为本轮提交、新镜像和四文件组合哈希。绿实例、临时环境文件、临时 Caddyfile、构建日志与探针日志已清理。
+- `.yunbay-deploy-sha` 和 `.yunbay-source-manifest` 已原子更新为实际构建的功能提交、新镜像和四文件组合哈希；运维记录另以纯文档提交推送 GitHub `main`。绿实例、临时环境文件、临时 Caddyfile、构建日志与探针日志已清理。
 
 ### 回滚
 
