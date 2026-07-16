@@ -2,6 +2,30 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-17 生产服务器 Docker 构建缓存清理（已完成）
+
+### 目标与基线
+
+- 本轮只回收可明确再生、未被运行服务使用的 Docker builder cache；不修改代码、配置、数据库、用户数据、密钥、持久卷、业务备份或带标签回滚镜像。
+- 清理前根分区为 `85 GiB / 145 GiB（59%）`，可用约 `60 GiB`，inode 使用率 `9%`。
+- Docker images 为 `70.45 GB`，build cache 为 `55.15 GB`，其中汇总可实际回收约 `31.78 GB`；业务目录中 backups `8.0 GiB`、releases `1.2 GiB`，均按回滚/审计资产保护。
+- 实施前核对 Docker 官方 prune 文档和 GitHub 上按年龄过滤、先 dry-run/测量、排除 volumes 的生产脚本；完整依据与阶段计划见 `docs/superpowers/specs/2026-07-17-production-server-cleanup-plan.md`。
+
+### 实施与反馈
+
+- 获取并持有 `/var/lock/yunbay-new-api-deploy.lock`，确认无并发 build、Compose、rsync 或部署进程后开始；每轮命令均设 15 分钟硬超时。
+- 第一轮只清超过 24 小时未使用的 builder cache，并保留至少 `8 GB` 缓存，实际回收 `11,054,096,384` bytes；根盘 `59% -> 52%`。
+- 第一轮清理瞬时 load 上升，立即停止扩大范围；待 load 连续回落且 12 个容器身份/restart count、5 轮内外 HTTP 和严重日志复核通过后，才执行第二轮。
+- 第二轮只清超过 12 小时未使用的 builder cache，继续保留至少 `8 GB`，再回收 `8,093,089,792` bytes。
+- 两轮累计释放 `19,147,186,176` bytes（约 `17.83 GiB` / `19.17 GB`）；根盘最终 `67 GiB / 145 GiB（47%）`，可用约 `78 GiB`。build cache 从 `55.15 GB` 降为 `35.97 GB`，可回收量从 `31.78 GB` 降为 `12.6 GB`。
+
+### 最终验证与保留边界
+
+- 12 个运行容器的 ID、镜像 ID、启动时间和 restart count 全部未变；没有重启或重建 new-api、Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP 或 Grok 服务。
+- 最终 load 1 分钟值为 `1.44`，systemd failed units 为 0；源站 `/api/status`、公网 `/api/status` 与首页连续 5 轮全部 200，new-api/Caddy/Sub2API/Grok API/LDXP worker 严重日志计数为 0。
+- 最终 2 个 dangling images 仅约 5 小时，仍在 12 小时保护窗；7 个 exited containers 属于带挂载的旧 Grok 回滚栈。为稳定性与回滚能力主动保留这些对象及空旧网络。
+- 本轮没有执行 `docker system prune -a`、image/container/network prune、`docker volume prune`、备份/发布包删除、日志截断或 sudo 权限绕过。后续只有磁盘再次超过阈值并逐项确认引用关系时，才单独计划 tagged image、旧栈或备份保留策略。
+
 ## 2026-07-16 生产 502 故障处置与恢复记录（已完成）
 
 ### 目标与性能指标
