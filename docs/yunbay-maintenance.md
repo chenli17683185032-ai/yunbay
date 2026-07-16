@@ -1548,3 +1548,22 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ### 回滚
 
 回滚必须继续使用本文顶部唯一允许流程：获取 `/var/lock/yunbay-new-api-deploy.lock`，把 `yunbay-new-api:rollback-quick-start-confirm-order-20260716T131718Z` 重标为 `yunbay-new-api:prod`，从成功回滚目录恢复 `existing-files.txt` 中的 12 个文件，并在独立 watchdog 保护下只执行 Compose `--no-deps --force-recreate --no-build new-api`。Caddy upstream 始终保持 `new-api:3000`；禁止重启或修改 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP 服务。
+
+## 2026-07-17 快速启动单一导入条与生图下一步上线
+
+- 功能提交 `44a3e932857d5f1b0a7abc955a1fa08878fe0161` 已发布；后续 `ef54e007` 只收尾计划。Provider 导入动作后同一组件原位收敛为完成条，生图设置立即作为下一步出现；生图 Prompt 导入后才解锁“进入控制台”。再次导入仍可 hover/focus 展开详情，但不会回退完成态或隐藏生图设置。
+- 生产从 `7bc5e4e7` 精确、非删除式同步 `index.tsx` 与源码约束测试两文件。文件 SHA-256 分别为 `6ee31a63fdb442d730b57b04e6632024d412497da5500d42afc13f9afdc25916`、`40ac75b97316c5c0d694a1970c39ce9b0c4ef75311ca2031f26f0cb3cf6332`，组合清单 SHA-256 为 `cfa56c2cf171adc9b6e8bb4b55014be292555fa8a4936b5b9e0be305a0eb1f6a`。本轮没有数据库迁移、环境变量或业务数据变更。
+- 新镜像为 `sha256:2ab381744eb207bc1246a31682c39ed3a7d569d7663dc17abe193e3b0717fdf5`，release 标签为 `yunbay-new-api:release-44a3e932`。最终标准容器 `ea163ea454d49d374bdbebd708fdd170d11e884c5d49250a074a1cad87ec8588` 为 `running / healthy / restart=0`，watchdog=`success`。
+- 生产入口 `index.e4374b86a3.js` 和 quick-start chunk `4963.937f71286d.js` 的 SHA-256 分别为 `cf673d3ea925820fbc18db9e0c6b55e24bdc2d8aa2f896c4ac5d0dc60573b3b3`、`1addc8ec05f0628f7f708f00dc4a93d5b9089ea74a60e603bcc98c710b83b4d9`，字节数分别为 `3064387`、`47329`，与本地已测试构建一致。
+- 切换探针在 `2026-07-16T16:08:38Z` 至 `16:08:46Z` 观测到 502，`16:08:47Z` 起恢复 200。Caddy 日志首末 502 相隔约 8.58 秒，共 25 个请求：23 个新进程监听前的 connection refused、1 个旧连接 EOF、1 个旧连接关闭；没有 DNS/lookup 错误，Caddy 未重启、reload 或改写。
+- 最终公网 `/`、`/quick-start`、`/api/status` 连续 10 轮共 30 次全部为 200，新应用严重启动日志为 0。Caddy 文件、挂载和运行时哈希前后相同，upstream 全程只有 `new-api:3000`；PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 均未变化。
+
+成功回滚点：
+
+```text
+backup: /opt/new-api/backups/quick-start-merged-flow-20260716T160439Z-44a3e932
+rollback tag: yunbay-new-api:rollback-quick-start-merged-20260716T160439Z
+old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d0e
+```
+
+两文件源包和完整部署日志已归档到成功备份，顶层传输包、脚本、状态、日志、PID 和 run dir 已清理。回滚必须获取 `/var/lock/yunbay-new-api-deploy.lock`，恢复成功备份中的两文件，把上述 rollback 标签重标为 `yunbay-new-api:prod`，启动独立 watchdog，并且只重建标准 `new-api`。Caddy upstream 始终保持 `new-api:3000`；禁止修改或重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP 服务。

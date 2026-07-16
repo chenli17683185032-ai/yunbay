@@ -668,7 +668,7 @@
 | 单容器状态机与 Prompt 下一步 | 已完成 | Provider 原位收敛，Prompt 紧邻出现，无独立确认卡 |
 | 自动化与双视口浏览器验收 | 已完成 | 工程检查、交互、布局、键盘和 reduced-motion 全通过 |
 | GitHub main | 已完成 | `44a3e932` 已普通推送 main，仅包含计划、实现和源码约束测试 |
-| 生产部署 | 未授权 | 保持当前生产服务不变，等待新的明确部署指令 |
+| 生产部署 | 已完成 | `44a3e932` 已按固定 upstream 闭环发布，watchdog 成功，30/30 公网探针为 200 |
 
 ### 15.7 实施验证记录
 
@@ -683,3 +683,25 @@
 - 最终本地生产入口为 `dist/static/js/index.e4374b86a3.js`，SHA-256 `cf673d3ea925820fbc18db9e0c6b55e24bdc2d8aa2f896c4ac5d0dc60573b3b3`、字节数 `3064387`；quick-start chunk 为 `dist/static/js/async/4963.937f71286d.js`，SHA-256 `1addc8ec05f0628f7f708f00dc4a93d5b9089ea74a60e603bcc98c710b83b4d9`、字节数 `47329`。
 - 功能、测试与本节计划已作为 `44a3e932` 普通 fast-forward 推送 GitHub `main`；提交范围只有三个本轮目标文件，工作区既有运维手册改动、旧规格文档和 `outputs/` 均未纳入。
 - 本轮没有连接、同步、构建或重启生产服务器；现网继续运行上一轮健康版本。开发验收复用现有 `http://127.0.0.1:5173/quick-start`，没有停止本地后端或前端进程。
+
+### 15.8 生产执行计划
+
+- 用户已明确发送“部署”，本轮生产发布自此获准。功能基线固定为 `44a3e932857d5f1b0a7abc955a1fa08878fe0161`；后续纯计划提交不参与镜像功能身份。
+- 预期生产基线为 `7bc5e4e7b5ad67969bae0961b0a580670d206382`。精确同步范围仍只有 `web/default/src/features/quick-start/index.tsx` 与 `web/default/src/features/quick-start/quick-start-page-source.test.ts`；不做删除式同步，不上传本地运维手册、旧规格文档、`outputs/` 或其它脏工作区内容。
+- 先获取非阻塞部署锁 `/var/lock/yunbay-new-api-deploy.lock` 并只读确认：标准 `new-api` 与 Caddy healthy，当前容器镜像可解析，正式 Caddyfile、挂载和运行时 upstream 都只有 `new-api:3000`，公网 `/`、`/quick-start`、`/api/status` 为 200，且不存在 `new-api-green`。
+- 锁内建立带 UTC 时间与 `44a3e932` 标记的成功回滚目录，备份两个源文件、存在文件清单、`.yunbay-deploy-sha` 与 `.yunbay-source-manifest`；把切换前正在运行的镜像 ID固定为不可变 rollback tag。同步后逐文件核对本地与生产 SHA-256，并记录组合 manifest。
+- 在服务器构建 `yunbay-new-api:prod`，构建期间旧标准容器继续提供服务；成功后固定 `yunbay-new-api:release-44a3e932`，并在切换前核对镜像内入口、主 bundle、quick-start chunk 的哈希/字节数及单 Provider/单 Prompt 稳定标记。
+- 正式切换前启动独立于 SSH 会话、最迟 60 秒结束的 watchdog。只允许执行 `docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate --no-build new-api`；不创建绿实例、不修改或 reload Caddy、不重启 PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 或 worker。
+- 新标准容器 45 秒内未达到目标镜像、Docker healthy、容器内/宿主机 HTTP 200，或最终固定 upstream、静态身份、公网探针、依赖服务不变量任一失败时，watchdog/发布脚本必须自动把固定旧镜像重新标记为 `:prod`，恢复两文件源码和部署标记，并再次只重建标准 `new-api`；禁止留下等待人工输入的中间态。
+- 发布成功须同时满足：`new-api`/Caddy healthy，Caddy upstream 仍只有 `new-api:3000`，其它服务容器 ID、启动时间和 restart count 未变化，公网 `/`、`/quick-start`、`/api/status` 连续 10 轮为 200，生产 bundle 与本地测试构建身份一致且包含本轮稳定标记。随后原子更新部署标记、追加仓库与桌面唯一运维手册，并清理传输包、顶层脚本、构建日志、探针和 watchdog 临时目录；源码备份、审计证据和 release/rollback 镜像标签保留。
+
+### 15.9 生产结果
+
+- 生产从 `7bc5e4e7b5ad67969bae0961b0a580670d206382` 精确同步上述两文件到功能提交 `44a3e932857d5f1b0a7abc955a1fa08878fe0161`。生产文件 SHA-256 分别为 `6ee31a63fdb442d730b57b04e6632024d412497da5500d42afc13f9afdc25916`、`40ac75b97316c5c0d694a1970c39ce9b0c0b4ef75311ca2031f26f0cb3cf6332`，组合清单 SHA-256 为 `cfa56c2cf171adc9b6e8bb4b55014be292555fa8a4936b5b9e0be305a0eb1f6a`。
+- 构建期间旧标准容器持续服务。新镜像 `sha256:2ab381744eb207bc1246a31682c39ed3a7d569d7663dc17abe193e3b0717fdf5` 固定为 `yunbay-new-api:release-44a3e932`；切换前镜像 `sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d0e` 固定为 `yunbay-new-api:rollback-quick-start-merged-20260716T160439Z`。
+- 只用 Compose 强制重建标准 `new-api`。最终容器 `ea163ea454d49d374bdbebd708fdd170d11e884c5d49250a074a1cad87ec8588` 为 `running / healthy / restart=0`；独立 watchdog 结果为 `success`，生产标记已原子更新到功能提交、两文件清单和新镜像。
+- 切换从 `2026-07-16T16:08:37Z` 开始，探针在 `16:08:38Z` 至 `16:08:46Z` 连续观测到 502，`16:08:47Z` 起恢复 200。Caddy 同窗记录 25 个 502，首末时间为 `16:08:38.129Z` 与 `16:08:46.711Z`，窗口约 8.58 秒：23 个 connection refused、1 个旧连接 EOF、1 个旧连接关闭；没有 DNS/lookup 错误，低于 1 分钟稳定性上限。
+- 生产入口 `/static/js/index.e4374b86a3.js` 的 SHA-256 为 `cf673d3ea925820fbc18db9e0c6b55e24bdc2d8aa2f896c4ac5d0dc60573b3b3`、字节数 `3064387`；quick-start chunk `/static/js/async/4963.937f71286d.js` 的 SHA-256 为 `1addc8ec05f0628f7f708f00dc4a93d5b9089ea74a60e603bcc98c710b83b4d9`、字节数 `47329`，与本地已测试构建完全一致。
+- 公网 `/`、`/quick-start`、`/api/status` 独立连续 10 轮共 30 次全部为 200；新应用启动后日志中 `panic/fatal/error/unhealthy` 为 0。Caddy 文件、挂载和运行时哈希前后相同，主站 upstream 全程只有 `new-api:3000`。
+- Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 在切换前后完全一致。本轮没有数据库迁移，没有修改业务数据、环境变量或其它服务。
+- 成功备份为 `/opt/new-api/backups/quick-start-merged-flow-20260716T160439Z-44a3e932`。两文件源包和完整部署日志已归档到该目录，源包无 AppleDouble 条目；顶层传输包、脚本、状态、日志、PID 和 run dir 已清理，release/rollback 镜像与审计证据保留。
