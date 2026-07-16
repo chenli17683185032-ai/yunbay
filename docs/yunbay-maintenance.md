@@ -1450,3 +1450,34 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ### 回滚
 
 回滚目录的 `existing-files.txt` 记录部署前已存在的两个文件，`new-files.txt` 记录本轮新增的两个动效模块。源码回滚时恢复备份 `source/` 中的既有文件，并删除部署前不存在的新增文件；镜像回滚使用 `yunbay-new-api:rollback-quick-start-motion-20260715T194510Z`。仍须采用本轮已经验证的绿实例与 Caddy graceful reload 流程，先让旧镜像候选达到 healthy 并切流，再重建标准 `new-api`，禁止直接中断服务，也禁止重启 PostgreSQL、Redis、Caddy、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库变更。
+
+## 2026-07-16 CC Switch Provider 与生图提示词两阶段导入上线
+
+本轮在官网原版 CC Switch 单次只支持一个 `resource` 的边界内，把快速启动现有按钮改为可恢复的两阶段动作：首次导入 Provider，随后同一个按钮切换为“继续导入推荐提示词”。Prompt 固定要求图片请求直接使用 `POST /v1/images/generations` 与 `gpt-image-2`，禁止把图片模型设为 Codex 主聊天模型，并要求 Base64 原图先保存到工作区 `outputs/`。按产品要求，Prompt 会写入与 Provider 相同的真实 API Key；运维记录和测试只使用假 Key，未记录任何真实 Key。
+
+### 发布内容与验证
+
+- 功能提交：`ee953c5954f85e61a4004f0df26f9043e696cc10`（`feat: add staged CC Switch prompt import`），已普通 fast-forward 推送 GitHub `main`。
+- Provider 与 Prompt 均从内存中的同一个 `effectiveApiKey` 生成并统一规范化 `sk-` 前缀；完整 Key 不写入 local/session storage、日志、toast 或可见页面，但按明确产品要求会经 Base64 Deep Link 进入 CC Switch，并最终以明文存在用户的 `~/.codex/AGENTS.md`。Base64 只是编码，不是加密。
+- Prompt Deep Link 只含 `resource=prompt`、`app=codex`、名称、UTF-8 Base64 正文和 `enabled=true`，不混入 Provider 专属字段。现有“重试”继续只重开 Provider。
+- 浏览器初测发现英文长标签会把桌面网格列从 230px 撑到 310px；最终使用 `minmax(0, …)` 固定轨道并允许按钮正文在固定 48px 高度内平衡换行。1280x720 与 390x844 下切换前后宽高一致，无横向溢出、控制台错误或底栏遮挡。
+- 本地验证：快速启动测试 `53 pass / 0 fail`；TypeScript、涉及文件 ESLint、Prettier、六语 i18n 同步、生产构建与 `git diff --check` 均通过。六种语言 missing、extras、untranslated 均为 0。
+
+### 无中断部署
+
+- 精确、非删除式同步 11 个前端源码/测试/i18n 文件，本地与生产组合 SHA-256 均为 `9d66e3710df70ef1a2522224e2e0f75301995a9b8938b3769dc659c97f3dc26c`。
+- 回滚目录：`/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59`；旧镜像 `sha256:bd931400a56e9ad0b43c776bbffac26075267a91ac2362c596880b655a4857fa`，回滚标签 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`。
+- 新镜像：`sha256:3db9cb74a065b3aec8dbfae5919c038739c96bdf728b43794491b2fb86dbb91a`，发布标签 `yunbay-new-api:release-ee953c59`。候选绿实例达到 Docker `healthy` 后才切流，内部入口为 `/static/js/index.04106f6b05.js`。
+- 临时 Caddyfile 只把唯一 upstream 改为 `new-api-green:3000`，经 `caddy validate` 后 graceful reload。绿实例承载公网期间，标准 `new-api` 使用 Compose `--no-deps --force-recreate --no-build` 在 2 秒内重建；标准实例 healthy 后验证并 reload 正式 Caddyfile。
+- 正式 Caddyfile SHA-256 始终为 `655d48c14d94372bf2383af094899fc3e3e8c54fe24b4476ba3ae7f887302388`。Caddy 容器 ID、启动时间和 restart=0 不变；PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 均未重启。
+
+### 上线验收与清理
+
+- 标准容器 `a891da9bfa9efbdac84822d5a48ce731cb2e3420a97d23e8ad4ace390e45e725` 为 `running / healthy / restart=0`，应用严重启动日志为 0。
+- 公网 `/`、`/quick-start`、`/api/status` 各 3/3 为 200；公网入口 `/static/js/index.04106f6b05.js` 的 SHA-256 为 `211fdddf75fef5856d5f1288c8c6b96585d752d9d77d860d4c8ff3cc2196079c`，字节数 `3064077`，与绿实例一致。
+- 切换窗口本机公网探针 180 次中 177 次为 200；编号 8、80、152 三次在收到 HTTP 状态前失败。服务器同窗 Caddy 5xx=0、upstream error=0、应用严重日志=0，三个失败点间隔规律，按本机 SOCKS5/Cloudflare 传输链路失败记录，不记为服务端 5xx。最终独立探针 30/30 为 200。
+- `.yunbay-deploy-sha` 与 `.yunbay-source-manifest` 已原子更新到功能提交、新镜像、11 文件数量和组合哈希。绿实例、宿主机/容器临时 Caddyfile及本机构建验证临时文件均已清理。
+
+### 回滚
+
+源码回滚从 `/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59/source/` 恢复 `existing-files.txt` 中的 11 个文件；镜像回滚使用 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`。仍须先用旧镜像启动 healthy 绿实例、Caddy 平滑切流、重建标准 `new-api`，再切回正式 Caddyfile；禁止直接停止当前流量承载实例，也不要重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库迁移。

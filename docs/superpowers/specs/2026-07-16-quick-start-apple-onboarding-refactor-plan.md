@@ -349,7 +349,7 @@
 | Prompt 构造、阶段切换与测试 | 已完成 | 同一按钮按 `importAttempted` 切换且两次 URL 使用同一 Key |
 | 六语言与工程验证 | 已完成 | 六语言无缺失，测试、类型、lint、format 与生产构建通过 |
 | 桌面与移动端浏览器验收 | 已完成 | 两种视口切换稳定、参数正确、Provider 重试可用 |
-| GitHub main、生产部署与运维记录 | 待开始 | 只提交本轮文件，推送 main，无中断部署并追加既有运维手册 |
+| GitHub main、生产部署与运维记录 | 已完成 | 功能提交已推送 main，绿实例部署完成并追加既有运维手册 |
 
 ### 11.6 实施验证记录
 
@@ -360,3 +360,8 @@
 - 1280x720 与 390x844 浏览器验收均通过：按钮切换前后宽高一致、没有横向溢出、控制台无错误；现有人工确认和 Provider 重试操作保持可用。
 - `bun test src/features/quick-start/*.test.ts`：53 pass / 0 fail；`bun run typecheck`、涉及文件 ESLint、Prettier 与 `bun run build` 均通过。
 - `bun run i18n:sync` 后 en、zh、fr、ja、ru、vi 的 missing、extras、untranslated 均为 0；六个 locale 各只新增两行，没有排序噪声。
+- 功能提交 `ee953c5954f85e61a4004f0df26f9043e696cc10` 已普通 fast-forward 推送 GitHub `main`。生产精确同步 11 个文件，组合 SHA-256 为 `9d66e3710df70ef1a2522224e2e0f75301995a9b8938b3769dc659c97f3dc26c`。
+- 新镜像为 `sha256:3db9cb74a065b3aec8dbfae5919c038739c96bdf728b43794491b2fb86dbb91a`；绿实例 healthy 后经 Caddy graceful reload 承载流量，标准 `new-api` 仅用 Compose `--no-deps --force-recreate --no-build` 在 2 秒内重建，再平滑切回。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 和 worker 均未重启。
+- 最终公网 `/`、`/quick-start`、`/api/status` 各 3/3 为 200；入口 `/static/js/index.04106f6b05.js`，bundle SHA-256 `211fdddf75fef5856d5f1288c8c6b96585d752d9d77d860d4c8ff3cc2196079c`、字节数 `3064077`。
+- 切换窗口本机公网探针 180 次中 177 次为 200，编号 8/80/152 的三次在 HTTP 状态前失败；同窗 Caddy 5xx=0、upstream error=0、应用严重日志=0，且三次间隔规律，按本机代理/Cloudflare 传输链路失败记录。最终独立探针 30/30 为 200。
+- 生产回滚目录为 `/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59`；旧镜像标签 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`，新镜像标签 `yunbay-new-api:release-ee953c59`。部署标记和 11 文件 manifest 已原子更新，绿实例与临时 Caddyfile 已清理。
