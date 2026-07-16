@@ -667,7 +667,7 @@
 | GitHub 经验与完整闭环计划 | 已完成 | 本节已写入唯一计划文件，固定状态、反馈、验证和发布边界 |
 | 单容器状态机与 Prompt 下一步 | 已完成 | Provider 原位收敛，Prompt 紧邻出现，无独立确认卡 |
 | 自动化与双视口浏览器验收 | 已完成 | 工程检查、交互、布局、键盘和 reduced-motion 全通过 |
-| GitHub main | 未开始 | 仅提交本轮相关文件并普通推送，排除既有脏工作区 |
+| GitHub main | 已完成 | `44a3e932` 已普通推送 main，仅包含计划、实现和源码约束测试 |
 | 生产部署 | 未授权 | 保持当前生产服务不变，等待新的明确部署指令 |
 
 ### 15.7 实施验证记录
@@ -681,4 +681,5 @@
 - hover 与 focus 事件均验证可展开，pointer leave 与焦点移出均验证可收起；`prefers-reduced-motion: reduce` 下仍保持 1 个 Provider、1 个 Prompt 和完整展开/收起状态，宽度 `390px`。浏览器 error 为 0；唯一 warning 是 Motion 对主动模拟 reduced-motion 的说明性提示。
 - `bun test src/features/quick-start/*.test.ts` 为 54 pass / 0 fail；`bun run typecheck`、定向 ESLint、Prettier、`bun run i18n:sync`、`git diff --check` 与 `bun run build` 全部通过。六语言 missing、extras、untranslated 均为 0。
 - 最终本地生产入口为 `dist/static/js/index.e4374b86a3.js`，SHA-256 `cf673d3ea925820fbc18db9e0c6b55e24bdc2d8aa2f896c4ac5d0dc60573b3b3`、字节数 `3064387`；quick-start chunk 为 `dist/static/js/async/4963.937f71286d.js`，SHA-256 `1addc8ec05f0628f7f708f00dc4a93d5b9089ea74a60e603bcc98c710b83b4d9`、字节数 `47329`。
+- 功能、测试与本节计划已作为 `44a3e932` 普通 fast-forward 推送 GitHub `main`；提交范围只有三个本轮目标文件，工作区既有运维手册改动、旧规格文档和 `outputs/` 均未纳入。
 - 本轮没有连接、同步、构建或重启生产服务器；现网继续运行上一轮健康版本。开发验收复用现有 `http://127.0.0.1:5173/quick-start`，没有停止本地后端或前端进程。
