@@ -1385,3 +1385,68 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 发布完成后，用户补充要求“先不要上线”。为恢复发布前状态，运维侧只完成了当前容器、回滚镜像和备份目录的只读预检查，尚未执行源码恢复、文件删除、镜像重标记、Compose 重建或任何服务重启。随后用户明确要求不要撤回，以免打断服务器运行，因此立即取消回滚。
 
 取消时生产仍运行新镜像 `sha256:3e38bc6f23e74bd51b19a326dbd63aa84b5efc7b2a029378bbab0220da5e403f`，Compose 服务状态为 `running / healthy`。本次取消回滚没有造成额外服务切换或中断；后续除非用户再次明确要求，不执行该回滚方案。
+
+## 2026-07-16 快速启动页内动效与平台图标无中断上线
+
+本轮保持快速启动五页信息架构和业务状态机不变，只精修页内操作反馈、平台品牌图标和响应式对齐。运维记录不包含 SSH 私钥、生产环境变量、API Key、cookie 或用户会话。
+
+### 发布内容与验证
+
+- 发布提交：`a048627a338ca19b2ad7c4930bfae15ed798c61a`（`feat: refine quick start interactions`），本地 `main`、`origin/main` 与生产标记一致。
+- 用途、模型和软件选择使用共享选中底板与弹簧反馈；模型选择后的重排使用 Motion position layout，步骤编号到完成勾选使用交叉淡入、缩放和位移。
+- `prefers-reduced-motion: reduce` 下取消空间位移与缩放；完整 reload 后选择前、中间帧和最终帧的 transform 均为 `none`。
+- Mac 使用 `SiApple` 品牌标识，Windows 使用 `FaWindows`；下载按钮桌面固定 `224x48`，移动端固定 `316x48`。账户操作和最终控制器也完成等宽、单行与最长法语/俄语文案验收。
+- 默认模型继续精确使用 `gpt-5.6-sol`，思考强度独立为 `xhigh`；没有引入 `gpt-5.6-sol-thinking`。
+- 自动化结果：快速启动测试 `51 pass / 0 fail`，TypeScript typecheck、涉及文件 ESLint、Prettier、六语 i18n 同步、生产构建和 `git diff --check` 均通过。
+- Browser 在 `1280x720` 和 `390x844` 下完成交互、对齐、长文案、滚动区和减少动态效果验收，控制台 error/warn 为 0；本地生产入口为 `/static/js/index.4f358c87c4.js`。
+
+### 无中断部署
+
+本轮只精确、非删除式同步四个文件。生产与本地逐项 SHA-256 一致，哈希清单组合值为：
+
+```text
+fdfc8da280151ff290b7ace8fe1e7f73612867300ef09d4176cd447db1721490
+```
+
+回滚点与镜像：
+
+```text
+source backup: /opt/new-api/backups/quick-start-motion-20260715T194510Z-a048627a
+old image: sha256:3e38bc6f23e74bd51b19a326dbd63aa84b5efc7b2a029378bbab0220da5e403f
+rollback tag: yunbay-new-api:rollback-quick-start-motion-20260715T194510Z
+new image: sha256:bd931400a56e9ad0b43c776bbffac26075267a91ac2362c596880b655a4857fa
+release tag: yunbay-new-api:release-a048627a
+standard container: 2f6671300340a284d4572a9d1b05ee6257028fa6dcfeaeecfaa476c2a137a302
+```
+
+构建期间旧 `yunbay-new-api` 容器持续 `healthy`，ID 和启动时间未变化。候选绿实例使用当前生产实例解析后的环境和相同挂载，环境临时文件权限为 `0600` 且创建容器后立即删除；绿实例未映射宿主机端口。第一次候选启动证明应用 `/api/status` 已是 200，但直接 `docker run` 没有自动继承 Compose 服务层 HEALTHCHECK，因此没有切流；该候选先被移除，再带与正式服务相同的 HEALTHCHECK 参数重建并达到 Docker `healthy`。
+
+绿实例入口和静态资源验收：
+
+```text
+green start_time: 1784168601
+entry: /static/js/index.4f358c87c4.js
+bundle sha256: 08c82ce58f3adb7fc781366b41beb37bd2a7e147d74303cbd7356a7e2ddca3b7
+bundle bytes: 3062829
+```
+
+临时 Caddyfile 只替换唯一主站 upstream，先在容器内 `caddy validate`，再执行 `caddy reload` 平滑切到 `new-api-green:3000`。绿实例承载流量期间，只执行以下命令重建标准实例：
+
+```bash
+cd /opt/new-api/app
+docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate --no-build new-api
+```
+
+标准实例达到 `healthy` 后，验证正式 `/etc/caddy/Caddyfile` 并再次 `caddy reload` 切回 `new-api:3000`。正式宿主机 Caddyfile SHA-256 始终为 `655d48c14d94372bf2383af094899fc3e3e8c54fe24b4476ba3ae7f887302388`；Caddy 容器 `8a961ee82d49a452d551e7f36cdcd8931ef844b3b8392f5a3761cc40a753735a` 的 ID、启动时间和 restart count 均未变化。Compose 审计确认 PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 和 worker 也没有重建或重启。
+
+### 上线验收与清理
+
+- 标准实例为 `running / healthy / restart=0`，`start_time=1784168769`；启动日志中 `panic`、`fatal`、迁移错误均为 0。
+- 公网 `/`、`/quick-start`、`/api/status` 均为 HTTP 200；连续三次及最终复核均命中标准实例。公网 bundle 的文件名、字节数和 SHA-256 与本地一致，包含 `gpt-5.6-sol`，不含 `gpt-5.6-sol-thinking`。
+- 覆盖切绿与标准重建的公网持续探针 `159/159` 为 200。覆盖两次 Caddy reload 的源站探针共 2400 次，全部收到 HTTP 响应：718 次 200、1682 次由同一来源高频访问主动触发的 429，没有连接失败或 5xx；停止高频探针后 200 恢复。
+- 一次本机到 SOCKS5/Cloudflare 的 TLS 握手在收到 HTTP 状态前超时；服务端同时段无 5xx、容器无重启，随后最终请求为 200，故记录为客户端链路抖动，不是服务端 HTTP 错误。
+- `.yunbay-deploy-sha` 和 `.yunbay-source-manifest` 已原子更新为本轮提交、新镜像和四文件组合哈希。绿实例、临时环境文件、临时 Caddyfile、构建日志与探针日志已清理。
+
+### 回滚
+
+回滚目录的 `existing-files.txt` 记录部署前已存在的两个文件，`new-files.txt` 记录本轮新增的两个动效模块。源码回滚时恢复备份 `source/` 中的既有文件，并删除部署前不存在的新增文件；镜像回滚使用 `yunbay-new-api:rollback-quick-start-motion-20260715T194510Z`。仍须采用本轮已经验证的绿实例与 Caddy graceful reload 流程，先让旧镜像候选达到 healthy 并切流，再重建标准 `new-api`，禁止直接中断服务，也禁止重启 PostgreSQL、Redis、Caddy、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库变更。

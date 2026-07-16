@@ -278,7 +278,7 @@
 | 页内选择与步骤动效 | 已完成 | 用途、模型、软件和步骤状态均形成连续反馈，减少动态效果可降级 |
 | 品牌图标与按钮对齐 | 已完成 | Apple/Windows 标识准确，下载操作列桌面与移动端稳定同宽 |
 | 自动化与浏览器闭环 | 已完成 | 测试、typecheck、lint、format、i18n、build 及双视口交互验收通过 |
-| GitHub 与无中断生产同步 | 进行中 | main 已同步，绿实例切流无服务错误，公网与容器健康通过 |
+| GitHub 与无中断生产同步 | 已完成 | main、生产标记和运维记录均已同步；绿实例切流期间无连接失败或 5xx，最终公网与容器健康通过 |
 
 ### 10.7 实施验证记录
 
@@ -295,3 +295,12 @@
 - `bun test src/features/quick-start/*.test.ts`：51 pass / 0 fail。
 - `bun run typecheck`、涉及文件 ESLint、Prettier、`bun run build`、`git diff --check` 均通过；最终生产构建入口为 `dist/static/js/index.4f358c87c4.js`。
 - `bun run i18n:sync` 后 en、zh、fr、ja、ru、vi 的 missing、extras、untranslated 均为 0，本轮没有新增可见文案或 locale 变更。
+- 本轮发布提交为 `a048627a338ca19b2ad7c4930bfae15ed798c61a`，已与 GitHub `main` 同步；四个精确同步文件在本地与生产逐项 SHA-256 一致，哈希清单组合值为 `fdfc8da280151ff290b7ace8fe1e7f73612867300ef09d4176cd447db1721490`。
+- 发布前回滚点为 `/opt/new-api/backups/quick-start-motion-20260715T194510Z-a048627a`；旧镜像 `sha256:3e38bc6f23e74bd51b19a326dbd63aa84b5efc7b2a029378bbab0220da5e403f` 保留为 `yunbay-new-api:rollback-quick-start-motion-20260715T194510Z`。
+- 构建期间旧生产容器 ID、启动时间和健康状态均未变化。新镜像为 `sha256:bd931400a56e9ad0b43c776bbffac26075267a91ac2362c596880b655a4857fa`，审计标签为 `yunbay-new-api:release-a048627a`。
+- 绿实例使用当前生产容器解析后的环境与相同挂载，未映射宿主机端口；补齐 Compose 服务层 HEALTHCHECK 后达到 `healthy`，入口 `/static/js/index.4f358c87c4.js` 的 SHA-256 为 `08c82ce58f3adb7fc781366b41beb37bd2a7e147d74303cbd7356a7e2ddca3b7`。
+- 临时 Caddyfile 仅把唯一 upstream 从 `new-api:3000` 改为 `new-api-green:3000`，容器内 `caddy validate` 通过后执行 graceful reload。绿实例承载流量时只用 Compose `--no-deps --force-recreate --no-build` 重建标准 `new-api`，标准实例 `healthy` 后验证正式 Caddyfile并 graceful reload 切回。
+- 正式宿主机 Caddyfile SHA-256 始终为 `655d48c14d94372bf2383af094899fc3e3e8c54fe24b4476ba3ae7f887302388`；Caddy 容器 ID、启动时间和重启计数未变化。PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 和 worker 也未重启。
+- 切换窗口公网持续探针 `159/159` 为 HTTP 200。源站高频探针共 2400 次，全部收到 HTTP 响应：718 次 200、1682 次由探针自身触发的 429，没有连接失败或 5xx；停止高频探针后限流恢复。最终公网 `/`、`/quick-start`、`/api/status` 均为 200，`start_time=1784168769`，bundle 文件名、字节数和 SHA-256 与本地一致。
+- 一次本机到代理/Cloudflare 的 TLS 握手在收到 HTTP 状态前超时；同一时段服务端无 5xx、容器无重启，随后固定出口最终复核再次为 200，因此按客户端链路抖动记录，不记为服务端中断。
+- 生产 `.yunbay-deploy-sha` 与 `.yunbay-source-manifest` 已原子更新到 `a048627a` 和新镜像；绿实例、临时环境文件、临时 Caddyfile、构建日志及探针日志均已清理，回滚目录和镜像标签保留。
