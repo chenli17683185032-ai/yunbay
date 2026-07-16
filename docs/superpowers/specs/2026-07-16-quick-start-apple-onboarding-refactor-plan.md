@@ -766,8 +766,8 @@
 | 生图完成条与稳定底栏实现 | 已完成 | 同一视觉对象收敛，主按钮连续移到中央 |
 | 自动化与六语言检查 | 已完成 | 测试、类型、Lint、格式、i18n、构建全通过 |
 | 双视口与 reduced-motion 浏览器验收 | 已完成 | 中间帧、最终对齐、键盘、刷新恢复和溢出通过 |
-| GitHub main | 进行中 | 只提交本轮计划、实现、测试与必要翻译 |
-| 生产部署 | 已授权，进行中 | 固定 upstream、旧实例持续服务、watchdog 保护下只切换 new-api |
+| GitHub main | 已完成 | 功能提交 `a6e524db` 已普通推送 main |
+| 生产部署 | 已完成 | 固定 upstream 单服务切换成功，watchdog=success，生产标记已更新 |
 
 ### 16.8 实施验证与发布基线
 
@@ -778,3 +778,12 @@
 - `bun test src/features/quick-start/*.test.ts` 为 `54 pass / 0 fail`；`bun run typecheck`、定向 ESLint、Prettier、`bun run i18n:sync`、`git diff --check` 与 `bun run build` 全部通过。
 - 本地生产入口 `dist/static/js/index.58250d789d.js` 的 SHA-256 为 `86e3b28ff39082fdb0d56db4830e4d3d08d6417fe9ec0f7c0c34762589e2f08b`、字节数 `3065573`；Quick Start chunk `dist/static/js/async/4963.d9f8a87c33.js` 的 SHA-256 为 `2ec156b89b34f56a6e11c27f8a490178149483164d018cade9330da5750f3aed`、字节数 `50341`。
 - 用户已明确发送“快点部署了”。发布仍遵循固定 `new-api:3000` upstream：先推送功能提交，再精确同步本轮 10 个源码/测试/翻译文件；构建期间旧标准实例持续服务，切换前固定当前运行镜像并启动独立 60 秒 watchdog，只执行 Compose `--no-deps --force-recreate --no-build new-api`。禁止修改或重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP 服务。
+
+### 16.9 生产结果
+
+- 功能提交 `a6e524db3fda07da8184092fee5b9970fa8d0cab` 已普通 fast-forward 推送 GitHub `main`，随后从生产基线 `44a3e932857d5f1b0a7abc955a1fa08878fe0161` 精确同步 10 个源码、测试和翻译文件。生产组合清单 SHA-256 为 `7b53c1b8c1852158200451f25fd5b3246fec2e3d7b4d5ae8393f2b34572c3594`，没有数据库迁移、环境变量或业务数据变更。
+- 构建期间旧标准容器保持 `healthy / restart=0` 并持续提供 200。新镜像 `sha256:a9a3c1791f56400170fa96e63a6cb5f0414e7b00a1eac43e9a3cec618b1ffd25` 固定为 `yunbay-new-api:release-a6e524db`；最终标准容器 `52c86e2fd6e435288c4e91975da39ebcc743c1f08da4d2dace18f5d80cf918e8` 为 `running / healthy / restart=0`，独立 watchdog 结果为 `success`。
+- 切换探针在 `2026-07-16T17:58:47Z` 至 `17:58:55Z` 的约 9 秒窗口内记录 8 次 502，随后恢复并持续为 200，低于 1 分钟约束。发布脚本内置 10 轮固定探针全部通过，收尾再独立复测 5 轮 `/`、`/quick-start`、`/api/status` 全部为 200；新应用严重启动日志为 0。
+- 生产入口 `index.58250d789d.js` 的 SHA-256 为 `86e3b28ff39082fdb0d56db4830e4d3d08d6417fe9ec0f7c0c34762589e2f08b`、字节数 `3065573`；Quick Start chunk `4963.d9f8a87c33.js` 的 SHA-256 为 `2ec156b89b34f56a6e11c27f8a490178149483164d018cade9330da5750f3aed`、字节数 `50341`，与本地已测试构建完全一致，并包含本轮完成条与底栏收敛标记。
+- Caddy 文件、只读挂载和运行时配置哈希前后完全一致，upstream 始终只有 `new-api:3000`，无绿实例。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 均未变化。
+- 成功回滚目录为 `/opt/new-api/backups/quick-start-completion-collapse-20260716T175451Z-a6e524db`；固定回滚标签为 `yunbay-new-api:rollback-quick-start-completion-20260716T175451Z`，旧镜像为 `sha256:2ab381744eb207bc1246a31682c39ed3a7d569d7663dc17abe193e3b0717fdf5`。源包、部署脚本、构建日志、探针和 watchdog 证据已归档，服务器顶层传输包、脚本、状态文件、日志和临时 run dir 已清理。
