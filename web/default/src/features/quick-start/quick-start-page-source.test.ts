@@ -52,6 +52,10 @@ const providerPanelSource = pageSource.slice(
   pageSource.indexOf('function CCSwitchImportPanel'),
   pageSource.indexOf('function ImageSettingsImportPanel')
 )
+const providerReimportHandlerSource = pageSource.slice(
+  pageSource.indexOf('const handleReimportToCCSwitch'),
+  pageSource.indexOf('const handleImportPromptToCCSwitch')
+)
 
 test('quick start controls are centered, enlarged, and keep one primary action', () => {
   assert.match(pageSource, /left-1\/2/)
@@ -159,10 +163,43 @@ test('quick start final page confirms prerequisites before one-click import and 
   assert.match(pageSource, /handleImportPromptToCCSwitch/)
   assert.match(pageSource, /imported=\{importAttempted\}/)
   assert.match(pageSource, /onImport=\{handleImportToCCSwitch\}/)
+  assert.match(
+    pageSource,
+    /softwareConfirmed && effectiveApiKey && !importConfirmed/
+  )
   assert.doesNotMatch(providerPanelSource, /onImportPrompt/)
   assert.doesNotMatch(providerPanelSource, /handleImportPromptToCCSwitch/)
   assert.match(providerPanelSource, /props\.imported \? t\('Import again'\)/)
   assert.match(pageSource, /data-quick-start-provider-status/)
+  assert.match(pageSource, /data-quick-start-provider-reimport/)
+  assert.match(pageSource, /data-quick-start-provider-details/)
+  assert.match(pageSource, /aria-expanded=\{providerDetailsExpanded\}/)
+  assert.match(pageSource, /aria-controls='quick-start-provider-details'/)
+  assert.match(pageSource, /onPointerEnter=\{\(\) =>/)
+  assert.match(
+    pageSource,
+    /onPointerLeave=\{\(\) => setProviderDetailsExpanded\(false\)\}/
+  )
+  assert.match(
+    pageSource,
+    /onFocus=\{\(\) => setProviderDetailsExpanded\(true\)\}/
+  )
+  assert.match(pageSource, /event\.currentTarget\.contains/)
+  assert.match(pageSource, /height: 'auto'/)
+  assert.match(pageSource, /onAnimationComplete=\{\(\) =>/)
+  assert.match(
+    pageSource,
+    /expandedButton\?\.getAttribute\('aria-expanded'\) !==\s*'true'/
+  )
+  assert.match(pageSource, /QUICK_START_REDUCED_TRANSITION/)
+  assert.match(
+    providerReimportHandlerSource,
+    /openCCSwitchProviderImport\(true\)/
+  )
+  assert.doesNotMatch(
+    providerReimportHandlerSource,
+    /setImportConfirmed\(false\)/
+  )
   assert.match(pageSource, /layout=\{reducedMotion \? false : true\}/)
   assert.match(pageSource, /step='04'/)
   assert.equal(

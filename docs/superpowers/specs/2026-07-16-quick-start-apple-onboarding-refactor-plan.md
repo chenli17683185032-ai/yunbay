@@ -521,3 +521,70 @@
 - 首次正式 SSH 因本机 Clash 临时落到未放行出口而在 banner 前失败，远端脚本没有执行。随后一次预备备份因可选容器没有 Docker health 字段提前退出，也没有同步、构建或切换。
 - 第一次切换时 watchdog 把旧容器在 Compose 替换过程中的 `exited/unhealthy` 瞬态误判为新镜像失败，自动恢复旧镜像、旧源码和旧标记；修正为只有当前容器已使用新镜像时才即时判定 unhealthy。第二次切换中新实例已 healthy/200，但静态验证要求了被生产压缩器移除的源码字符串，因此主动请求自动回滚；最终改用入口、完整 bundle 哈希、字节数、稳定文案和旧文案缺失作为证据。
 - Caddy 在第二次切换、该次回滚和最终切换窗口共记录 30 个 HTTP 502，其中 27 个为标准容器重建期间的短暂连接失败；三个窗口分别约 10 秒、6 秒和 10 秒，主要影响 `/v1/responses`。没有 `new-api-green` DNS/lookup 错误，Caddy 没有重启；最终窗口之后全部探针恢复 200。该事实保留为后续进一步缩短固定 upstream 重建时间的基线。
+
+## 14. 第六轮：Provider 完成条与悬停展开详情
+
+### 14.1 目标与性能指标
+
+把 Provider 已确认后的两个重复视觉对象综合为一个稳定的组合块：默认只显示圆形完成标记、完成说明和灰色“再次导入”按钮；用户把鼠标移入按钮或用键盘聚焦时，按钮恢复为亮白主样式，API、模型、脱敏 Key 与思考强度从完成条内部向下弹性展开；离开组合块或焦点移到块外后自动收起。
+
+- `importConfirmed=false` 时继续显示现有 CC Switch 大面板和待确认反馈，不改变首次导入闭环。
+- `importConfirmed=true` 时原 CC Switch 大面板必须消失，只保留一个 Provider 完成组合块；生图设置面板继续位于其下方。
+- 完成组合块默认高度收敛，左侧继续使用与准备步骤同源的 `36x36` 圆形勾选标记；“再次导入”默认为低对比度灰色，不与下方生图主操作竞争。
+- 鼠标进入再次导入按钮或键盘聚焦按钮后，按钮在约 200-320ms 内非线性过渡为亮白样式；详情以 `height: 0 -> auto`、透明度和轻微纵向位移组合展开，弹簧在约 550ms 内稳定。
+- 鼠标离开整个组合块或焦点移到块外后，详情沿相反路径弹性收起；在详情区域内查看内容不能意外触发收起。
+- 点击“再次导入”仍打开同一个 Provider Deep Link，但 `importConfirmed` 必须保持为 `true`，不能闪回待确认面板或隐藏生图设置。
+- `prefers-reduced-motion: reduce` 下取消弹簧、位移和缩放，仅使用不超过 80ms 的透明度/高度反馈；移动端无悬停时保持紧凑完成态，键盘/辅助输入仍可展开。
+- 桌面 `1280x720` 与移动端 `390x844` 均不得出现横向溢出、按钮错位、详情裁切、底栏遮挡或展开导致的宽度变化。
+
+### 14.2 最小充分控制模型
+
+- 被控对象：Provider 完成组合块的详情高度、透明度、按钮背景与文字颜色。
+- 控制输入：组合块的 `pointerenter` / `pointerleave`，以及再次导入按钮的 `focus` / 组合块的 `blur`。
+- 测量状态：一个仅存在于 React 内存的布尔值 `providerDetailsExpanded`；不写入快速启动 session，也不影响业务完成状态。
+- 稳定状态：`importConfirmed=true` 是业务稳态；详情展开只是瞬时显示状态。再次导入只重放执行器，不修改业务稳态。
+- 扰动与降级：触屏设备可能没有 hover，键盘焦点可能在组合块内部移动，系统可能要求减少动态效果；分别以紧凑默认态、`relatedTarget` 包含关系检查和 reduced-motion 分支处理。
+
+### 14.3 GitHub 经验参考
+
+- `motiondivision/motion`：沿用项目现有 `AnimatePresence` 与 spring transition，以 `height: 0 -> auto` 配合 overflow clipping 完成内容展开/收起；不新增动画库。
+- `shadcn-ui/ui`：继续复用项目 Button、`aria-expanded`、`aria-controls` 与 `focus-visible` 语义，保持鼠标和键盘等价反馈。
+- `farion1231/cc-switch`：再次导入仍使用既有 `resource=provider` Deep Link；本轮不改协议参数、Provider 数据或 Prompt 资源顺序。
+
+### 14.4 最小实施范围
+
+- `index.tsx`：抽取 Provider 四项指标为小型复用组件；把首次导入大面板限制为未确认态；在确认分支加入灰色再次导入按钮、可访问性属性和 Motion 详情区域。
+- 拆分 Provider Deep Link 执行器与状态转换：首次/待确认重试继续写入 `importConfirmed=false`，已确认再次导入只保持 `importConfirmed=true` 并更新同一 session。
+- `quick-start-page-source.test.ts`：约束确认后只有一个组合块、详情顺序、hover/focus/reduced-motion 控制、`aria-expanded`，以及已确认再次导入不调用 `setImportConfirmed(false)`。
+- 不新增翻译 key、依赖、持久化字段，不改后端、数据库、默认模型、Prompt 构造器、生产配置或运维服务。
+
+### 14.5 验证闭环
+
+- 自动化：快速启动全量测试、`bun run typecheck`、涉及文件 ESLint/Prettier、`bun run i18n:sync`、`bun run build`、`git diff --check`。
+- Browser 桌面：走到 Provider 已确认，确认大面板已合并；采样按钮默认灰色、hover 后亮白、详情展开中间帧与最终高度，移出后回到紧凑高度；点击再次导入后完成标记和生图面板保持可见。
+- Browser 键盘与 reduced-motion：Tab 聚焦可展开、焦点移出可收起；减少动态效果下无弹簧 transform，顺序和功能不变。
+- Browser 移动端：`390x844` 下默认紧凑、焦点展开可读，组合块和生图面板无横向溢出或底栏遮挡；不实际修改本机 CC Switch 或 `~/.codex/AGENTS.md`。
+
+### 14.6 发布控制与实施节点
+
+- 本轮按用户当前指示只完成本地闭环并普通推送 GitHub `main`；生产仍保持当前健康版本，不同步文件、不构建镜像、不停止、重建或重启任何服务器服务。
+- 只提交本轮计划、快速启动实现和对应测试；保留并排除工作区现有运维手册改动、旧规格文档和 `outputs/`。
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 现状、交互边界与 GitHub 经验核验 | 已完成 | 已确认重复面板根因、稳定态与可复用 Motion/Button 路径 |
+| 完整计划与控制指标 | 已完成 | 本节已追加到既有唯一计划文件 |
+| 完成组合块、悬停详情与再次导入状态 | 已完成 | 默认紧凑、hover/focus 展开、移出收起且业务确认态不回退 |
+| 自动化与双视口浏览器验收 | 已完成 | 工程检查、动效采样、键盘、reduced-motion 与双视口布局均通过 |
+| GitHub main | 进行中 | 只提交本轮相关文件并普通推送 main |
+| 生产部署 | 未授权 | 本轮不触碰生产，等待用户另行明确指令 |
+
+### 14.7 实施验证记录
+
+- Provider 首次/待确认导入继续使用 `openCCSwitchProviderImport(false)`；完成条“再次导入”独立使用 `openCCSwitchProviderImport(true)`。浏览器拦截测试捕获到一个 `resource=provider`、`model=gpt-5.6-sol` 的 Deep Link，点击后 DOM 仍为 `confirmed`、生图设置面板仍可见，session 中 `importAttempted` 与 `importConfirmed` 均保持 `true`。
+- `importConfirmed=true` 后原 CC Switch 大面板不再渲染；默认完成组合条为 `600x86`，按钮为 `112x44`、低对比度灰色，详情 DOM 不存在。悬停展开约 90ms 时详情高度 `64.52px`、透明度 `0.747`、纵向位移约 `-2.50px`；最终组合条为 `600x172`，按钮变为纯白，详情高度 `86px` 且 transform 清除。
+- 鼠标移出组合块约 90ms 时详情收至 `24.69px`、透明度 `0.290`、纵向位移约 `-5.70px`，最终回到 `600x86` 且详情卸载；展开和收起全过程 `documentWidth=1280`。
+- 键盘聚焦“再次导入”可展开，焦点移到下方生图按钮后按同一弹簧路径收起。`prefers-reduced-motion: reduce` 下展开/收起全程 `transform: none`，只保留约 80ms 的高度与透明度反馈；浏览器仅记录 Motion 对模拟 reduced-motion 的预期说明性 warning，应用 error 为 0。
+- 移动端 `390x844` 默认组合条为 `358x146`，灰色按钮为 `324x44`；展开后组合条为 `358x415`，四项详情为 `324x269`。动画完成后活动滚动区自动最小滚动 `264px`，详情底部为 `687px`、底栏顶部为 `773px`，完整留出 `86px` 间距；页面和活动滚动区宽度均为 `390px`。桌面同一引导只产生 `2px` 的最小位置校正。
+- `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、涉及文件 ESLint、Prettier、`bun run i18n:sync`、`git diff --check` 与 `bun run build` 均通过。六语言 missing、extras、untranslated 均为 0，最终生产构建入口为 `dist/static/js/index.2f46b5d28b.js`。
+- 本轮没有同步生产文件、构建服务器镜像、修改 Caddy，也没有停止、重建或重启任何生产服务；生产继续运行既有健康版本。
