@@ -261,6 +261,8 @@ export const STATIC_I18N_KEYS = [
   'Next: download CC Switch for your computer.',
   'Next: prepare your balance and API key.',
   'Next: review your setup and import it to CC Switch.',
+  'Continue importing recommended prompt',
+  'Trying to open the recommended prompt in CC Switch',
   'Web Coding',
   'Use it for code generation, web development, debugging, and project collaboration.',
   'Use it for daily conversations, writing, summaries, translation, and knowledge Q&A.',

@@ -304,3 +304,59 @@
 - 切换窗口公网持续探针 `159/159` 为 HTTP 200。源站高频探针共 2400 次，全部收到 HTTP 响应：718 次 200、1682 次由探针自身触发的 429，没有连接失败或 5xx；停止高频探针后限流恢复。最终公网 `/`、`/quick-start`、`/api/status` 均为 200，`start_time=1784168769`，bundle 文件名、字节数和 SHA-256 与本地一致。
 - 一次本机到代理/Cloudflare 的 TLS 握手在收到 HTTP 状态前超时；同一时段服务端无 5xx、容器无重启，随后固定出口最终复核再次为 200，因此按客户端链路抖动记录，不记为服务端中断。
 - 生产 `.yunbay-deploy-sha` 与 `.yunbay-source-manifest` 已原子更新到 `a048627a` 和新镜像；绿实例、临时环境文件、临时 Caddyfile、构建日志及探针日志均已清理，回滚目录和镜像标签保留。
+
+## 11. 第三轮：单按钮两阶段导入 Provider 与生图提示词
+
+### 11.1 目标与性能指标
+
+在官网原版 CC Switch 只支持单一 `resource` 的约束下，把现有导入操作综合为一个可恢复的两阶段控制器：第一次用户点击导入 Provider，按钮随后切换为“继续导入推荐提示词”；第二次用户点击导入并启用 Prompt。稳定性优先，不尝试由一次点击连续拉起两个自定义协议。
+
+完成标准：
+
+- 第一阶段保持现有 `resource=provider` URL、模型、endpoint、真实 API Key 与 `enabled=true` 不变。
+- Provider Deep Link 发出后，使用既有 `importAttempted` 作为反馈量切换同一按钮，不新增第二个按钮或敏感持久化状态。
+- 第二阶段使用 `resource=prompt`、`app=codex`、固定名称、UTF-8 Base64 正文与 `enabled=true`。
+- Prompt 正文严格使用用户指定的生图规则，并把当前内存中的同一个规范化真实 API Key 写入 `API Key为：` 后；不得使用占位符、脱敏值或另一把 Key。
+- 完整 API Key 不写入 `localStorage`、`sessionStorage`、日志、toast、测试快照或可见页面；但按用户明确要求，它会经 Deep Link 传给 CC Switch 并最终以明文存在 `~/.codex/AGENTS.md`。
+- 页面刷新后，既有会话摘要可恢复到 Prompt 阶段；现有“重试”继续只重开 Provider，避免丢失恢复路径。
+- 新增界面文案覆盖 en、zh、fr、ja、ru、vi，桌面与 390x844 移动端按钮不溢出、不跳动。
+
+### 11.2 协议与安全边界
+
+- 2026-07-16 已复核 `farion1231/cc-switch` 主分支：parser 对 `provider` 与 `prompt` 分开分派；Prompt 的 `content` 由 Base64 解码并校验 UTF-8，`enabled=true` 会保存后启用。
+- Base64 不是加密；Provider URL 与 Prompt URL 都会携带完整 API Key。实现只能避免额外泄露面，不能把用户要求写入 `AGENTS.md` 的 Key 变成密文。
+- 第二阶段仍需一次明确用户点击和 CC Switch 的独立确认；网页不声称两项已被客户端自动完成。
+
+### 11.3 最小充分实现
+
+- 扩展 `quick-start-cc-switch.ts`：增加提示词名称、由 API Key 生成精确正文、UTF-8 Base64 编码和 Prompt URL 构造器，不增加依赖。
+- 扩展 URL 单元测试：解码 Prompt 后验证固定规则、完整同款 Key、`enabled=true`，并验证 Prompt URL 不含 Provider 专属参数。
+- 调整 `index.tsx`：增加 Prompt handler；导入面板根据 `importAttempted` 在同一个稳定尺寸按钮内切换 handler、图标和标签。
+- 更新源码约束测试、六语言 locale 与静态 key；不修改后端、数据库或 CC Switch 客户端。
+
+### 11.4 验证闭环
+
+- 自动化：`bun test src/features/quick-start/*.test.ts`、`bun run i18n:sync`、`bun run typecheck`、涉及文件 ESLint/Prettier、`bun run build`、`git diff --check`。
+- 协议捕获：使用测试 Key 捕获两次 URL，确认第一阶段是 Provider，第二阶段解码后 Prompt 含同一个 Key；验证输出不打印真实生产 Key。
+- 浏览器：1280x720 与 390x844 验证首次点击后同按钮切换、长翻译无溢出、现有确认和 Provider 重试路径仍可用；不在自动化中真正改写本机 `~/.codex/AGENTS.md`。
+
+### 11.5 实施节点
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 上游协议、现有状态与安全边界核验 | 已完成 | 已确认原版 CC Switch 需两次用户手势及明文 Key 边界 |
+| 完整计划与最小状态模型 | 已完成 | 本节已写入既有单一计划文件 |
+| Prompt 构造、阶段切换与测试 | 已完成 | 同一按钮按 `importAttempted` 切换且两次 URL 使用同一 Key |
+| 六语言与工程验证 | 已完成 | 六语言无缺失，测试、类型、lint、format 与生产构建通过 |
+| 桌面与移动端浏览器验收 | 已完成 | 两种视口切换稳定、参数正确、Provider 重试可用 |
+| GitHub main、生产部署与运维记录 | 待开始 | 只提交本轮文件，推送 main，无中断部署并追加既有运维手册 |
+
+### 11.6 实施验证记录
+
+- `quick-start-cc-switch.ts` 新增纯函数构造生图 Prompt；Provider 与 Prompt 都使用同一个 `effectiveApiKey`，并统一补全 `sk-` 前缀。Prompt URL 只携带 `resource=prompt`、`app=codex`、名称、Base64 正文和 `enabled=true`，不重复添加 Provider 专属参数。
+- 同一按钮使用既有 `importAttempted` 切换处理函数：初始打开 Provider，随后显示“继续导入推荐提示词”；现有“重试”仍重新打开 Provider，刷新后不需要持久化完整 Key。
+- 浏览器初测发现英文长文案会把桌面右侧网格列从 230px 撑到 310px；网格轨道改为 `minmax(0, …)`，按钮允许固定 48px 高度内平衡换行后，切换前后尺寸一致。
+- 使用测试 Key 捕获两条 Deep Link：第一条为 Provider 且 `apiKey=sk-test-import-key`；第二条为 Prompt，Base64 解码后包含 `API Key为：sk-test-import-key`、固定图片端点、`gpt-image-2` 限制和 `outputs/` 保存规则。测试没有读取或输出真实生产 Key。
+- 1280x720 与 390x844 浏览器验收均通过：按钮切换前后宽高一致、没有横向溢出、控制台无错误；现有人工确认和 Provider 重试操作保持可用。
+- `bun test src/features/quick-start/*.test.ts`：53 pass / 0 fail；`bun run typecheck`、涉及文件 ESLint、Prettier 与 `bun run build` 均通过。
+- `bun run i18n:sync` 后 en、zh、fr、ja、ru、vi 的 missing、extras、untranslated 均为 0；六个 locale 各只新增两行，没有排序噪声。

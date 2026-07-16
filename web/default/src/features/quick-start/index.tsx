@@ -84,6 +84,7 @@ import {
 } from './quick-start-api-key'
 import {
   buildQuickStartCCSwitchImportURL,
+  buildQuickStartCCSwitchPromptImportURL,
   getQuickStartCCSwitchImportState,
   maskQuickStartApiKey,
   normalizeQuickStartCodexEndpoint,
@@ -608,6 +609,19 @@ export function QuickStart() {
     toast.message(t('Trying to open CC Switch'))
   }
 
+  const handleImportPromptToCCSwitch = () => {
+    if (!effectiveApiKey) {
+      toast.warning(t('Generate an API key first'))
+      return
+    }
+
+    const url = buildQuickStartCCSwitchPromptImportURL({
+      apiKey: effectiveApiKey,
+    })
+    window.open(url, '_blank')
+    toast.message(t('Trying to open the recommended prompt in CC Switch'))
+  }
+
   const handleConfirmImport = () => {
     setImportConfirmed(true)
     writeQuickStartSession({
@@ -1082,8 +1096,9 @@ export function QuickStart() {
                         : null
                     }
                     apiKey={effectiveApiKey}
-                    imported={importConfirmed}
-                    onImport={handleImportToCCSwitch}
+                    providerImportAttempted={importAttempted}
+                    onImportProvider={handleImportToCCSwitch}
+                    onImportPrompt={handleImportPromptToCCSwitch}
                   />
                 </motion.div>
               ) : null}
@@ -1321,10 +1336,19 @@ function CCSwitchImportPanel(props: {
   modelName: string
   reasoningTarget: string | null
   apiKey: string
-  imported: boolean
-  onImport: () => void
+  providerImportAttempted: boolean
+  onImportProvider: () => void
+  onImportPrompt: () => void
 }) {
   const { t } = useTranslation()
+  const handleImport = props.providerImportAttempted
+    ? props.onImportPrompt
+    : props.onImportProvider
+  const importLabel = props.providerImportAttempted
+    ? t('Continue importing recommended prompt')
+    : t('One-click import')
+  const ImportIcon = props.providerImportAttempted ? Sparkles : ArrowUpRight
+
   return (
     <div className='overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'>
       <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
@@ -1337,7 +1361,7 @@ function CCSwitchImportPanel(props: {
           CC Switch
         </div>
       </div>
-      <div className='grid gap-4 p-5 lg:grid-cols-[1.15fr_0.85fr] lg:items-center'>
+      <div className='grid gap-4 p-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] lg:items-center'>
         <div className='min-w-0'>
           <h2 className='text-lg font-semibold text-white'>
             {t('Import current setup to CC Switch')}
@@ -1371,15 +1395,11 @@ function CCSwitchImportPanel(props: {
           </div>
         </div>
         <Button
-          className='h-12 w-full rounded-full bg-white px-5 text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
-          onClick={props.onImport}
+          className='h-12 w-full min-w-0 rounded-full bg-white px-4 text-center leading-tight whitespace-normal text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
+          onClick={handleImport}
         >
-          {props.imported ? (
-            <RotateCcw data-icon='inline-start' />
-          ) : (
-            <ArrowUpRight data-icon='inline-start' />
-          )}
-          {props.imported ? t('Import again') : t('One-click import')}
+          <ImportIcon data-icon='inline-start' />
+          <span className='min-w-0 text-balance'>{importLabel}</span>
         </Button>
       </div>
     </div>

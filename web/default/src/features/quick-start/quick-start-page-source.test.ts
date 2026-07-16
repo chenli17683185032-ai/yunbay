@@ -150,7 +150,15 @@ test('quick start final page confirms prerequisites before one-click import and 
   assert.match(pageSource, /Have you finished installing CC Switch\?/)
   assert.match(pageSource, /Import current setup to CC Switch/)
   assert.match(pageSource, /buildQuickStartCCSwitchImportURL/)
+  assert.match(pageSource, /buildQuickStartCCSwitchPromptImportURL/)
   assert.match(pageSource, /handleImportToCCSwitch/)
+  assert.match(pageSource, /handleImportPromptToCCSwitch/)
+  assert.match(pageSource, /providerImportAttempted=\{importAttempted\}/)
+  assert.match(
+    pageSource,
+    /props\.providerImportAttempted\s*\?\s*props\.onImportPrompt\s*:\s*props\.onImportProvider/
+  )
+  assert.match(pageSource, /Continue importing recommended prompt/)
   assert.match(pageSource, /Configured API/)
   assert.match(pageSource, /Configured model/)
   assert.match(pageSource, /Generated API key/)

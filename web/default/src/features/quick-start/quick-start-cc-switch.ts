@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 export const QUICK_START_CC_SWITCH_APP = 'codex'
 export const QUICK_START_CC_SWITCH_PROVIDER_NAME = 'Yunbay Codex'
+export const QUICK_START_CC_SWITCH_PROMPT_NAME = '云贝生图推荐提示词'
 
 type QuickStartCCSwitchImportURLInput = {
   serverAddress: string
@@ -28,6 +29,10 @@ type QuickStartCCSwitchImportURLInput = {
 type QuickStartCCSwitchImportStateInput = {
   apiKey: string
   model: string
+}
+
+type QuickStartCCSwitchPromptImportURLInput = {
+  apiKey: string
 }
 
 export type QuickStartCCSwitchImportState =
@@ -88,6 +93,37 @@ export function buildQuickStartCCSwitchImportURL(
   params.set('apiKey', normalizeQuickStartApiKey(input.apiKey))
   params.set('model', input.model.trim())
   params.set('homepage', serverAddress)
+  params.set('enabled', 'true')
+
+  return `ccswitch://v1/import?${params.toString()}`
+}
+
+export function buildQuickStartImagePrompt(apiKey: string): string {
+  const normalizedApiKey = normalizeQuickStartApiKey(apiKey)
+  return `当我提出生图请求时，必须直接 POST \`https://yunbay.xyz/v1/images/generations\`，模型固定使用 \`gpt-image-2\`。禁止把 \`gpt-image-2\` 配置为 Codex 主聊天模型，也禁止通过 \`/v1/chat/completions\` 或 \`/v1/responses\` 直接调用它。API Key为：${normalizedApiKey}\n收到图片的 Base64 数据后，先解码并将原图保存到当前工作区的 \`outputs/\` 目录；需要 4K 时再另外处理，并保留原始图片。`
+}
+
+function encodeUtf8Base64(value: string): string {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte)
+  }
+  return btoa(binary)
+}
+
+export function buildQuickStartCCSwitchPromptImportURL(
+  input: QuickStartCCSwitchPromptImportURLInput
+): string {
+  const params = new URLSearchParams()
+
+  params.set('resource', 'prompt')
+  params.set('app', QUICK_START_CC_SWITCH_APP)
+  params.set('name', QUICK_START_CC_SWITCH_PROMPT_NAME)
+  params.set(
+    'content',
+    encodeUtf8Base64(buildQuickStartImagePrompt(input.apiKey))
+  )
   params.set('enabled', 'true')
 
   return `ccswitch://v1/import?${params.toString()}`
