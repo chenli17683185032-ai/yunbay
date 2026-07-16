@@ -212,7 +212,6 @@ export function QuickStart() {
   const navigationCompletedRef = useRef(false)
   const importPanelRef = useRef<HTMLDivElement>(null)
   const importStatusRef = useRef<HTMLDivElement>(null)
-  const promptPanelRef = useRef<HTMLDivElement>(null)
   const { status } = useStatus()
   const pricing = usePricingData()
 
@@ -357,9 +356,8 @@ export function QuickStart() {
   useEffect(() => {
     if (!softwareConfirmed || !effectiveApiKey) return
     const frame = window.requestAnimationFrame(() => {
-      const target = importConfirmed
-        ? promptPanelRef.current
-        : importAttempted
+      const target =
+        importConfirmed || importAttempted
           ? importStatusRef.current
           : importPanelRef.current
       target?.scrollIntoView({
@@ -1132,7 +1130,7 @@ export function QuickStart() {
                           step='04'
                           complete
                           reducedMotion={Boolean(reducedMotion)}
-                          className='size-9 rounded-xl text-[11px]'
+                          className='size-9 rounded-full text-[11px]'
                         />
                       ) : null}
                       <div className='min-w-0'>
@@ -1171,7 +1169,6 @@ export function QuickStart() {
             <AnimatePresence initial={false}>
               {importConfirmed ? (
                 <motion.div
-                  ref={promptPanelRef}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
@@ -1357,7 +1354,7 @@ function ReadinessRow(props: {
             step={props.step}
             complete={props.complete}
             reducedMotion={props.reducedMotion}
-            className='size-9 rounded-xl text-[11px]'
+            className='size-9 rounded-full text-[11px]'
           />
           <div className='min-w-0'>
             <div className='font-semibold text-white'>{props.title}</div>

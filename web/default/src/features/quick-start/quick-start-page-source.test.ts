@@ -165,6 +165,10 @@ test('quick start final page confirms prerequisites before one-click import and 
   assert.match(pageSource, /data-quick-start-provider-status/)
   assert.match(pageSource, /layout=\{reducedMotion \? false : true\}/)
   assert.match(pageSource, /step='04'/)
+  assert.equal(
+    pageSource.match(/className='size-9 rounded-full text-\[11px\]'/g)?.length,
+    2
+  )
   assert.match(pageSource, /data-quick-start-prompt-panel/)
   assert.match(pageSource, /buildQuickStartImagePromptPreview/)
   assert.match(pageSource, /One-click import image settings/)
@@ -180,7 +184,11 @@ test('quick start final page confirms prerequisites before one-click import and 
   assert.match(pageSource, /Generated API key/)
   assert.match(pageSource, /importConfirmed/)
   assert.match(pageSource, /navigationCompletedRef/)
-  assert.match(pageSource, /importConfirmed\s*\?\s*promptPanelRef\.current/)
+  assert.match(
+    pageSource,
+    /importConfirmed \|\| importAttempted[\s\S]*importStatusRef\.current/
+  )
+  assert.doesNotMatch(pageSource, /promptPanelRef/)
   assert.match(pageSource, /target\?\.scrollIntoView/)
   assert.match(pageSource, /exitSurface\.animate\(keyframes/)
   assert.match(pageSource, /fill: 'forwards'/)

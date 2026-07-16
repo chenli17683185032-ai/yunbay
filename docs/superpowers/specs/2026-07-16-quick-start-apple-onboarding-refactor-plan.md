@@ -413,7 +413,8 @@
 ### 12.6 发布控制
 
 - 本地闭环通过后只提交本轮相关文件，推送 GitHub `main`，不纳入用户现有未跟踪设计稿或 `outputs/`。
-- 生产继续使用已验证的绿实例、内部健康检查、Caddy graceful reload 和标准实例切回流程；异常时保持当前健康实例，不让部署无限等待。
+- 2026-07-16 的 `42f8c7dd` 生产尝试已在临时 upstream 切换阶段中止，并引发公开入口 502；绿实例、临时 Caddyfile 和 Caddy 动态切流从此废止，不能再作为发布或回滚路径。
+- 生产 Caddy 文件与运行时 upstream 必须始终保持 `new-api:3000`。发布和回滚只允许在部署锁与独立 60 秒 watchdog 保护下，用 Compose `--no-deps --force-recreate --no-build` 有界重建标准 `new-api`；45 秒内未 healthy 或出现 exited/dead/unhealthy 时自动恢复固定旧镜像并再次只重建标准服务。
 - 发布结果、提交、镜像、回滚点、探针与切流结果追加到 `docs/yunbay-maintenance.md` 和桌面现有运维手册。
 
 ### 12.7 实施节点
@@ -425,7 +426,7 @@
 | Provider 完成收敛与 Prompt 大面板 | 已完成 | 下一动作只向下出现，预览脱敏且实际导入保持真实同 Key |
 | 六语言与工程验证 | 已完成 | 六语言无缺失，测试、类型、lint、format 与构建通过 |
 | 桌面与移动端浏览器验收 | 已完成 | 顺序、动画、长文预览、溢出和 Deep Link 捕获均通过 |
-| GitHub main、生产部署与运维记录 | 待开始 | main 与生产同步，双运维手册追加完成 |
+| GitHub main、生产部署与运维记录 | 已中止 | `42f8c7dd` 已在 main；生产尝试在旧动态切流阶段中止，当前不得沿用该发布路径 |
 
 ### 12.8 实施验证记录
 
@@ -436,3 +437,65 @@
 - Prompt 预览复用实际 Prompt 构造器并只传入掩码 Key；桌面与移动端可见正文均不包含完整测试 Key。捕获的 Provider URL 与 Prompt Base64 解码正文都包含同一个 `sk-test-browser-import-key`，Prompt 仍为 `resource=prompt`、`enabled=true` 并保留图片端点、模型限制和 `outputs/` 规则。
 - 1280x720 与 390x844 浏览器控制台 error/warning 均为 0；两张截图已保存到本次 Codex 可视化目录，没有写入项目 `outputs/`。
 - `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、涉及文件 ESLint、Prettier、`bun run build`、`git diff --check` 均通过。生产构建入口为 `dist/static/js/index.48c85fa5d3.js`。
+- `42f8c7dd` 的生产尝试没有完成：临时绿实例缺少预期网络别名，Caddy 动态 upstream 无法解析并对外返回 502。事故恢复后 Caddy 已回到固定 `new-api:3000`，失败候选已清理；本节的代码与浏览器结果仍有效，但不能把该次尝试记录为已发布。
+
+## 13. 第五轮：确认反馈优先、圆形完成标记与固定 upstream 发布
+
+### 13.1 目标与性能指标
+
+把第五页的完成反馈闭环固定为 `Provider 导入 -> 用户确认 -> 圆形完成反馈 -> 生图设置动作`。状态变化先被用户看见，再出现下一动作，避免自动滚动直接跳过完成反馈。
+
+- `importConfirmed=true` 后，Provider 状态行左侧必须显示与上方三个准备步骤完全相同的 `36x36` 圆形勾选标记；同一组件、同一 class、同一完成动画，不允许做近似副本。
+- Provider 完成行在 DOM、视觉坐标和键盘阅读顺序上都必须位于 `ImageSettingsImportPanel` 上方。
+- 确认动作后的自动滚动目标必须是 Provider 完成行，而不是后续生图设置面板；生图设置作为下一动作在其下方展开。
+- 桌面 `1280x720` 与移动端 `390x844` 无横向溢出、底栏遮挡或状态切换引起的宽度变化；减少动态效果时仍保持同一顺序，只取消空间动画。
+- 不修改 Provider/Prompt Deep Link、真实 Key 边界、默认模型、思考强度、后端、数据库或六语言文案。
+
+### 13.2 现状、运行时与最小充分模型
+
+- 用户截图中的生产页面仍是旧链路：上方面板按钮切换为“继续导入推荐提示词”，确认结果卡落在其下方且没有完成标记。
+- GitHub `main@42f8c7dd` 已把 Prompt 独立为下方面板，并在确认行复用 `QuickStartStepMarker`；但自动滚动仍直接指向 Prompt 面板，且标记 class 仍使用 `rounded-xl`，没有把“圆形且与上方严格同源”写成稳定约束。
+- 最小改动只涉及 `index.tsx` 与源码约束测试：上方准备步骤和 Provider 完成行统一为 `rounded-full`；确认后滚动到 `importStatusRef`；移除不再需要的 Prompt ref；强化顺序、同 class 和滚动目标断言。
+- 不新增组件、依赖、状态、翻译 key 或持久化字段。
+
+### 13.3 GitHub 经验参考
+
+- `motiondivision/motion`：继续使用已有 `AnimatePresence`、layout 与 reduced-motion 分支，让完成行先收敛、下一面板后进入，不叠加第二套状态机。
+- `shadcn-ui/ui`：复用现有 Button 与 Lucide `Check` 组合，通过同一个语义组件表达完成状态，不手写第二套 SVG。
+- `farion1231/cc-switch`：Provider 与 Prompt 仍是两个独立 `resource`，因此 UI 继续保留两次明确用户动作，只调整反馈顺序。
+- `kortix-ai/suna` 与 `super-productivity/super-productivity` 的部署脚本经验：使用单飞锁、有界健康反馈和失败自动回滚；不再动态改写 Caddy upstream。
+
+### 13.4 验证闭环
+
+- 源码测试先约束：完成标记与 `ReadinessRow` 使用同一圆形 class；Provider 状态位置小于 Prompt 面板位置；`importConfirmed` 滚动目标为 `importStatusRef`，源码中不存在 `promptPanelRef`。
+- 自动化：快速启动全量测试、`bun run typecheck`、涉及文件 ESLint/Prettier、`bun run i18n:sync`、`bun run build`、`git diff --check`。
+- Browser 桌面与移动端走通 `Provider 尝试 -> 已打开 -> 完成行 + Prompt 面板`；测量两个完成标记均为 `36x36`、`border-radius: 9999px`，并确认完成行 `top < Prompt panel top`。
+- 检查页面身份、非空、无框架错误层、控制台 error/warn、截图、交互状态与 reduced-motion；不实际修改本机 `~/.codex/AGENTS.md`。
+
+### 13.5 发布闭环
+
+- 用户明确说“部署”前，生产发布保持暂停；不得停止、重建或重启服务器服务。当前只允许提交并推送 GitHub `main`。
+- 先只读确认生产标准实例 healthy、Caddy 文件与运行时 upstream 都是 `new-api:3000`，并固定当前运行镜像为不可变回滚标签。
+- 获取 `/var/lock/yunbay-new-api-deploy.lock` 后同步精确文件并构建；构建期间旧标准容器继续服务。发布前启动独立于 SSH 的 60 秒 watchdog。
+- 正式切换只重建标准 `new-api`，不创建绿实例、不生成临时 Caddyfile、不调用 Caddy Admin API或 `caddy reload`。45 秒内未恢复时 watchdog 自动标回旧镜像并重建。
+- 成功标准：new-api/Caddy healthy，Caddy upstream 仍为 `new-api:3000`，首页与 `/api/status` 连续 5 次 200，新 bundle 和目标 DOM 可识别；随后更新生产标记与既有运维手册并清理临时文件。
+
+### 13.6 实施节点
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 截图、源码、事故与 GitHub 经验核验 | 已完成 | 已确认生产旧 UI、main 已有部分修复及动态切流废止边界 |
+| 完整计划与控制指标 | 已完成 | 本节已追加到唯一实施计划文件 |
+| 圆形完成标记、反馈顺序与测试 | 已完成 | 同源圆形标记、状态优先滚动和顺序断言通过 |
+| 自动化与双视口浏览器验收 | 已完成 | 工程检查、交互、测量、截图和 reduced-motion 通过 |
+| GitHub main | 进行中 | 只提交本轮三个文件并普通推送 main |
+| 固定 upstream 生产发布 | 等待用户授权 | 用户明确说“部署”前不停止、重建或重启任何服务器服务 |
+
+### 13.7 实施验证记录
+
+- Provider 确认后的 `QuickStartStepMarker` 与上方准备步骤统一使用 `size-9 rounded-full text-[11px]`；源码测试锁定两处同源 class。完成行在源码、DOM 查询顺序和视觉坐标上都位于 `ImageSettingsImportPanel` 之前。
+- 确认后的自动滚动目标已改为 `importStatusRef`，同时移除 `promptPanelRef`；用户先看到圆形完成反馈，再向下看到生图设置动作。
+- 独立 Prompt 面板继续由 `buildQuickStartImagePromptPreview()` 生成，预览包含 `/v1/images/generations`、`gpt-image-2` 与 `outputs/` 规则，只显示掩码 Key；旧“继续导入推荐提示词”按钮数量为 0，“一键导入生图设置”按钮数量为 1。
+- 桌面 `1280x720` 和移动端 `390x844` 均已通过：完成标记为 `36x36` 完整圆形，完成行在 Prompt 面板上方，无横向溢出。减少动态效果下同一交互顺序通过，页面 `scrollWidth=viewportWidth=1280`；开发模式仅有 Motion 检测到 reduced-motion 后输出的预期说明性 warning，控制台 error 为 0。
+- `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、定向 ESLint、六语言 i18n、Prettier、`bun run build` 与 `git diff --check` 均通过。最新本地生产入口为 `dist/static/js/index.5ef2da020e.js`。
+- 本轮没有执行生产部署或任何服务器服务变更；生产继续运行现有版本，等待用户明确发布指令。
