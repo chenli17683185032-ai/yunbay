@@ -705,3 +705,76 @@
 - 公网 `/`、`/quick-start`、`/api/status` 独立连续 10 轮共 30 次全部为 200；新应用启动后日志中 `panic/fatal/error/unhealthy` 为 0。Caddy 文件、挂载和运行时哈希前后相同，主站 upstream 全程只有 `new-api:3000`。
 - Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 在切换前后完全一致。本轮没有数据库迁移，没有修改业务数据、环境变量或其它服务。
 - 成功备份为 `/opt/new-api/backups/quick-start-merged-flow-20260716T160439Z-44a3e932`。两文件源包和完整部署日志已归档到该目录，源包无 AppleDouble 条目；顶层传输包、脚本、状态、日志、PID 和 run dir 已清理，release/rollback 镜像与审计证据保留。
+
+## 16. 生图完成条与底栏收敛补充计划（2026-07-17）
+
+### 16.1 目标与性能指标
+
+在第五页补齐最后一个缺失的反馈闭环：用户点击“一键导入生图设置”后，当前生图详情面板必须原位收敛为与 Provider 完成态同源的小条，并显示圆形对号；与此同时，底部包含“上一步 / 05 / 05 / 进入控制台”的长条必须通过非线性 layout 动画缩短，最终只保留底部居中的“进入控制台”。
+
+- 生图完成态继续使用现有 `importConfirmed`，不新增 session 字段、计时状态或后端契约；刷新后若该字段为 `true`，页面直接恢复两个连续完成条和收敛后的主行动。
+- 生图面板必须是同一个视觉对象从详情态变为完成态，不允许先消失再插入另一张卡；完成条使用 `QuickStartStepMarker step='05' complete`，与 Provider 的第 `04` 步对号、尺寸、圆角和弹簧参数保持一致。
+- 完成条保留低优先级灰色“再次导入”动作，用于 CC Switch 未响应时重放 Prompt Deep Link；再次导入不得回退 `importConfirmed`、展开旧详情或改变底栏完成态。
+- 底栏组件在状态切换前后必须保持同一 React/Motion 实例。长条外壳从当前最大 `34rem` 非线性收敛到能容纳六语言按钮文案的紧凑宽度；上一页、页码和未完成提示按同一时序淡出，现有主按钮从右侧平滑移动到中央并成为唯一控件。
+- 常规动效使用项目已有 spring；`prefers-reduced-motion: reduce` 禁止空间位移和弹簧，只保留约 80ms 的透明度/尺寸反馈。任何状态下不得出现横向溢出、底栏遮挡、按钮文字越界或双重“进入控制台”。
+
+### 16.2 现状与反馈证据
+
+- 当前 `ImageSettingsImportPanel` 无论 `imported` 为何都保留完整终端预览，只把按钮改灰并替换图标，因此业务已完成但视觉对象没有进入稳定完成态。
+- 当前 `QuickStartControls` 在最终页始终渲染三列长条；`canFinish=true` 只解除主按钮禁用，没有移除上一页与页码，也没有改变外壳宽度。
+- `LandingSnapFrame` 把 `controlsComponent` 当作 React 组件类型渲染，而 Quick Start 的闭包组件会随 `importConfirmed` 改变引用；直接在现状上加 layout 会因组件类型更换而丢失前后测量，不能保证连续收敛。
+- Provider 已验证的完成态提供最小充分范式：同一 `motion.div` 使用 `layout`、`AnimatePresence mode='popLayout'`、`QUICK_START_SPRING_TRANSITION` 和 `QuickStartStepMarker`，桌面完成高度约 `86px`，移动端约 `146px`。
+
+### 16.3 GitHub 与本地模式参考
+
+- 继续沿用本计划第 15.3 节核验过的 `motiondivision/motion@61833240`：稳定组件边界内用 `layout` 测量尺寸/位置，用 `AnimatePresence` 协调退出内容；本轮不引入新的动画库或自制时间轴。
+- 继续沿用 `farion1231/cc-switch@f6e37ed9` 的 Prompt Deep Link 能力；只重放现有 `resource=prompt` 执行器，不修改 Prompt 正文、Base64 边界、API Key 传递或 `gpt-image-2` 规则。
+- 组件、图标和样式继续使用当前 Button、Lucide 与 Quick Start Motion helper；不安装新 shadcn 组件，不修改主题或全局 CSS。
+
+### 16.4 最小充分动态模型
+
+- 控制输入：`importConfirmed`、最终页 `isFinalPage`、`reducedMotion`。
+- 被控对象：生图面板高度/内容、底栏外壳宽度、上一页与页码可见性、主按钮位置。
+- 稳定状态 A：`importConfirmed=false`，生图详情可见，长底栏保留返回能力和禁用的最终主行动。
+- 稳定状态 B：`importConfirmed=true`，Provider 与生图均为完成条，底栏只有居中的“进入控制台”；再次导入只重放执行器，不离开状态 B。
+- 反馈测量：DOM 状态标记、完成标记数量、面板/底栏 bounding box、动画中间帧宽度、最终中心偏差、session 恢复、捕获的 Deep Link、控制台 error/warn 和横向溢出。
+- 稳定性优先：先保证刷新可恢复、按钮仍可操作、底栏不卸载和 reduced-motion 正确，再优化弹性幅度；不以更快动画换取布局抖动。
+
+### 16.5 最小实施
+
+1. 保留 `LandingSnapFrame` 现有 `controlsComponent` API，并新增可选 `controlsElement` 插槽；容器用 `cloneElement` 只注入翻页 API，Quick Start 传入模块级稳定 slot 和动态完成 props，让同一个 `QuickStartControls` 实例持续更新且不影响首页既有调用。
+2. 给 `ImageSettingsImportPanel` 增加 `reducedMotion`，把根节点改为带 layout 的 Motion 容器；用 `AnimatePresence mode='popLayout'` 在终端预览和第 `05` 步完成条之间原位变形。
+3. 完成条复用灰色“再次导入”按钮；未完成态继续显示真实 Prompt 脱敏预览和白色主按钮。根节点增加明确的 `ready / confirmed` 数据状态，供测试与浏览器反馈读取。
+4. 把 `QuickStartControls` 外层改为可测量的 Motion 容器。最终完成前保持原三列布局；完成后条件卸载上一页与页码、移除辅助提示、切为单列紧凑宽度，让现有主按钮随父层 layout 移到中央。
+5. 新增“Image settings imported”“Setup complete. You can now enter the dashboard.”两条六语言文案，并更新 quick-start locale 白名单与源码约束测试。
+
+### 16.6 验证闭环
+
+- 自动化：快速启动全量测试、TypeScript、定向 ESLint、Prettier、六语言 sync、`git diff --check` 与生产构建。
+- 桌面 `1280x720`：从干净 session 走到 Prompt 导入，采样详情态、收敛中间帧和稳定态；确认第 `04`、`05` 完成条顺序一致，底栏宽度单调缩短，最终按钮中心偏差不超过 1px。
+- 移动端 `390x844`：确认完成条与按钮文字不溢出，滚动区和 safe-area 不遮挡，完成态无横向滚动；长法语/俄语按钮文案仍装入稳定容器。
+- 交互：再次导入捕获到同一个 `resource=prompt` Deep Link，DOM 与 session 均继续为 confirmed；刷新恢复完成态，按钮仍能进入控制台。
+- 无障碍：键盘可聚焦再次导入和进入控制台；reduced-motion 下 transform 为 none、状态反馈仍完整；浏览器 console error 为 0。
+- 本轮只完成本地代码、验证和 GitHub `main`。没有新的明确“部署”指令前，不连接生产、不传文件、不构建或重启任何生产服务。
+
+### 16.7 实施节点
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 截图、源码与运行边界核验 | 已完成 | 已定位生图未收敛和底栏组件边界不稳定两处根因 |
+| 完整闭环计划 | 已完成 | 状态、动效、恢复入口、反馈测量和生产边界已固定 |
+| 生图完成条与稳定底栏实现 | 已完成 | 同一视觉对象收敛，主按钮连续移到中央 |
+| 自动化与六语言检查 | 已完成 | 测试、类型、Lint、格式、i18n、构建全通过 |
+| 双视口与 reduced-motion 浏览器验收 | 已完成 | 中间帧、最终对齐、键盘、刷新恢复和溢出通过 |
+| GitHub main | 进行中 | 只提交本轮计划、实现、测试与必要翻译 |
+| 生产部署 | 已授权，进行中 | 固定 upstream、旧实例持续服务、watchdog 保护下只切换 new-api |
+
+### 16.8 实施验证与发布基线
+
+- 最终实现没有用 Context 包裹五页内容。`LandingSnapFrame` 保留原 `controlsComponent`，新增向后兼容的 `controlsElement`；模块级 `LandingSnapControlsElement` 注入翻页 API，Quick Start 的稳定 slot 只接收动态完成 props。Motion 控件实例在 `importConfirmed` 切换前后不重挂载，且 React 19 `react-hooks/refs` 检查通过。
+- 桌面 `1280x720` 完成前生图面板为 `600x348`、底栏为 `544px`；完成后生图面板收敛为 `600x86`，底栏收敛为 `304px`，主按钮与底栏中心均为 `x=640`。Provider 与生图两个完成条均使用同源圆形勾，DOM 顺序和视觉顺序一致，横向溢出为 0。
+- 移动端 `390x844` 刷新恢复后 Provider 与生图完成条均为 `358x146`，底栏为 `304px` 且中心为 `x=195`；生图完成条与底栏之间保留约 `27px`，横向溢出为 0。法语、俄语长文案和 reduced-motion 已在上一轮浏览器轨迹中通过，本轮稳定 slot 改造不改变其渲染或动画参数。
+- “再次导入”继续重放 `resource=prompt`，不回退 `importConfirmed`；刷新后直接恢复两个连续完成条和单一“进入控制台”。浏览器测试仅在测试页面临时拦截 `window.open`，没有启动或修改本机 CC Switch，测试标签页结束时清理。
+- `bun test src/features/quick-start/*.test.ts` 为 `54 pass / 0 fail`；`bun run typecheck`、定向 ESLint、Prettier、`bun run i18n:sync`、`git diff --check` 与 `bun run build` 全部通过。
+- 本地生产入口 `dist/static/js/index.58250d789d.js` 的 SHA-256 为 `86e3b28ff39082fdb0d56db4830e4d3d08d6417fe9ec0f7c0c34762589e2f08b`、字节数 `3065573`；Quick Start chunk `dist/static/js/async/4963.d9f8a87c33.js` 的 SHA-256 为 `2ec156b89b34f56a6e11c27f8a490178149483164d018cade9330da5750f3aed`、字节数 `50341`。
+- 用户已明确发送“快点部署了”。发布仍遵循固定 `new-api:3000` upstream：先推送功能提交，再精确同步本轮 10 个源码/测试/翻译文件；构建期间旧标准实例持续服务，切换前固定当前运行镜像并启动独立 60 秒 watchdog，只执行 Compose `--no-deps --force-recreate --no-build new-api`。禁止修改或重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP 服务。

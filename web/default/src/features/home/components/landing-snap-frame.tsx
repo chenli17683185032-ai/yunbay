@@ -18,12 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Children,
+  cloneElement,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ComponentType,
+  type ReactElement,
   type ReactNode,
 } from 'react'
 import { flushSync } from 'react-dom'
@@ -46,6 +48,7 @@ type LandingSnapFrameProps = {
   allowContentScroll?: boolean
   onActiveIndexChange?: (activeIndex: number, previousIndex: number) => void
   controlsComponent?: ComponentType<LandingSnapControlsApi>
+  controlsElement?: ReactElement<{ api?: LandingSnapControlsApi }>
 }
 
 type LandingNavigateEvent = CustomEvent<{
@@ -60,6 +63,13 @@ export type LandingSnapControlsApi = {
   goPrevious: () => void
   goNext: () => void
   goToIndex: (index: number) => void
+}
+
+function LandingSnapControlsElement(props: {
+  element: ReactElement<{ api?: LandingSnapControlsApi }>
+  api: LandingSnapControlsApi
+}) {
+  return cloneElement(props.element, { api: props.api })
 }
 
 const PAGE_TRANSITION_LOCK_MS = 980
@@ -391,7 +401,12 @@ export function LandingSnapFrame(props: LandingSnapFrameProps) {
         ))}
       </div>
       {showControls &&
-        (ControlsComponent ? (
+        (props.controlsElement ? (
+          <LandingSnapControlsElement
+            element={props.controlsElement}
+            api={controlsApi}
+          />
+        ) : ControlsComponent ? (
           <ControlsComponent {...controlsApi} />
         ) : (
           <div

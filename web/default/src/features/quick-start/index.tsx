@@ -151,6 +151,34 @@ const QUICK_START_SECONDARY_ACTION_CLASS =
 
 type QuickStartNavigationPath = QuickStartEnterDashboardPath | '/wallet'
 
+type QuickStartControlsProps = {
+  api: LandingSnapControlsApi
+  canFinish: boolean
+  disabled: boolean
+  reducedMotion: boolean
+  onEnterDashboard: () => void
+  onSkip: () => void
+}
+
+type QuickStartControlsSlotProps = Omit<QuickStartControlsProps, 'api'> & {
+  api?: LandingSnapControlsApi
+}
+
+function QuickStartControlsSlot(props: QuickStartControlsSlotProps) {
+  if (!props.api) return null
+
+  return (
+    <QuickStartControls
+      api={props.api}
+      canFinish={props.canFinish}
+      disabled={props.disabled}
+      reducedMotion={props.reducedMotion}
+      onEnterDashboard={props.onEnterDashboard}
+      onSkip={props.onSkip}
+    />
+  )
+}
+
 function extractQuickStartServerAddress(
   status: Record<string, unknown> | null
 ): string {
@@ -340,7 +368,9 @@ export function QuickStart() {
 
   useEffect(() => {
     if (!softwareConfirmed || !effectiveApiKey) return
-    const frame = window.requestAnimationFrame(() => {
+    let settleFrame = 0
+    let settleTimer = 0
+    const scrollTargetIntoView = () => {
       const target = importAttempted
         ? promptPanelRef.current
         : importPanelRef.current
@@ -348,8 +378,23 @@ export function QuickStart() {
         behavior: reducedMotion ? 'auto' : 'smooth',
         block: 'nearest',
       })
+    }
+    const frame = window.requestAnimationFrame(() => {
+      settleFrame = window.requestAnimationFrame(() => {
+        scrollTargetIntoView()
+      })
     })
-    return () => window.cancelAnimationFrame(frame)
+    if (importAttempted) {
+      settleTimer = window.setTimeout(
+        scrollTargetIntoView,
+        reducedMotion ? 100 : 520
+      )
+    }
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.cancelAnimationFrame(settleFrame)
+      window.clearTimeout(settleTimer)
+    }
   }, [effectiveApiKey, importAttempted, reducedMotion, softwareConfirmed])
 
   const scrollPromptIntoView = useCallback(() => {
@@ -622,20 +667,6 @@ export function QuickStart() {
     toast.message(t('Trying to open image settings in CC Switch'))
   }
 
-  const QuickStartControlsComponent = useCallback(
-    (api: LandingSnapControlsApi) => (
-      <QuickStartControls
-        api={api}
-        canFinish={importConfirmed}
-        disabled={isExiting}
-        reducedMotion={Boolean(reducedMotion)}
-        onEnterDashboard={() => beginDashboardExit(true)}
-        onSkip={() => beginDashboardExit(false)}
-      />
-    ),
-    [beginDashboardExit, importConfirmed, isExiting, reducedMotion]
-  )
-
   return (
     <div className='fixed inset-0 h-[100dvh] w-full overflow-hidden bg-[#030409]'>
       <main
@@ -668,7 +699,15 @@ export function QuickStart() {
           className='relative z-10'
           allowContentScroll
           onActiveIndexChange={handlePageChange}
-          controlsComponent={QuickStartControlsComponent}
+          controlsElement={
+            <QuickStartControlsSlot
+              canFinish={importConfirmed}
+              disabled={isExiting}
+              reducedMotion={Boolean(reducedMotion)}
+              onEnterDashboard={() => beginDashboardExit(true)}
+              onSkip={() => beginDashboardExit(false)}
+            />
+          }
         >
           <QuickStartPage
             eyebrow={t('Quick Start')}
@@ -1105,6 +1144,7 @@ export function QuickStart() {
               {importAttempted ? (
                 <motion.div
                   ref={promptPanelRef}
+                  layout={reducedMotion ? false : true}
                   initial={{ opacity: 0, y: 16 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
@@ -1119,6 +1159,8 @@ export function QuickStart() {
                   <ImageSettingsImportPanel
                     apiKey={effectiveApiKey}
                     imported={importConfirmed}
+                    reducedMotion={Boolean(reducedMotion)}
+                    onCollapsed={scrollPromptIntoView}
                     onImport={handleImportPromptToCCSwitch}
                   />
                 </motion.div>
@@ -1560,54 +1602,129 @@ function CCSwitchImportMetrics(props: {
 function ImageSettingsImportPanel(props: {
   apiKey: string
   imported: boolean
+  reducedMotion: boolean
+  onCollapsed: () => void
   onImport: () => void
 }) {
   const { t } = useTranslation()
   const promptPreview = buildQuickStartImagePromptPreview(props.apiKey)
 
   return (
-    <div
+    <motion.div
       data-quick-start-prompt-panel
-      className='overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]'
+      data-quick-start-prompt-imported={props.imported}
+      data-quick-start-prompt-status={props.imported ? 'confirmed' : 'ready'}
+      layout={props.reducedMotion ? false : true}
+      transition={
+        props.reducedMotion
+          ? QUICK_START_REDUCED_TRANSITION
+          : QUICK_START_SPRING_TRANSITION
+      }
+      className={cn(
+        'overflow-hidden rounded-[1.25rem] border border-white/12 bg-white/[0.045] shadow-[0_24px_80px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.08)]',
+        props.imported && 'p-4 backdrop-blur-xl'
+      )}
     >
-      <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
-        <div className='flex items-center gap-2'>
-          <span className='size-2.5 rounded-full bg-[#ff5f57]' />
-          <span className='size-2.5 rounded-full bg-[#febc2e]' />
-          <span className='size-2.5 rounded-full bg-[#28c840]' />
-        </div>
-        <div className='font-mono text-[10px] text-white/36 uppercase'>
-          Codex · AGENTS.md
-        </div>
-      </div>
-      <div className='p-5'>
-        <h2 className='text-lg font-semibold text-white'>
-          {t('Image generation settings')}
-        </h2>
-        <pre className='mt-4 max-h-56 overflow-y-auto border-y border-white/10 py-4 font-mono text-xs leading-6 break-words whitespace-pre-wrap text-white/66'>
-          {promptPreview}
-        </pre>
-        <Button
-          data-quick-start-prompt-imported={props.imported}
-          className={cn(
-            'mt-5 h-12 w-full min-w-0 rounded-full border px-4 text-center leading-tight whitespace-normal transition-[transform,background-color,border-color,color,box-shadow] duration-300 active:scale-[0.98]',
-            props.imported
-              ? 'border-white/10 bg-white/[0.065] text-white/58 hover:border-white/20 hover:bg-white/[0.1] hover:text-white'
-              : 'border-white bg-white text-[#030409] hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)]'
-          )}
-          onClick={props.onImport}
-        >
-          {props.imported ? (
-            <RotateCcw data-icon='inline-start' />
-          ) : (
-            <Sparkles data-icon='inline-start' />
-          )}
-          <span className='min-w-0 text-balance'>
-            {t('One-click import image settings')}
-          </span>
-        </Button>
-      </div>
-    </div>
+      <AnimatePresence initial={false} mode='popLayout'>
+        {props.imported ? (
+          <motion.div
+            key='prompt-imported'
+            initial={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: 10, scale: 0.985 }
+            }
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: -8, scale: 0.985 }
+            }
+            transition={
+              props.reducedMotion
+                ? QUICK_START_REDUCED_TRANSITION
+                : QUICK_START_SPRING_TRANSITION
+            }
+            onAnimationComplete={props.onCollapsed}
+          >
+            <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex min-w-0 items-start gap-3'>
+                <QuickStartStepMarker
+                  step='05'
+                  complete
+                  reducedMotion={props.reducedMotion}
+                  className='size-9 rounded-full text-[11px]'
+                />
+                <div className='min-w-0'>
+                  <div className='font-semibold text-white'>
+                    {t('Image settings imported')}
+                  </div>
+                  <p className='mt-1 text-sm leading-6 text-white/54'>
+                    {t('Setup complete. You can now enter the dashboard.')}
+                  </p>
+                </div>
+              </div>
+              <Button
+                data-quick-start-prompt-reimport
+                className='h-11 w-full min-w-28 rounded-full border border-white/10 bg-white/[0.065] px-5 text-white/58 shadow-none transition-[transform,background-color,border-color,color,box-shadow] duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:border-white/20 hover:bg-white/[0.1] hover:text-white active:scale-[0.98] sm:w-auto'
+                onClick={props.onImport}
+              >
+                <RotateCcw data-icon='inline-start' />
+                {t('Import again')}
+              </Button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key='prompt-ready'
+            initial={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: 10, scale: 0.985 }
+            }
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={
+              props.reducedMotion
+                ? { opacity: 0 }
+                : { opacity: 0, y: -8, scale: 0.985 }
+            }
+            transition={
+              props.reducedMotion
+                ? QUICK_START_REDUCED_TRANSITION
+                : QUICK_START_SPRING_TRANSITION
+            }
+          >
+            <div className='flex items-center justify-between gap-3 border-b border-white/10 px-5 py-3'>
+              <div className='flex items-center gap-2'>
+                <span className='size-2.5 rounded-full bg-[#ff5f57]' />
+                <span className='size-2.5 rounded-full bg-[#febc2e]' />
+                <span className='size-2.5 rounded-full bg-[#28c840]' />
+              </div>
+              <div className='font-mono text-[10px] text-white/36 uppercase'>
+                Codex · AGENTS.md
+              </div>
+            </div>
+            <div className='p-5'>
+              <h2 className='text-lg font-semibold text-white'>
+                {t('Image generation settings')}
+              </h2>
+              <pre className='mt-4 max-h-56 overflow-y-auto border-y border-white/10 py-4 font-mono text-xs leading-6 break-words whitespace-pre-wrap text-white/66'>
+                {promptPreview}
+              </pre>
+              <Button
+                className='mt-5 h-12 w-full min-w-0 rounded-full border border-white bg-white px-4 text-center leading-tight whitespace-normal text-[#030409] transition-[transform,background-color,box-shadow] duration-300 hover:bg-white/88 hover:shadow-[0_14px_40px_rgba(255,255,255,0.16)] active:scale-[0.98]'
+                onClick={props.onImport}
+              >
+                <Sparkles data-icon='inline-start' />
+                <span className='min-w-0 text-balance'>
+                  {t('One-click import image settings')}
+                </span>
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   )
 }
 
@@ -1654,18 +1771,18 @@ function QuickStartPage(props: {
   )
 }
 
-function QuickStartControls(props: {
-  api: LandingSnapControlsApi
-  canFinish: boolean
-  disabled: boolean
-  reducedMotion: boolean
-  onEnterDashboard: () => void
-  onSkip: () => void
-}) {
+function QuickStartControls(props: QuickStartControlsProps) {
   const { t } = useTranslation()
   const isFinalPage = !props.api.canGoNext
+  const controlsCollapsed = isFinalPage && props.canFinish
   const primaryDisabled = props.disabled || (isFinalPage && !props.canFinish)
   const handlePrimary = isFinalPage ? props.onEnterDashboard : props.api.goNext
+  let controlsGridClass = 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+  if (isFinalPage) {
+    controlsGridClass =
+      'grid-cols-[3rem_auto_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+  }
+  if (controlsCollapsed) controlsGridClass = 'grid-cols-1'
   let secondaryControl: ReactNode = null
   if (!isFinalPage) {
     secondaryControl = (
@@ -1693,39 +1810,99 @@ function QuickStartControls(props: {
   }
 
   return (
-    <div
+    <motion.div
       data-point-cloud-ignore
-      className='absolute bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-30 flex w-[min(calc(100%-1.5rem),34rem)] -translate-x-1/2 flex-col items-center gap-2'
+      data-quick-start-controls-state={
+        controlsCollapsed ? 'complete' : 'navigation'
+      }
+      layout={props.reducedMotion ? false : true}
+      transition={
+        props.reducedMotion
+          ? QUICK_START_REDUCED_TRANSITION
+          : QUICK_START_SPRING_TRANSITION
+      }
+      className={cn(
+        'absolute inset-x-0 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-30 mx-auto flex flex-col items-center gap-2',
+        controlsCollapsed
+          ? 'w-[min(calc(100%-1.5rem),19rem)]'
+          : 'w-[min(calc(100%-1.5rem),34rem)]'
+      )}
     >
-      <div
+      <motion.div
+        layout={props.reducedMotion ? false : true}
+        transition={
+          props.reducedMotion
+            ? QUICK_START_REDUCED_TRANSITION
+            : QUICK_START_SPRING_TRANSITION
+        }
         className={cn(
           'grid w-full items-center gap-1.5 rounded-full border border-white/12 bg-[#030409]/72 p-1.5 shadow-[0_20px_60px_rgba(0,0,0,0.34),inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-2xl',
-          isFinalPage
-            ? 'grid-cols-[3rem_auto_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
-            : 'grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'
+          controlsGridClass
         )}
       >
+        <AnimatePresence initial={false} mode='popLayout'>
+          {!controlsCollapsed ? (
+            <motion.button
+              key='previous-control'
+              layout={props.reducedMotion ? false : 'position'}
+              type='button'
+              aria-label={t('Previous')}
+              onClick={props.api.goPrevious}
+              disabled={!props.api.canGoPrevious || props.disabled}
+              initial={
+                props.reducedMotion
+                  ? { opacity: 0 }
+                  : { opacity: 0, x: -12, scale: 0.96 }
+              }
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={
+                props.reducedMotion
+                  ? { opacity: 0 }
+                  : { opacity: 0, x: -14, scale: 0.92 }
+              }
+              whileTap={props.reducedMotion ? undefined : { scale: 0.96 }}
+              transition={
+                props.reducedMotion
+                  ? QUICK_START_REDUCED_TRANSITION
+                  : QUICK_START_SPRING_TRANSITION
+              }
+              className='flex h-12 min-w-12 items-center justify-center gap-2 justify-self-start rounded-full border border-transparent px-3 text-sm font-semibold text-white/72 transition-[border-color,background-color,color] duration-300 hover:border-white/12 hover:bg-white/[0.06] hover:text-white disabled:pointer-events-none disabled:opacity-28 sm:min-w-28'
+            >
+              <ArrowLeft className='size-4' aria-hidden='true' />
+              <span className='hidden sm:inline'>{t('Previous')}</span>
+            </motion.button>
+          ) : null}
+        </AnimatePresence>
+        <AnimatePresence initial={false} mode='popLayout'>
+          {!controlsCollapsed ? (
+            <motion.div
+              key='page-count'
+              layout={props.reducedMotion ? false : 'position'}
+              initial={
+                props.reducedMotion
+                  ? { opacity: 0 }
+                  : { opacity: 0, scale: 0.94 }
+              }
+              animate={{ opacity: 1, scale: 1 }}
+              exit={
+                props.reducedMotion
+                  ? { opacity: 0 }
+                  : { opacity: 0, scale: 0.88 }
+              }
+              transition={
+                props.reducedMotion
+                  ? QUICK_START_REDUCED_TRANSITION
+                  : QUICK_START_SPRING_TRANSITION
+              }
+              className='min-w-16 text-center font-mono text-[10px] font-semibold text-white/44 tabular-nums'
+            >
+              {String(props.api.activeIndex + 1).padStart(2, '0')} /{' '}
+              {String(props.api.totalPages).padStart(2, '0')}
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
         <motion.button
-          type='button'
-          aria-label={t('Previous')}
-          onClick={props.api.goPrevious}
-          disabled={!props.api.canGoPrevious || props.disabled}
-          whileTap={props.reducedMotion ? undefined : { scale: 0.96 }}
-          transition={
-            props.reducedMotion
-              ? QUICK_START_REDUCED_TRANSITION
-              : QUICK_START_SPRING_TRANSITION
-          }
-          className='flex h-12 min-w-12 items-center justify-center gap-2 justify-self-start rounded-full border border-transparent px-3 text-sm font-semibold text-white/72 transition-[border-color,background-color,color] duration-300 hover:border-white/12 hover:bg-white/[0.06] hover:text-white disabled:pointer-events-none disabled:opacity-28 sm:min-w-28'
-        >
-          <ArrowLeft className='size-4' aria-hidden='true' />
-          <span className='hidden sm:inline'>{t('Previous')}</span>
-        </motion.button>
-        <div className='min-w-16 text-center font-mono text-[10px] font-semibold text-white/44 tabular-nums'>
-          {String(props.api.activeIndex + 1).padStart(2, '0')} /{' '}
-          {String(props.api.totalPages).padStart(2, '0')}
-        </div>
-        <motion.button
+          layout={props.reducedMotion ? false : 'position'}
           type='button'
           onClick={handlePrimary}
           disabled={primaryDisabled}
@@ -1737,8 +1914,10 @@ function QuickStartControls(props: {
               : QUICK_START_SPRING_TRANSITION
           }
           className={cn(
-            'flex h-12 max-w-full min-w-32 items-center justify-center gap-2 justify-self-end rounded-full bg-white px-3 text-xs leading-tight font-black whitespace-normal text-[#030409] shadow-[0_16px_48px_rgba(255,255,255,0.2)] ring-1 ring-white/30 transition-[background-color,color,box-shadow] duration-300 hover:shadow-[0_20px_58px_rgba(255,255,255,0.28)] disabled:pointer-events-none disabled:bg-white/20 disabled:text-white/42 disabled:shadow-none sm:min-w-40 sm:px-4 sm:text-sm sm:whitespace-nowrap',
-            isFinalPage && 'w-full sm:w-auto'
+            'flex h-12 max-w-full items-center justify-center gap-2 rounded-full bg-white text-xs leading-tight font-black whitespace-normal text-[#030409] shadow-[0_16px_48px_rgba(255,255,255,0.2)] ring-1 ring-white/30 transition-[background-color,color,box-shadow] duration-300 hover:shadow-[0_20px_58px_rgba(255,255,255,0.28)] disabled:pointer-events-none disabled:bg-white/20 disabled:text-white/42 disabled:shadow-none',
+            controlsCollapsed
+              ? 'w-full min-w-0 justify-self-stretch px-5 sm:px-6 sm:text-sm'
+              : 'min-w-32 justify-self-end px-3 sm:min-w-40 sm:px-4 sm:text-sm sm:whitespace-nowrap'
           )}
         >
           <span className='min-w-0 text-balance'>
@@ -1746,9 +1925,21 @@ function QuickStartControls(props: {
           </span>
           <ArrowRight className='size-4' aria-hidden='true' />
         </motion.button>
-      </div>
-      {secondaryControl}
-    </div>
+      </motion.div>
+      <AnimatePresence initial={false} mode='popLayout'>
+        {secondaryControl ? (
+          <motion.div
+            key={isFinalPage ? 'prompt-required' : 'skip-action'}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={QUICK_START_REDUCED_TRANSITION}
+          >
+            {secondaryControl}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </motion.div>
   )
 }
 

@@ -44,6 +44,10 @@ const completionDialogSource = readFileSync(
   resolve(currentDir, 'quick-start-completion-dialog.tsx'),
   'utf8'
 )
+const landingSnapFrameSource = readFileSync(
+  resolve(currentDir, '../home/components/landing-snap-frame.tsx'),
+  'utf8'
+)
 const appHeaderSource = readFileSync(
   resolve(currentDir, '../../components/layout/components/app-header.tsx'),
   'utf8'
@@ -60,16 +64,19 @@ const providerReimportHandlerSource = pageSource.slice(
   pageSource.indexOf('const handleReimportToCCSwitch'),
   pageSource.indexOf('const handleImportPromptToCCSwitch')
 )
+const promptImportHandlerStart = pageSource.indexOf(
+  'const handleImportPromptToCCSwitch'
+)
 const promptImportHandlerSource = pageSource.slice(
-  pageSource.indexOf('const handleImportPromptToCCSwitch'),
-  pageSource.indexOf('const QuickStartControlsComponent')
+  promptImportHandlerStart,
+  pageSource.indexOf('\n\n  return (', promptImportHandlerStart)
 )
 
 test('quick start controls are centered, enlarged, and keep one primary action', () => {
-  assert.match(pageSource, /left-1\/2/)
-  assert.match(pageSource, /-translate-x-1\/2/)
+  assert.match(pageSource, /inset-x-0/)
+  assert.match(pageSource, /mx-auto/)
   assert.match(pageSource, /h-12 min-w-12/)
-  assert.match(pageSource, /h-12[^\n]*min-w-32/)
+  assert.match(pageSource, /min-w-32 justify-self-end/)
   assert.match(pageSource, /shadow-\[0_16px_48px_rgba\(255,255,255,0\.2\)\]/)
   assert.match(pageSource, /ring-1 ring-white\/30/)
   assert.match(pageSource, /font-black/)
@@ -81,7 +88,26 @@ test('quick start controls are centered, enlarged, and keep one primary action',
   assert.match(pageSource, /justify-self-start/)
   assert.match(pageSource, /justify-self-end/)
   assert.match(pageSource, /grid-cols-\[3rem_auto_minmax\(0,1fr\)\]/)
-  assert.match(pageSource, /isFinalPage && 'w-full sm:w-auto'/)
+  assert.match(pageSource, /data-quick-start-controls-state/)
+  assert.match(
+    pageSource,
+    /controlsCollapsed = isFinalPage && props\.canFinish/
+  )
+  assert.match(pageSource, /w-\[min\(calc\(100%-1\.5rem\),34rem\)\]/)
+  assert.match(pageSource, /w-\[min\(calc\(100%-1\.5rem\),19rem\)\]/)
+  assert.match(pageSource, /controlsGridClass = 'grid-cols-1'/)
+  assert.match(pageSource, /!controlsCollapsed \? \(/)
+  assert.match(pageSource, /layout=\{props\.reducedMotion \? false : true\}/)
+  assert.match(pageSource, /function QuickStartControlsSlot/)
+  assert.match(pageSource, /controlsElement=\{/)
+  assert.match(pageSource, /<QuickStartControlsSlot/)
+  assert.doesNotMatch(pageSource, /QuickStartControlsContext/)
+  assert.match(landingSnapFrameSource, /controlsElement\?: ReactElement/)
+  assert.match(
+    landingSnapFrameSource,
+    /cloneElement\(props\.element, \{ api: props\.api \}\)/
+  )
+  assert.match(landingSnapFrameSource, /controlsComponent\?: ComponentType/)
   assert.match(pageSource, /isFinalPage\s*\?\s*props\.onEnterDashboard/)
   assert.equal(pageSource.match(/t\('Enter dashboard'\)/g)?.length, 1)
 })
@@ -221,11 +247,12 @@ test('quick start final page merges provider feedback and reveals image settings
   assert.match(promptImportHandlerSource, /setImportConfirmed\(true\)/)
   assert.match(promptImportHandlerSource, /importConfirmed: true/)
   assert.match(pageSource, /canFinish=\{importConfirmed\}/)
+  assert.match(pageSource, /canFinish=\{props\.canFinish\}/)
   assert.match(pageSource, /layout=\{reducedMotion \? false : true\}/)
   assert.match(pageSource, /step='04'/)
   assert.equal(
     pageSource.match(/className='size-9 rounded-full text-\[11px\]'/g)?.length,
-    2
+    3
   )
   assert.match(pageSource, /data-quick-start-prompt-panel/)
   assert.match(
@@ -234,7 +261,24 @@ test('quick start final page merges provider feedback and reveals image settings
   )
   assert.match(pageSource, /buildQuickStartImagePromptPreview/)
   assert.match(pageSource, /One-click import image settings/)
-  assert.doesNotMatch(promptPanelSource, /t\('Import again'\)/)
+  assert.match(promptPanelSource, /data-quick-start-prompt-status/)
+  assert.match(
+    promptPanelSource,
+    /data-quick-start-prompt-status=\{props\.imported \? 'confirmed' : 'ready'\}/
+  )
+  assert.match(promptPanelSource, /mode='popLayout'/)
+  assert.match(promptPanelSource, /key='prompt-ready'/)
+  assert.match(promptPanelSource, /key='prompt-imported'/)
+  assert.match(promptPanelSource, /step='05'/)
+  assert.match(promptPanelSource, /Image settings imported/)
+  assert.match(
+    promptPanelSource,
+    /Setup complete\. You can now enter the dashboard\./
+  )
+  assert.match(promptPanelSource, /data-quick-start-prompt-reimport/)
+  assert.match(promptPanelSource, /t\('Import again'\)/)
+  assert.match(pageSource, /onCollapsed=\{scrollPromptIntoView\}/)
+  assert.match(promptPanelSource, /onAnimationComplete=\{props\.onCollapsed\}/)
   const providerPanelPosition = pageSource.indexOf('<CCSwitchImportPanel')
   const promptConditionPosition = pageSource.indexOf('{importAttempted ? (')
   const promptPanelPosition = pageSource.indexOf('<ImageSettingsImportPanel')
