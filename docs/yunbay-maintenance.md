@@ -2,6 +2,38 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-16 生产 502 故障处置与恢复记录（已完成）
+
+### 目标与性能指标
+
+- 首要目标：恢复 `https://yunbay.xyz/` 与 `https://yunbay.xyz/api/status`，公开入口返回 HTTP 200。
+- 稳定性优先：先识别故障边界，再执行最小充分恢复动作；不执行全栈 `compose down/up`。
+- 中断约束：若需切换或重启，仅操作故障容器，预期额外中断不超过 1 分钟。
+- 数据约束：不修改生产业务数据，不输出 secret，不删除现有容器、卷、镜像或备份。
+
+### 闭环排障与恢复步骤
+
+- [x] 从客户端复现故障并确认公开入口返回 502。
+- [x] 通过受限 SSH 登录生产服务器，采集主机负载、磁盘、内存和 Docker 状态。
+- [x] 检查 `yunbay-caddy`、`yunbay-new-api`、PostgreSQL、Redis 的健康状态和有界日志。
+- [x] 对照 Caddy 上游连通性与 new-api 本地健康端点，定位对象、测量链路或执行链路故障。
+- [x] 执行最小恢复动作：热重载 Caddy 正式配置，没有重启任何容器。
+- [x] 公开入口连续复测，确认首页和 `/api/status` 返回 200，未鉴权 `/v1/models` 返回预期 401。
+- [x] 观察容器健康状态和错误日志，确认无持续重启、资源饱和或依赖断连。
+- [x] 将根因、恢复动作、停机时长和后续预防措施更新到本节及唯一服务器连接手册。
+
+### 根因、恢复与验证
+
+- 故障窗口：Caddy 首次出现 `lookup new-api-green` 错误为 `2026-07-16 13:53:47 +08:00`；`14:04:17 +08:00` 完成热重载，公开入口恢复，持续约 10 分 30 秒。
+- new-api 本体、PostgreSQL、Redis 始终 healthy，宿主机 `127.0.0.1:3000/api/status` 始终返回 200；故障对象仅为 Caddy 运行时路由。
+- 正式 `/opt/new-api/app/Caddyfile` 与容器内挂载文件均指向 `new-api:3000`，但 Caddy Admin API 中的运行时配置被留在 `new-api-green:3000`。
+- 临时绿实例在 `13:52:39 +08:00` 启动，但其 Docker 网络 DNS 名称中没有 `new-api-green` 别名；Caddy 因此持续收到 Docker DNS `server misbehaving` 并对外返回 502。
+- 恢复动作：先验证正式 Caddyfile，再执行 `caddy reload` 热重载，运行时 upstream 立即恢复为 `new-api:3000`；没有重启 Caddy、new-api、数据库、Redis 或其它服务，额外切换中断低于 1 秒。
+- 清理动作：确认没有部署进程仍在运行且正式实例持续 healthy 后，删除未承载流量的失败候选容器 `yunbay-new-api-green`，避免后续名称冲突。
+- 恢复后 Caddy 为 healthy、restart=0，new-api 为 running/healthy、restart=0；首页与 `/api/status` 连续多轮返回 200，恢复后 Caddy 没有新增代理错误。
+- 后续 blue/green 发布必须先同时验证候选容器健康和 `docker exec yunbay-caddy getent hosts <upstream>` 成功，再允许 Caddy 切流；切流脚本还应设置有界 watchdog，若公开探针出现首次 5xx，立即热重载正式 Caddyfile。
+- 本地工作区已有与本次事故无关的未跟踪文件，本次处置未清理、未覆盖。
+
 ## 2026-07-12 模型价格同步手动编辑上线
 
 本轮将模型价格同步预览中的手动编辑能力发布到生产。运维记录只包含可复现的代码、构建和运行状态，不记录 SSH 私钥、后台会话、API Key 或生产环境变量明文。
