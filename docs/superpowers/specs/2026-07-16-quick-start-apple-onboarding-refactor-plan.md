@@ -576,7 +576,7 @@
 | 完整计划与控制指标 | 已完成 | 本节已追加到既有唯一计划文件 |
 | 完成组合块、悬停详情与再次导入状态 | 已完成 | 默认紧凑、hover/focus 展开、移出收起且业务确认态不回退 |
 | 自动化与双视口浏览器验收 | 已完成 | 工程检查、动效采样、键盘、reduced-motion 与双视口布局均通过 |
-| GitHub main | 进行中 | 只提交本轮相关文件并普通推送 main |
+| GitHub main | 已完成 | `7bc5e4e7` 已普通推送 main，只包含本轮三个相关文件 |
 | 生产部署 | 未授权 | 本轮不触碰生产，等待用户另行明确指令 |
 
 ### 14.7 实施验证记录
@@ -587,4 +587,5 @@
 - 键盘聚焦“再次导入”可展开，焦点移到下方生图按钮后按同一弹簧路径收起。`prefers-reduced-motion: reduce` 下展开/收起全程 `transform: none`，只保留约 80ms 的高度与透明度反馈；浏览器仅记录 Motion 对模拟 reduced-motion 的预期说明性 warning，应用 error 为 0。
 - 移动端 `390x844` 默认组合条为 `358x146`，灰色按钮为 `324x44`；展开后组合条为 `358x415`，四项详情为 `324x269`。动画完成后活动滚动区自动最小滚动 `264px`，详情底部为 `687px`、底栏顶部为 `773px`，完整留出 `86px` 间距；页面和活动滚动区宽度均为 `390px`。桌面同一引导只产生 `2px` 的最小位置校正。
 - `bun test src/features/quick-start/*.test.ts`：54 pass / 0 fail；`bun run typecheck`、涉及文件 ESLint、Prettier、`bun run i18n:sync`、`git diff --check` 与 `bun run build` 均通过。六语言 missing、extras、untranslated 均为 0，最终生产构建入口为 `dist/static/js/index.2f46b5d28b.js`。
+- 功能、测试与本节计划提交 `7bc5e4e7` 已普通 fast-forward 推送 GitHub `main`；提交范围只有本轮三个目标文件，工作区既有运维手册改动、旧规格文档和 `outputs/` 均未纳入。
 - 本轮没有同步生产文件、构建服务器镜像、修改 Caddy，也没有停止、重建或重启任何生产服务；生产继续运行既有健康版本。
