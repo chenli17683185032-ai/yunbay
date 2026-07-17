@@ -67,7 +67,7 @@ test('quick start image prompt preserves the imported API key and required routi
 
   assert.equal(
     prompt,
-    '当我提出生图请求时，必须直接 POST `https://yunbay.xyz/v1/images/generations`，模型固定使用 `gpt-image-2`。禁止把 `gpt-image-2` 配置为 Codex 主聊天模型，也禁止通过 `/v1/chat/completions` 或 `/v1/responses` 直接调用它。API Key为：sk-test-import-key\n收到图片的 Base64 数据后，先解码并将原图保存到当前工作区的 `outputs/` 目录；需要 4K 时再另外处理，并保留原始图片。'
+    '文生图请求端点走POST /v1/images/generations；图生图、参考图、局部修改、蒙版请求端点走POST /v1/images/edits。模型固定使用 `gpt-image-2`。禁止把 `gpt-image-2` 配置为 Codex 主聊天模型，也禁止通过 `/v1/chat/completions` 或 `/v1/responses` 直接调用它。API Key为：sk-test-import-key\n收到图片的 Base64 数据后，先解码并将原图保存到当前工作区的 `outputs/` 目录；需要 4K 时再另外处理，并保留原始图片。'
   )
 })
 
@@ -76,9 +76,16 @@ test('quick start image prompt preview masks the key without changing the rules'
 
   assert.match(preview, /API Key为：sk-••••••••-key/)
   assert.doesNotMatch(preview, /sk-test-import-key/)
-  assert.match(preview, /https:\/\/yunbay\.xyz\/v1\/images\/generations/)
+  assert.match(preview, /文生图请求端点走POST \/v1\/images\/generations/)
+  assert.match(
+    preview,
+    /图生图、参考图、局部修改、蒙版请求端点走POST \/v1\/images\/edits/
+  )
+  assert.doesNotMatch(preview, /https:\/\/yunbay\.xyz\/v1\/images\/generations/)
+  assert.doesNotMatch(preview, /\t/)
   assert.match(preview, /gpt-image-2/)
   assert.match(preview, /outputs\//)
+  assert.ok(preview.endsWith('并保留原始图片。'))
 })
 
 test('quick start CC Switch prompt URL imports and enables the image prompt', () => {
@@ -97,10 +104,15 @@ test('quick start CC Switch prompt URL imports and enables the image prompt', ()
     QUICK_START_CC_SWITCH_PROMPT_NAME
   )
   assert.ok(encodedContent)
-  assert.equal(
-    Buffer.from(encodedContent, 'base64').toString('utf8'),
-    buildQuickStartImagePrompt('sk-test-import-key')
+  const decodedContent = Buffer.from(encodedContent, 'base64').toString('utf8')
+  assert.equal(decodedContent, buildQuickStartImagePrompt('sk-test-import-key'))
+  assert.ok(
+    decodedContent.startsWith(
+      '文生图请求端点走POST /v1/images/generations；图生图、参考图、局部修改、蒙版请求端点走POST /v1/images/edits。'
+    )
   )
+  assert.match(decodedContent, /API Key为：sk-test-import-key\n/)
+  assert.ok(decodedContent.endsWith('并保留原始图片。'))
   assert.equal(parsed.searchParams.get('enabled'), 'true')
   assert.equal(parsed.searchParams.has('apiKey'), false)
   assert.equal(parsed.searchParams.has('endpoint'), false)

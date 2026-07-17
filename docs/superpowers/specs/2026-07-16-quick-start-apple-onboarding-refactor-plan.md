@@ -787,3 +787,55 @@
 - 生产入口 `index.58250d789d.js` 的 SHA-256 为 `86e3b28ff39082fdb0d56db4830e4d3d08d6417fe9ec0f7c0c34762589e2f08b`、字节数 `3065573`；Quick Start chunk `4963.d9f8a87c33.js` 的 SHA-256 为 `2ec156b89b34f56a6e11c27f8a490178149483164d018cade9330da5750f3aed`、字节数 `50341`，与本地已测试构建完全一致，并包含本轮完成条与底栏收敛标记。
 - Caddy 文件、只读挂载和运行时配置哈希前后完全一致，upstream 始终只有 `new-api:3000`，无绿实例。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 均未变化。
 - 成功回滚目录为 `/opt/new-api/backups/quick-start-completion-collapse-20260716T175451Z-a6e524db`；固定回滚标签为 `yunbay-new-api:rollback-quick-start-completion-20260716T175451Z`，旧镜像为 `sha256:2ab381744eb207bc1246a31682c39ed3a7d569d7663dc17abe193e3b0717fdf5`。源包、部署脚本、构建日志、探针和 watchdog 证据已归档，服务器顶层传输包、脚本、状态文件、日志和临时 run dir 已清理。
+
+## 17. 生图请求端点提示重写计划（2026-07-18）
+
+### 17.1 目标与性能指标
+
+把快速启动导入 CC Switch 的生图提示词重写为明确的双路由规则：文生图走 `POST /v1/images/generations`；图生图、参考图、局部修改和蒙版请求走 `POST /v1/images/edits`。
+
+- 两个端点均保持用户指定的相对形式，不再在提示词中写完整域名；用户文本中的排版制表符归一为普通中文句号，不写入隐藏 Tab。
+- 原始提示词、页面脱敏预览和 `resource=prompt` Deep Link 解码内容必须继续来自同一个 `buildQuickStartImagePrompt()`，避免三个副本漂移。
+- `API Key为：` 后继续插入 `normalizeQuickStartApiKey()` 的动态结果；调用方传入已有 `sk-` 前缀时不重复添加，没有前缀时仍自动补齐。
+- 不改变 `gpt-image-2`、主聊天模型禁令、API Key 脱敏、`outputs/`、4K 处理规则或 CC Switch Deep Link 参数。
+- 本轮不新增 UI 文案 key、不改布局、动效、会话状态或后端契约；生产环境需等待新的明确部署指令。
+
+### 17.2 GitHub 经验与事实依据
+
+- `farion1231/cc-switch` 当前 README 明确 Prompts 可跨应用同步，并支持 `ccswitch://` Deep Link 一键导入提示词；因此继续复用现有 `resource=prompt` 和 Base64 内容链路，不引入第二种导入方式。
+- `openai/openai-openapi` 的 OpenAPI 定义同时包含图片生成与 `POST /images/edits`（`operationId: createImageEdit`），与用户指定的 `/v1/images/generations`、`/v1/images/edits` 客户端路径一致。
+- 当前项目已经用精确字符串测试锁定完整提示词，并对预览脱敏与 Deep Link 解码内容分别验证；本轮沿用这些现有反馈点，不新增抽象。
+
+### 17.3 最小充分动态模型
+
+- 输入：规范化后的 API Key。
+- 控制器：`buildQuickStartImagePrompt()` 拼接唯一提示词正文。
+- 输出 A：真实完整提示词；输出 B：替换为脱敏 Key 的页面预览；输出 C：Base64 编码后写入 CC Switch Deep Link 的内容。
+- 稳定条件：A、B、C 均以新的双路由句开头，以原有“并保留原始图片。”结尾；动态 Key、模型禁令和保存规则保持不变。
+- 扰动边界：换行、Base64 编解码和 Key 脱敏不得改变两个端点、请求类型映射或文本顺序，最终正文不得包含完整 `https://yunbay.xyz/v1/images/generations` 旧地址或隐藏 Tab。
+
+### 17.4 最小实施与验证闭环
+
+1. 先更新 `quick-start-cc-switch.test.ts`：用最新完整正文替换精确期望，并分别断言预览与 Deep Link 解码内容包含两个相对端点、请求类型映射和动态 Key，且不再包含完整旧地址。
+2. 只修改 `buildQuickStartImagePrompt()` 的模板字符串，用用户最新双路由首段替换旧首段，保留动态 Key 插值与第二行保存规则。
+3. 运行 Quick Start 全量测试、TypeScript、定向 ESLint、Prettier、`git diff --check` 和生产构建；确认只有计划、构造器和测试三个目标文件发生本轮变化。
+4. 将实现结果回写本节，显式暂存本轮文件，提交并普通推送 GitHub `main`；保留现有无关运维文档、旧规格和 `outputs/`，不连接生产服务器。
+
+### 17.5 实施节点
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 现状与 GitHub 依据核验 | 已完成 | 已确认单一构造链路、CC Switch Prompt Deep Link 和 `/images/edits` 规范 |
+| 完整闭环计划 | 已完成 | 目标、边界、反馈点、发布边界已写入唯一计划文件 |
+| 测试约束与最小实现 | 已完成 | 三种输出均使用最新双路由正文，Key 与保存规则不变 |
+| 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
+| GitHub main | 进行中 | 只提交本轮三个目标文件并普通推送 |
+| 生产部署 | 未授权 | 不连接、不上传、不构建、不重启生产服务 |
+
+### 17.6 实施验证记录
+
+- `buildQuickStartImagePrompt()` 当前首段精确为：`文生图请求端点走POST /v1/images/generations；图生图、参考图、局部修改、蒙版请求端点走POST /v1/images/edits。`，随后继续保留 `gpt-image-2`、主聊天模型禁令和动态 Key 插值；第二行原图保存与 4K 规则未变。
+- Key 继续经过 `normalizeQuickStartApiKey()`：无前缀输入自动补 `sk-`，已有前缀不重复添加；页面预览仍只显示脱敏 Key。完整正文、预览和 Deep Link 解码结果都不包含旧完整生图域名、上一版末尾追加句或隐藏 Tab。
+- 精确字符串、脱敏预览和 Base64 解码三层测试先失败后通过；定向测试为 `9 pass / 0 fail`，Quick Start 全量为 `54 pass / 0 fail`。
+- `bun run typecheck`、定向 ESLint、Prettier、`git diff --check` 与 `bun run build` 全部通过；生产构建生成主入口 `index.76b18de830.js` 和 Quick Start chunk `4963.1f05d9fe68.js`。
+- 本轮目标差异仅为本计划、`quick-start-cc-switch.ts` 和对应测试；既有 `docs/yunbay-maintenance.md`、旧规格与 `outputs/` 保持原状。本轮没有连接或修改生产服务器。
