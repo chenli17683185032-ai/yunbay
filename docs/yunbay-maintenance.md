@@ -1591,3 +1591,26 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 ```
 
 两文件源包和完整部署日志已归档到成功备份，顶层传输包、脚本、状态、日志、PID 和 run dir 已清理。回滚必须获取 `/var/lock/yunbay-new-api-deploy.lock`，恢复成功备份中的两文件，把上述 rollback 标签重标为 `yunbay-new-api:prod`，启动独立 watchdog，并且只重建标准 `new-api`。Caddy upstream 始终保持 `new-api:3000`；禁止修改或重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP 服务。
+
+## 2026-07-17 VIP 历史余额返利、活动邮件与 QQ 临时备用 SMTP
+
+### 返利结果
+
+- 活动切点为 `2026-07-17 11:48:13 +08:00`；只计成功的网站余额直充和 root 管理员正向直接加余额，超值套餐、兑换码、非 root 加额与当前钱包显示额均不作为充值证据。
+- 用户已手工处理的 VIP ID `212–256` 被强制排除；本次严格名单为 19 人，充值基数 `$1,095`，30% 返利 `$328.50`，原子增加 `164,250,000 quota`。活动幂等标识为 `campaign_vip_recharge_rebate_20260717_v1`，审计错误为 0。
+- 用户名 `647` 对应用户 ID `211`：余额直充 `$30`、root 加额 `$10`，返利基数 `$40`、实际返利 `$12`；此前看到的“300 多”是累计消费，不是余额充值。
+- 备份目录为 `/opt/new-api/backups/vip-recharge-rebate-20260717T044732Z/`；数据库 dump SHA-256 为 `d89f6bbd79b4b07440c4f6d1c7fdcf57ee53d392f58f593642322c14d2d18b9e`，`pg_restore --list` 已通过。
+
+### 邮件结果
+
+- 固定批次 manifest 为 `ca5295f8ea361b545b4008e25382a74396a2b68fba4009989d2663ad5d1cb600`：当时共 258 个用户、223 个唯一有效邮箱、35 个缺失邮箱、0 个无效、0 个重复。活动开始后的新注册用户不追加进已持久化批次。
+- Resend SMTP 首先一次成功 184 封，随后 39 封统一返回 `550 daily email sending quota`。用户明确授权临时切换历史 QQ SMTP，允许显示个人 QQ 发件身份。
+- QQ 配置切换只更新 7 个 SMTP/SystemName options；new-api 单独重启并在 14 秒内恢复 healthy。逐封重新登录方式成功 21 封后触发 QQ `535 login frequency limited`，按 QQ 官方建议冷却超过 15 分钟，再以单个 STARTTLS 会话发送剩余 18 封。
+- 最终回执为 `sent=223 / pending=0 / failed=0 / sending=0`；223 个 recipient hash 和规范化邮箱均唯一，223 条成功回执都有 `sent_at` 且 `last_error` 为空。完成时间为 `2026-07-17 15:55:30 +08:00`。
+
+### 临时 SMTP 与自动恢复
+
+- 当前生产 SMTP 临时为 `smtp.qq.com:587 + STARTTLS`，注册、验证码和密码重置均走 QQ。切换后已观察到 5 次验证码请求，HTTP 200 为 5/5，应用 `failed to send email` 为 0。
+- 原 Resend 与 QQ 配置快照、SHA-256、控制脚本和审计材料保存在上述 `0600/0700` 备份目录，不含凭据的公开文档不记录 token。控制脚本 SHA-256 为 `a56fbae4c3ea0160cf55f85bd57eb80c9213b04aef0d7b0c77c63746b23aa982`。
+- `/etc/cron.d/yunbay-resend-restore-20260718` 将在 `2026-07-18 08:05 +08:00` 后恢复原 Resend 快照。每轮有 120 秒硬超时、最多 12 轮；live SMTP 指纹异常时拒绝覆盖并撤销调度，成功后删除 cron 和计数文件，再验证 new-api healthy、源站和公网 `/api/status` 为 200。
+- 最终连续 5 轮源站/公网 `/api/status` 均为 200；new-api、PostgreSQL、Redis、Caddy 均为 healthy/restart=0，应用 panic/fatal 为 0。
