@@ -204,8 +204,8 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 	if plan.ModelGroup == "" {
 		return "套餐模型分组不能为空"
 	}
-	if plan.ConcurrencyLimit != 1 && plan.ConcurrencyLimit != 2 {
-		return "并发限制必须为1或2"
+	if plan.ConcurrencyLimit <= 0 {
+		return "并发限制必须大于0"
 	}
 	if requestedLimit5hAmount < 0 || requestedLimit7dAmount < 0 {
 		return "套餐额度不能为负数"

@@ -166,8 +166,7 @@ export function SubscriptionsMutateDrawer({
     (isValuePackage && getValuePackageTotalLimitLabelKey(packageType)) ||
     'Received amount'
   const totalLimitDescriptionKey =
-    (isValuePackage &&
-      getValuePackageTotalLimitDescriptionKey(packageType)) ||
+    (isValuePackage && getValuePackageTotalLimitDescriptionKey(packageType)) ||
     '0 means unlimited. The value is converted to quota units when saved.'
   const durationUnit = form.watch('duration_unit')
   const resetPeriod = form.watch('quota_reset_period')
@@ -685,28 +684,17 @@ export function SubscriptionsMutateDrawer({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>concurrency_limit</FormLabel>
-                        <Select
-                          items={[
-                            { value: '1', label: '1' },
-                            { value: '2', label: '2' },
-                          ]}
-                          onValueChange={(value) =>
-                            field.onChange(Number(value))
-                          }
-                          value={String(field.value || 1)}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent alignItemWithTrigger={false}>
-                            <SelectGroup>
-                              <SelectItem value='1'>1</SelectItem>
-                              <SelectItem value='2'>2</SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type='number'
+                            min={1}
+                            step={1}
+                            onChange={(e) =>
+                              field.onChange(Number(e.target.value))
+                            }
+                          />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -760,9 +748,7 @@ export function SubscriptionsMutateDrawer({
                             />
                           </FormControl>
                           <FormDescription>
-                            {t(
-                              VALUE_PACKAGE_7D_PERIOD_LIMIT_DESCRIPTION_KEY
-                            )}
+                            {t(VALUE_PACKAGE_7D_PERIOD_LIMIT_DESCRIPTION_KEY)}
                           </FormDescription>
                           <FormMessage />
                         </FormItem>

@@ -1202,7 +1202,7 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageConfig(t *testing.
 
 	invalidConcurrencyPlan := missingLdxpPlan
 	invalidConcurrencyPlan.Title = "invalid concurrency"
-	invalidConcurrencyPlan.ConcurrencyLimit = 3
+	invalidConcurrencyPlan.ConcurrencyLimit = 0
 	invalidConcurrencyPlan.LdxpProductUrl = "https://ldxp.example.test/day"
 	invalidConcurrencyPlan.LdxpProductName = "Day product"
 	invalidConcurrencyPlan.LdxpProductAmount = 9.9
@@ -1400,7 +1400,7 @@ func TestAdminUpdateSubscriptionPlanPersistsValuePackageFields(t *testing.T) {
 	updated.PackageType = model.ValuePackageTypeMonth
 	updated.PackageLevel = model.ValuePackageLevelMonth
 	updated.ModelGroup = "month-card"
-	updated.ConcurrencyLimit = 2
+	updated.ConcurrencyLimit = 5
 	updated.Limit5hAmount = 2000
 	updated.Limit7dAmount = 8000
 	updated.Benefits = "month benefit"
@@ -1420,7 +1420,7 @@ func TestAdminUpdateSubscriptionPlanPersistsValuePackageFields(t *testing.T) {
 	assert.Equal(t, model.ValuePackageTypeMonth, persisted.PackageType)
 	assert.Equal(t, model.ValuePackageLevelMonth, persisted.PackageLevel)
 	assert.Equal(t, "month-card", persisted.ModelGroup)
-	assert.Equal(t, 2, persisted.ConcurrencyLimit)
+	assert.Equal(t, 5, persisted.ConcurrencyLimit)
 	assert.EqualValues(t, 2000, persisted.Limit5hAmount)
 	assert.EqualValues(t, 8000, persisted.Limit7dAmount)
 	assert.Equal(t, "month benefit", persisted.Benefits)

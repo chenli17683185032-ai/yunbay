@@ -54,7 +54,7 @@ export function getPlanFormSchema(t: TFunction) {
     package_type: z.enum(['day', 'week', 'month']).optional(),
     package_level: z.coerce.number().min(0).optional(),
     model_group: z.string().optional(),
-    concurrency_limit: z.coerce.number().min(1).max(2).optional(),
+    concurrency_limit: z.coerce.number().int().min(1).optional(),
     limit_5h_amount: z.coerce.number().min(0).optional(),
     limit_7d_amount: z.coerce.number().min(0).optional(),
     benefits: z.string().optional(),
@@ -193,11 +193,11 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
       limit_5h_amount: parseQuotaFromDollars(
         Number(values.limit_5h_amount || 0)
       ),
-      limit_7d_amount: isValuePackage && shouldExposeValuePackage7dPeriodLimit(
-        values.package_type
-      )
-        ? parseQuotaFromDollars(Number(values.limit_7d_amount || 0))
-        : 0,
+      limit_7d_amount:
+        isValuePackage &&
+        shouldExposeValuePackage7dPeriodLimit(values.package_type)
+          ? parseQuotaFromDollars(Number(values.limit_7d_amount || 0))
+          : 0,
       benefits: values.benefits || '',
       ldxp_product_url: values.ldxp_product_url || '',
       ldxp_product_name: values.ldxp_product_name || '',

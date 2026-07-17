@@ -62,6 +62,31 @@ test('value package plan schema requires positive total quota', () => {
   )
 })
 
+test('value package concurrency accepts custom positive integers', () => {
+  const schema = getPlanFormSchema(t)
+
+  for (const concurrencyLimit of [1, 2, 5]) {
+    const result = schema.safeParse({
+      ...PLAN_FORM_DEFAULTS,
+      title: '自定义并发套餐',
+      concurrency_limit: concurrencyLimit,
+    })
+    assert.equal(result.success, true)
+  }
+
+  for (const concurrencyLimit of [0, -1, 1.5]) {
+    const result = schema.safeParse({
+      ...PLAN_FORM_DEFAULTS,
+      title: '非法并发套餐',
+      concurrency_limit: concurrencyLimit,
+    })
+    assert.equal(result.success, false)
+    if (result.success)
+      throw new Error('expected invalid concurrency limit to fail')
+    assert.deepEqual(result.error.issues[0]?.path, ['concurrency_limit'])
+  }
+})
+
 test('month value package stage quota cannot exceed total quota', () => {
   const result = getPlanFormSchema(t).safeParse({
     ...PLAN_FORM_DEFAULTS,
@@ -126,7 +151,7 @@ test('value package limit fields convert dollars to quota payload', () => {
     package_type: 'day' as const,
     package_level: 1,
     model_group: 'day-card',
-    concurrency_limit: 1,
+    concurrency_limit: 5,
     limit_5h_amount: 100,
     limit_7d_amount: 500,
     ldxp_product_url: 'https://ldxp.example.test/day',
@@ -137,7 +162,7 @@ test('value package limit fields convert dollars to quota payload', () => {
   assert.equal(payload.plan.plan_kind, 'value_package')
   assert.equal(payload.plan.package_type, 'day')
   assert.equal(payload.plan.model_group, 'day-card')
-  assert.equal(payload.plan.concurrency_limit, 1)
+  assert.equal(payload.plan.concurrency_limit, 5)
   assert.equal(typeof payload.plan.limit_5h_amount, 'number')
   assert.equal(typeof payload.plan.limit_7d_amount, 'number')
   assert.equal(payload.plan.ldxp_product_url, 'https://ldxp.example.test/day')

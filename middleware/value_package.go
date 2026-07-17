@@ -72,15 +72,12 @@ return 0
 
 // valuePackageConcurrencyCounters is the fallback limiter used when Redis is
 // disabled. Production deployments with Redis enabled use a shared Redis slot
-// set so the 1-2 concurrency limit is enforced across app instances.
+// set so the configured concurrency limit is enforced across app instances.
 var valuePackageConcurrencyCounters sync.Map
 
 func normalizeValuePackageConcurrencyLimit(limit int) int {
 	if limit <= 0 {
 		return 1
-	}
-	if limit > 2 {
-		return 2
 	}
 	return limit
 }

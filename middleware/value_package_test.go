@@ -524,17 +524,22 @@ func TestValuePackageConcurrencyLimiter(t *testing.T) {
 	_, exists = valuePackageConcurrencyCounters.Load(9001)
 	require.False(t, exists)
 
-	releaseA, ok := acquireValuePackageMemorySlot(9002, 9)
+	releaseA, ok := acquireValuePackageMemorySlot(9002, 3)
 	require.True(t, ok)
-	releaseB, ok := acquireValuePackageMemorySlot(9002, 9)
+	releaseB, ok := acquireValuePackageMemorySlot(9002, 3)
 	require.True(t, ok)
-	releaseC, ok := acquireValuePackageMemorySlot(9002, 9)
+	releaseC, ok := acquireValuePackageMemorySlot(9002, 3)
+	require.True(t, ok)
+	releaseD, ok := acquireValuePackageMemorySlot(9002, 3)
 	require.False(t, ok)
-	require.Nil(t, releaseC)
+	require.Nil(t, releaseD)
 	releaseA()
 	_, exists = valuePackageConcurrencyCounters.Load(9002)
 	require.True(t, exists)
 	releaseB()
+	_, exists = valuePackageConcurrencyCounters.Load(9002)
+	require.True(t, exists)
+	releaseC()
 	_, exists = valuePackageConcurrencyCounters.Load(9002)
 	require.False(t, exists)
 }
@@ -631,6 +636,23 @@ func TestValuePackageRedisConcurrencyLimiter(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, release3)
 	release3()
+
+	customReleases := make([]func(), 0, 3)
+	for i := 0; i < 3; i++ {
+		release, acquired, acquireErr := acquireValuePackageSlot(9102, 3)
+		require.NoError(t, acquireErr)
+		require.True(t, acquired)
+		require.NotNil(t, release)
+		customReleases = append(customReleases, release)
+	}
+	deniedRelease, acquired, acquireErr := acquireValuePackageSlot(9102, 3)
+	require.NoError(t, acquireErr)
+	require.False(t, acquired)
+	require.Nil(t, deniedRelease)
+	for _, release := range customReleases {
+		release()
+	}
+	require.False(t, redisServer.Exists(valuePackageConcurrencyRedisKey(9102)))
 }
 
 func TestValuePackageMiddlewareDisabledPreferenceDoesNotForceGroup(t *testing.T) {
