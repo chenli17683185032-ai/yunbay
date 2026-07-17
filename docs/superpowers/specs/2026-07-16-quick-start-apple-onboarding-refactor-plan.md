@@ -829,7 +829,7 @@
 | 完整闭环计划 | 已完成 | 目标、边界、反馈点、发布边界已写入唯一计划文件 |
 | 测试约束与最小实现 | 已完成 | 三种输出均使用最新双路由正文，Key 与保存规则不变 |
 | 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
-| GitHub main | 进行中 | 只提交本轮三个目标文件并普通推送 |
+| GitHub main | 已完成 | 实现提交 `f27f1a05` 已普通推送 main |
 | 生产部署 | 未授权 | 不连接、不上传、不构建、不重启生产服务 |
 
 ### 17.6 实施验证记录
@@ -839,3 +839,4 @@
 - 精确字符串、脱敏预览和 Base64 解码三层测试先失败后通过；定向测试为 `9 pass / 0 fail`，Quick Start 全量为 `54 pass / 0 fail`。
 - `bun run typecheck`、定向 ESLint、Prettier、`git diff --check` 与 `bun run build` 全部通过；生产构建生成主入口 `index.76b18de830.js` 和 Quick Start chunk `4963.1f05d9fe68.js`。
 - 本轮目标差异仅为本计划、`quick-start-cc-switch.ts` 和对应测试；既有 `docs/yunbay-maintenance.md`、旧规格与 `outputs/` 保持原状。本轮没有连接或修改生产服务器。
+- 计划、实现与测试已作为 `f27f1a05` 普通 fast-forward 推送 GitHub `main`；生产部署继续保持未授权状态。
