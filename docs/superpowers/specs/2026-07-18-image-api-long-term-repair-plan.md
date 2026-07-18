@@ -116,7 +116,7 @@ Chat/Responses 误用基线均为 HTTP 500、`invalid_request`，可用于发布
 ### 5. 测试与观测
 
 - [x] 添加 Python/curl 的端到端合同探针（Node SDK 仍待补齐）。
-- [x] 添加 generations/edits、代理/直连和错误矩阵的无计费探针；单图/多图真实生图仍待受控执行。
+- [x] 添加 generations/edits、代理/直连和错误矩阵的无计费探针；用户随后确认至少一次真实生图成功，未记录凭证、Prompt 或图像内容。
 - [x] 发布后复核 `/v1/models`、Chat/Responses 误用、generations/edits 无效体均为预期 HTTP 合同；五个探针 Request-ID 未产生消费日志。
 - [ ] 每分钟免费探测 models；每日一次受控低成本 generation/edit。
 - [ ] 建立边缘 403、图片成功率、错误分类和重复扣费告警。

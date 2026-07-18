@@ -23,9 +23,14 @@
 
 ### 无计费线上验收
 
-- `/v1/models` HTTP 200 且包含 `gpt-image-2`；Chat/Responses 误用均为 HTTP 400、`invalid_request` 并提示 Images 路径；generations/edits 无效 JSON 均为 HTTP 400。响应保留 Cloudflare `CF-Ray` 与源站 `x-oneapi-request-id`，未执行真实 generation/edit。
+- `/v1/models` HTTP 200 且包含 `gpt-image-2`；Chat/Responses 误用均为 HTTP 400、`invalid_request` 并提示 Images 路径；generations/edits 无效 JSON 均为 HTTP 400。响应保留 Cloudflare `CF-Ray` 与源站 `x-oneapi-request-id`；这些无计费合同探针未执行真实 generation/edit。
 - 使用无效上游凭证取得真实 OpenAI 401 响应后，用本轮同一错误处理函数分类为 `auth_rejected`、`skip_retry=false`；没有把该响应注入生产渠道，因此没有触发自动禁用。五个线上无计费探针 Request-ID 在生产 `logs` 中消费记录为 `0`、额度合计为 `0`。
 - 旧 Key 对应 token ID `6`、`339`、`394` 复核均为 `status=1`。本轮没有禁用、删除、轮换或切换任何 Key；备用 Key 仍只存本机钥匙串。
+
+### 用户确认的真实生图
+
+- 2026-07-18 16:42（Asia/Shanghai），用户确认真实生图已成功返回。这证明至少一次实际 generation 已穿过 Cloudflare、Caddy、new-api、上游渠道和客户端闭环；未在记录中保存 Key、Prompt、Base64 或图片内容。
+- 多图、图生图/编辑和连续 24 小时成功率观测仍未宣称完成，继续按长期计划执行。
 
 回滚时使用本节成功备份中的 `existing-files.txt` / `new-files.txt`、固定 rollback 标签和同一部署锁/watchdog，只重建标准 `new-api`；不要重启 Caddy、数据库、Redis、Sub2API 或其它服务。
 
