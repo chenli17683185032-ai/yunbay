@@ -109,7 +109,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			logger.LogError(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, responseBodyPreview))
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
-		return
+		return classifyRelayError(resp, responseBody, newApiErr)
 	}
 
 	if common.GetJsonType(errResponse.Error) == "object" {
@@ -120,14 +120,14 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			if showBodyWhenFail {
 				newApiErr.Err = buildErrWithBody(newApiErr.Error())
 			}
-			return
+			return classifyRelayError(resp, responseBody, newApiErr)
 		}
 	}
 	newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	if showBodyWhenFail {
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}
-	return
+	return classifyRelayError(resp, responseBody, newApiErr)
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
