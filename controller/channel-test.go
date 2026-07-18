@@ -45,6 +45,11 @@ type testResult struct {
 
 func normalizeChannelTestEndpoint(channel *model.Channel, modelName, endpointType string) string {
 	normalized := strings.TrimSpace(endpointType)
+	if common.IsImageGenerationModel(modelName) {
+		// Image models have no chat/Responses fallback. Keep channel tests on
+		// the dedicated Images contract even when a stale UI selection is sent.
+		return string(constant.EndpointTypeImageGeneration)
+	}
 	if normalized != "" {
 		return normalized
 	}

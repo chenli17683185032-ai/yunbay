@@ -123,6 +123,9 @@ func GetAndValidateResponsesRequest(c *gin.Context) (*dto.OpenAIResponsesRequest
 	if request.Model == "" {
 		return nil, errors.New("model is required")
 	}
+	if err := validateNonImageEndpointModel(request.Model); err != nil {
+		return nil, err
+	}
 	if request.Input == nil {
 		return nil, errors.New("input is required")
 	}
@@ -137,7 +140,17 @@ func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIRespon
 	if request.Model == "" {
 		return nil, errors.New("model is required")
 	}
+	if err := validateNonImageEndpointModel(request.Model); err != nil {
+		return nil, err
+	}
 	return request, nil
+}
+
+func validateNonImageEndpointModel(modelName string) error {
+	if !common.IsImageGenerationModel(modelName) {
+		return nil
+	}
+	return fmt.Errorf("model %s is only available via POST /v1/images/generations or POST /v1/images/edits", modelName)
 }
 
 func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageRequest, error) {
@@ -169,7 +182,7 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 				imageRequest.Image, _ = common.Marshal(imageValue)
 			}
 
-			if imageRequest.Model == "gpt-image-1" {
+			if isGPTImageModel(imageRequest.Model) {
 				if imageRequest.Quality == "" {
 					imageRequest.Quality = "standard"
 				}
@@ -219,7 +232,7 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			if imageRequest.Size == "" {
 				imageRequest.Size = "1024x1024"
 			}
-		} else if imageRequest.Model == "gpt-image-1" {
+		} else if isGPTImageModel(imageRequest.Model) {
 			if imageRequest.Quality == "" {
 				imageRequest.Quality = "auto"
 			}
@@ -235,6 +248,10 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 	}
 
 	return imageRequest, nil
+}
+
+func isGPTImageModel(modelName string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(modelName)), "gpt-image-")
 }
 
 func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest, err error) {
@@ -276,6 +293,9 @@ func GetAndValidateTextRequest(c *gin.Context, relayMode int) (*dto.GeneralOpenA
 	}
 	if textRequest.Model == "" {
 		return nil, errors.New("model is required")
+	}
+	if err := validateNonImageEndpointModel(textRequest.Model); err != nil {
+		return nil, err
 	}
 	if textRequest.WebSearchOptions != nil {
 		if textRequest.WebSearchOptions.SearchContextSize != "" {
