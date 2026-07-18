@@ -1637,3 +1637,11 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - `EmailRegistrationBody` / `RegistrationConfigBody` 补齐 `moemail_base_url`、`cfmail_base_url`；此前 provider 切换会丢失 MoeMail host 并复用旧 YYDS 地址。55 项相关回归全部通过。
 - 服务器源码备份：`/home/deploy/grok-backups/20260718T133820-registration-host-fields-2b43e9e`；候选镜像只用于注册侧验证，禁止替换生产 API 镜像。
 - 注册侧回滚只停止/删除 canary 或 `grok-registration`，不停止 API、PostgreSQL、Redis、egress。生产 API 回滚继续使用固定 `20260718T040204-32bb09f-registration-isolation` 备份和原镜像标签，遵循 60 秒有界 watchdog。
+
+### 2026-07-18 14:53 显式单账号注册结果
+
+- 本次收到明确的“启动注册”指令后，只运行一次性 canary：`/home/deploy/grok-backups/20260718T145340-history-registration-canary`，候选镜像 `grokcli-2api:20260718-registration-host-fields-2b43e9e`；参数为 1 batch / 1 session / 并发 1 / 预取 0、`restart=no`、本地 Solver、自动维护关闭。
+- 注册成功导入 1 个账号，账号总数 `3738 -> 3739`；新账号单独 probe 为 `ok=true`、`pool_status=normal`、不在冷却。未启动常驻 producer，也未重建 API。
+- 注册 cgroup 峰值约 `1.405 GiB / 202 PID`，硬限 `1.5 GiB / 220 PID`；API 活跃期间真实 SSE `5/5`，API 全程 `healthy / restart=0 / OOM=0`。本次没有外部 YesCaptcha/YesChatUp 调用。
+- canary 产生的 3 个本轮专属 Redis session/index 键已精确删除为 0；注册容器、浏览器、锁和临时脚本均已清理。审计结果和脱敏 probe 输出保留在上述目录。
+- 发现运行时配置快照文件为空，未把它当作“已恢复”；已将当时配置另存为受限审计文件，并用上一轮 YYDS 基线快照手动恢复，复核当前配置为 `mail_provider=yyds`、`captcha_provider=local`、本机 Solver。后续任何 runner 必须在创建 session 前验证快照非空且恢复回读一致，否则立即停止。

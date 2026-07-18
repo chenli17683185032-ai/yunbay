@@ -65,7 +65,7 @@
 
 ## 回滚/熔断条件
 
-出现 API 5xx/连接失败、API 容器 unhealthy/restart/OOM、宿主机 load 持续异常、注册 cgroup 接近内存/PID 上限、批次状态缺少 `batch_id`、注册硬超时或上游连续失败时：立即停止注册 runner 和活动浏览器，释放其资源，保留 API 原容器不动；只有恢复基线后才允许再次单账号试验。
+出现 API 5xx/连接失败、API 容器 unhealthy/restart/OOM、宿主机 load 持续异常、注册 cgroup 接近内存/PID 上限、批次状态缺少 `batch_id`、注册硬超时、上游连续失败、配置快照为空或恢复失败时：立即停止注册 runner 和活动浏览器，释放其资源，保留 API 原容器不动；配置快照未验证前不得创建真实注册 session，只有恢复基线后才允许再次单账号试验。
 
 ## 当前进度
 
@@ -120,3 +120,23 @@
 
 - 本计划与 Grok 运维章节已作为提交 `745aa1cf` fast-forward 推送到 `yunbay/main`；暂存时只选择本轮两个文件，没有带入工作区原有计划、图像任务记录或 `outputs/`。
 - 下一次注册仍是新的显式控制动作：必须收到独立、明确的“注册”执行指令后才可启动，并继续从单账号档位运行。
+
+## 第四轮显式触发执行（2026-07-18 14:53 CST）
+
+目标：响应用户本次明确的“启动注册”指令，只增加一个可用账号；不恢复自动补量，不提高并发，不复用上一轮已清理的临时进程。
+
+- [x] 确认指令具有明确执行意图，并复核 API `healthy/restart=0/OOM=0`、注册容器为 0、宿主机资源余量充足。
+- [x] 从不可变候选镜像创建全新隔离 runner：1 batch / 1 session / 并发 1 / 预取 0、`restart=no`、独立 Redis 前缀、本地 Solver、自动维护关闭。
+- [x] 启动硬超时和资源 watchdog；越过注册软线、API 异常、批次状态异常或账号导入终态后，只停止并回收注册侧。
+- [x] 注册活跃期间执行真实 API 并发探针，确认 API 请求不因注册排队；记录脱敏资源峰值和结果。
+- [x] 核对账号总数变化及新账号单独测活，恢复临时配置并清理容器、浏览器、Redis 临时键和锁。
+- [x] 把本轮反馈同步到本计划、仓库运维记录和桌面唯一服务器手册，并只提交本轮必要文档到 GitHub `main`。
+
+### 第四轮结果
+
+- 运行目录：`/home/deploy/grok-backups/20260718T145340-history-registration-canary`；候选镜像为 `grokcli-2api:20260718-registration-host-fields-2b43e9e`。只创建一次性 `grok-registration-history-canary`，常驻 `registration-producer` 和 API 均未重启。
+- 注册结果为 `imported=true`，账号总数 `3738 -> 3739`；新账号单独测活返回 `ok=true`、`pool_status=normal`、`in_cooldown=false`。
+- 注册 cgroup 硬限为 `1 CPU / 1.5 GiB / 220 PID`；观测峰值约 `1.405 GiB / 202 PID`，未触及硬限。单次样本接近内存软线后回落，没有连续越线熔断，也没有 API 排队或 OOM。
+- 活跃期间真实 SSE probe 为 `5/5`，5 路均有业务成功、finish 和 `[DONE]`，最慢总耗时约 `4.12s`；API 始终 `healthy / restart=0 / OOM=0`。
+- 本次请求使用 `captcha_provider=local` 和本机 Solver，未调用外部 YesCaptcha/YesChatUp。临时 Redis 前缀曾产生 3 个 session/index 键，已按精确前缀删除为 `0`；容器、浏览器、锁和临时启动脚本均已回收。
+- 运行时配置自动快照为空，不能视为恢复成功；已将当前状态保留在审计目录，并用上一轮已验证的 YYDS 基线快照手动原样恢复。后续 runner 必须把“快照文件非空 + 恢复回读一致”设为注册前置条件，否则直接停止，不创建 session。
