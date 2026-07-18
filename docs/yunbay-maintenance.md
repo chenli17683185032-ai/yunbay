@@ -99,6 +99,66 @@
 - 最终 2 个 dangling images 仅约 5 小时，仍在 12 小时保护窗；7 个 exited containers 属于带挂载的旧 Grok 回滚栈。为稳定性与回滚能力主动保留这些对象及空旧网络。
 - 本轮没有执行 `docker system prune -a`、image/container/network prune、`docker volume prune`、备份/发布包删除、日志截断或 sudo 权限绕过。后续只有磁盘再次超过阈值并逐项确认引用关系时，才单独计划 tagged image、旧栈或备份保留策略。
 
+## 2026-07-16 生产部署文档纠偏计划（进行中）
+
+### 目标与稳定性指标
+
+- 消除把临时绿实例、临时 Caddyfile 和 Caddy Admin API 动态切流写成推荐发布/回滚路径的全部规范性文字。
+- 保留历史发布实际发生过的事实，但明确标注相关路径已经废止、只供事故审计，禁止复制执行。
+- 将唯一允许的 new-api 发布与回滚路径收敛为：Caddy 始终指向 `new-api:3000`，只用 Compose 有界重建标准 `new-api`，失败时在 1 分钟内回滚旧镜像。
+- 文档必须覆盖部署互斥锁、切换前置检查、有界 watchdog、自动回滚条件、成功判据和清理边界，避免任务中断后生产停留在中间态。
+- 本次只修正文档，不部署代码、不修改生产配置或业务数据。
+
+### 实施节点
+
+- [x] 全量盘点项目与桌面维护文档中的 `new-api-green`、临时 Caddyfile、Caddy 动态切流和绿实例回滚引用。
+- [x] 核对 GitHub 上 Docker Compose/Caddy 的配置、健康检查和有界部署经验，确认语法校验不能替代真实 upstream 连通性反馈。
+- [x] 在项目维护手册顶部建立唯一权威的部署/回滚规则，并将 502 事故后的建议从“加强蓝绿检查”改为“废止动态切流”。
+- [x] 修正历史发布章节：保留已发生的部署事实，同时为旧蓝绿流程加废止标记，并把所有未来回滚指令改成标准 Compose 重建。
+- [ ] 同步修正桌面唯一服务器连接手册，确保与仓库手册没有相互冲突的操作指令。
+- [ ] 修正快速启动实施计划，记录 `42f8c7dd` 生产部署已在切流阶段中止，禁止继续把旧路径称为“已验证”。
+- [ ] 全局搜索确认不再存在未加废止说明的绿实例/Caddy 动态切流建议；执行 Markdown 差异检查与 `git diff --check`。
+- [ ] 只提交本次跟踪文档并推送 GitHub `main`；保留并忽略用户已有未跟踪文件。
+
+### 验收条件
+
+- 任一维护者只阅读项目手册或桌面手册，都只能得到同一条可执行生产路径。
+- Caddy upstream 在部署前、中、后均固定为 `new-api:3000`，任何部署脚本不得调用 Caddy Admin API 改写主站 upstream。
+- 部署任务被中断、SSH 断开或候选镜像失败时，现网最多经历标准容器的有界重建窗口，不会无限停留在临时 upstream。
+- 历史文本中出现 `new-api-green` 时，邻近文字必须明确其为历史事实或已废止反例，不能被理解为当前操作手册。
+
+## new-api 生产发布唯一允许流程（2026-07-16 起强制执行）
+
+### 不变量与禁令
+
+- Caddy 的文件配置和运行时配置在发布前、中、后都必须指向固定 upstream `new-api:3000`。
+- 禁止为 new-api 发布或回滚创建 `new-api-green`、临时 Caddyfile，禁止通过 Caddy Admin API、`caddy reload` 或其它方式动态改写主站 upstream。
+- 禁止把 `caddy validate` 当作 upstream 可用性验证。Caddy 官方文档明确说明该命令只加载并 provision 配置、不会实际启动配置；它不能替代真实 HTTP 反馈。
+- 禁止用自由拼装的 `docker run` 候选容器承担生产流量，也禁止执行全栈 `docker compose down/up`。
+- 历史章节中的绿实例和 Caddy 动态切流只用于事故审计；即使某次历史发布成功，也不代表该路径仍获准复用。
+
+### 强制闭环
+
+1. 在同步、构建、重标记镜像或重建容器前，必须使用 `flock -n /var/lock/yunbay-new-api-deploy.lock` 获取单次部署锁；获取失败立即退出，不等待、不并发部署。
+2. 前置检查必须同时确认：标准 `yunbay-new-api` 为 healthy、Caddy 文件与运行时 upstream 均为 `new-api:3000`、首页和 `/api/status` 为 200。任一不满足都停止发布并先处理故障。
+3. 以当前**正在运行的容器镜像 ID**建立不可变回滚标签并验证标签可解析；不得只信任可变的 `yunbay-new-api:prod` 标签，因为失败的构建可能已经移动该标签。
+4. 构建和静态验证期间保持旧容器服务。正式切换只允许执行 Compose 标准服务重建：`up -d --no-deps --force-recreate --no-build new-api`，不修改或重启 Caddy、PostgreSQL、Redis、Sub2API 及其它无关服务。
+5. 切换前必须启动独立于 SSH 会话的服务器端 watchdog。watchdog 每秒检查容器健康、宿主机 `/api/status` 和公网 `/api/status`；标准服务在 45 秒内未恢复，或出现 exited/dead/unhealthy，必须自动把固定回滚镜像重新标记为 `prod` 并再次只重建 `new-api`。watchdog 自身最迟 60 秒结束，禁止无界等待。
+6. 只有 new-api healthy、Caddy healthy、首页与 `/api/status` 连续 5 次为 200、Caddy 运行时 upstream 仍为 `new-api:3000` 时才算发布成功。随后才能更新 `.yunbay-deploy-sha`、`.yunbay-source-manifest` 和运维记录。
+7. SSH 断开、操作者进程退出或验证失败都不得留下中间态；watchdog 必须完成自动回滚和失败退出。清理只限失败候选、临时环境与探针文件，不删除卷、数据库、回滚镜像或用户文件。
+
+### 回滚规则
+
+- 源码需要回退时，先按对应备份的 `existing-files.txt` / `new-files.txt` 恢复，再把预先固定的旧镜像标记为 `yunbay-new-api:prod`。
+- 回滚与发布使用同一个部署锁、同一个 60 秒 watchdog 和同一条 Compose 标准服务重建路径；Caddy upstream 始终保持 `new-api:3000`。
+- 回滚成功判据与发布相同。未连续通过健康反馈前，不得更新生产标记或宣布完成。
+
+### 参考经验
+
+- Caddy 官方命令文档：`caddy validate` 不会实际启动待验证配置，不能证明 upstream DNS 或 HTTP 可达：<https://github.com/caddyserver/website/blob/ea5f20c9442e9b3a96adae0ce546c8911ddcfb0c/src/docs/markdown/command-line.md#caddy-validate>。
+- Suna 的自托管更新器使用 `flock` 保证单飞、有限健康等待，并在新实例失败时保留旧实例：<https://github.com/kortix-ai/suna/blob/f5533c148994e39e295bf153a11a5fa0313299a2/apps/cli/src/self-host/assets/updater.sh>。
+- Super Productivity 的服务脚本同时检查容器状态与外部 HTTP，并用锁避免监控重叠：<https://github.com/super-productivity/super-productivity/blob/6f88775ea24a22d15deaa76fe6516e923394e033/packages/super-sync-server/scripts/health-alert.sh>。
+
 ## 2026-07-16 生产 502 故障处置与恢复记录（已完成）
 
 ### 目标与性能指标
@@ -128,7 +188,7 @@
 - 恢复动作：先验证正式 Caddyfile，再执行 `caddy reload` 热重载，运行时 upstream 立即恢复为 `new-api:3000`；没有重启 Caddy、new-api、数据库、Redis 或其它服务，额外切换中断低于 1 秒。
 - 清理动作：确认没有部署进程仍在运行且正式实例持续 healthy 后，删除未承载流量的失败候选容器 `yunbay-new-api-green`，避免后续名称冲突。
 - 恢复后 Caddy 为 healthy、restart=0，new-api 为 running/healthy、restart=0；首页与 `/api/status` 连续多轮返回 200，恢复后 Caddy 没有新增代理错误。
-- 后续 blue/green 发布必须先同时验证候选容器健康和 `docker exec yunbay-caddy getent hosts <upstream>` 成功，再允许 Caddy 切流；切流脚本还应设置有界 watchdog，若公开探针出现首次 5xx，立即热重载正式 Caddyfile。
+- 本事故之后正式废止 blue/green 与 Caddy 动态切流；后续发布和回滚只能使用上方“生产发布唯一允许流程”，Caddy 始终保持 `new-api:3000`。
 - 本地工作区已有与本次事故无关的未跟踪文件，本次处置未清理、未覆盖。
 
 ## 2026-07-12 模型价格同步手动编辑上线
@@ -1529,7 +1589,9 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 - 自动化结果：快速启动测试 `51 pass / 0 fail`，TypeScript typecheck、涉及文件 ESLint、Prettier、六语 i18n 同步、生产构建和 `git diff --check` 均通过。
 - Browser 在 `1280x720` 和 `390x844` 下完成交互、对齐、长文案、滚动区和减少动态效果验收，控制台 error/warn 为 0；本地生产入口为 `/static/js/index.4f358c87c4.js`。
 
-### 无中断部署
+### 历史部署记录（旧蓝绿流程已废止）
+
+> 以下内容只记录当时实际发生的发布过程，不是当前操作手册。临时绿实例、临时 Caddyfile 和 Caddy 动态切流已因 2026-07-16 全站 502 事故被禁止复制执行。
 
 本轮只精确、非删除式同步四个文件。生产与本地逐项 SHA-256 一致，哈希清单组合值为：
 
@@ -1559,14 +1621,14 @@ bundle sha256: 08c82ce58f3adb7fc781366b41beb37bd2a7e147d74303cbd7356a7e2ddca3b7
 bundle bytes: 3062829
 ```
 
-临时 Caddyfile 只替换唯一主站 upstream，先在容器内 `caddy validate`，再执行 `caddy reload` 平滑切到 `new-api-green:3000`。绿实例承载流量期间，只执行以下命令重建标准实例：
+历史事实：该次发布曾用临时 Caddyfile 将 upstream 切到 `new-api-green:3000`，再重建标准实例。`caddy validate` 当时只证明配置可加载，并未证明 upstream 可用；该步骤现已废止。标准实例当时使用的 Compose 命令如下，该命令本身仍属于当前允许的单服务重建动作：
 
 ```bash
 cd /opt/new-api/app
 docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate --no-build new-api
 ```
 
-标准实例达到 `healthy` 后，验证正式 `/etc/caddy/Caddyfile` 并再次 `caddy reload` 切回 `new-api:3000`。正式宿主机 Caddyfile SHA-256 始终为 `655d48c14d94372bf2383af094899fc3e3e8c54fe24b4476ba3ae7f887302388`；Caddy 容器 `8a961ee82d49a452d551e7f36cdcd8931ef844b3b8392f5a3761cc40a753735a` 的 ID、启动时间和 restart count 均未变化。Compose 审计确认 PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 和 worker 也没有重建或重启。
+历史上标准实例达到 `healthy` 后曾 reload 正式配置回 `new-api:3000`。正式宿主机 Caddyfile SHA-256 始终为 `655d48c14d94372bf2383af094899fc3e3e8c54fe24b4476ba3ae7f887302388`；Caddy 容器 `8a961ee82d49a452d551e7f36cdcd8931ef844b3b8392f5a3761cc40a753735a` 的 ID、启动时间和 restart count 均未变化。Compose 审计确认 PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 和 worker 也没有重建或重启。该历史 reload 不是未来发布步骤。
 
 ### 上线验收与清理
 
@@ -1578,7 +1640,7 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 
 ### 回滚
 
-回滚目录的 `existing-files.txt` 记录部署前已存在的两个文件，`new-files.txt` 记录本轮新增的两个动效模块。源码回滚时恢复备份 `source/` 中的既有文件，并删除部署前不存在的新增文件；镜像回滚使用 `yunbay-new-api:rollback-quick-start-motion-20260715T194510Z`。仍须采用本轮已经验证的绿实例与 Caddy graceful reload 流程，先让旧镜像候选达到 healthy 并切流，再重建标准 `new-api`，禁止直接中断服务，也禁止重启 PostgreSQL、Redis、Caddy、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库变更。
+回滚目录的 `existing-files.txt` 记录部署前已存在的两个文件，`new-files.txt` 记录本轮新增的两个动效模块。源码回滚时恢复备份 `source/` 中的既有文件，并删除部署前不存在的新增文件；镜像回滚使用 `yunbay-new-api:rollback-quick-start-motion-20260715T194510Z`。回滚必须遵循本文顶部唯一允许流程：固定旧镜像、保持 Caddy `new-api:3000` 不变，并在部署锁和有界 watchdog 保护下只重建标准 `new-api`。禁止重启 PostgreSQL、Redis、Caddy、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库变更。
 
 ## 2026-07-16 CC Switch Provider 与生图提示词两阶段导入上线
 
@@ -1592,12 +1654,14 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 - 浏览器初测发现英文长标签会把桌面网格列从 230px 撑到 310px；最终使用 `minmax(0, …)` 固定轨道并允许按钮正文在固定 48px 高度内平衡换行。1280x720 与 390x844 下切换前后宽高一致，无横向溢出、控制台错误或底栏遮挡。
 - 本地验证：快速启动测试 `53 pass / 0 fail`；TypeScript、涉及文件 ESLint、Prettier、六语 i18n 同步、生产构建与 `git diff --check` 均通过。六种语言 missing、extras、untranslated 均为 0。
 
-### 无中断部署
+### 历史部署记录（旧蓝绿流程已废止）
+
+> 以下内容只记录 `ee953c59` 当时的真实发布结果。绿实例和 Caddy 动态切流不再是获准的发布或回滚路径。
 
 - 精确、非删除式同步 11 个前端源码/测试/i18n 文件，本地与生产组合 SHA-256 均为 `9d66e3710df70ef1a2522224e2e0f75301995a9b8938b3769dc659c97f3dc26c`。
 - 回滚目录：`/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59`；旧镜像 `sha256:bd931400a56e9ad0b43c776bbffac26075267a91ac2362c596880b655a4857fa`，回滚标签 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`。
 - 新镜像：`sha256:3db9cb74a065b3aec8dbfae5919c038739c96bdf728b43794491b2fb86dbb91a`，发布标签 `yunbay-new-api:release-ee953c59`。候选绿实例达到 Docker `healthy` 后才切流，内部入口为 `/static/js/index.04106f6b05.js`。
-- 临时 Caddyfile 只把唯一 upstream 改为 `new-api-green:3000`，经 `caddy validate` 后 graceful reload。绿实例承载公网期间，标准 `new-api` 使用 Compose `--no-deps --force-recreate --no-build` 在 2 秒内重建；标准实例 healthy 后验证并 reload 正式 Caddyfile。
+- 历史上曾用临时 Caddyfile 把 upstream 改为 `new-api-green:3000`，随后重建标准 `new-api` 并切回；该动态切流步骤现已废止，不能从本记录复制执行。标准实例当时使用 Compose `--no-deps --force-recreate --no-build` 在 2 秒内重建。
 - 正式 Caddyfile SHA-256 始终为 `655d48c14d94372bf2383af094899fc3e3e8c54fe24b4476ba3ae7f887302388`。Caddy 容器 ID、启动时间和 restart=0 不变；PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 均未重启。
 
 ### 上线验收与清理
@@ -1609,7 +1673,7 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 
 ### 回滚
 
-源码回滚从 `/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59/source/` 恢复 `existing-files.txt` 中的 11 个文件；镜像回滚使用 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`。仍须先用旧镜像启动 healthy 绿实例、Caddy 平滑切流、重建标准 `new-api`，再切回正式 Caddyfile；禁止直接停止当前流量承载实例，也不要重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库迁移。
+源码回滚从 `/opt/new-api/backups/ccswitch-prompt-20260716T042219Z-ee953c59/source/` 恢复 `existing-files.txt` 中的 11 个文件；镜像回滚使用 `yunbay-new-api:rollback-ccswitch-prompt-20260716T042219Z`。回滚必须保持 Caddy `new-api:3000` 不变，在部署锁和有界 watchdog 保护下只重建标准 `new-api`；不要重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP 服务。本轮没有数据库迁移。
 
 ## 2026-07-16 快速启动确认顺序与独立生图提示词预览上线
 
@@ -1645,6 +1709,45 @@ docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.y
 ### 回滚
 
 回滚必须继续使用本文顶部唯一允许流程：获取 `/var/lock/yunbay-new-api-deploy.lock`，把 `yunbay-new-api:rollback-quick-start-confirm-order-20260716T131718Z` 重标为 `yunbay-new-api:prod`，从成功回滚目录恢复 `existing-files.txt` 中的 12 个文件，并在独立 watchdog 保护下只执行 Compose `--no-deps --force-recreate --no-build new-api`。Caddy upstream 始终保持 `new-api:3000`；禁止重启或修改 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP 服务。
+
+## 2026-07-16 快速启动再次导入悬停详情上线
+
+本轮把 Provider 已确认后的重复大面板和完成条合并：默认只显示圆形完成标记与灰色“再次导入”，悬停或键盘聚焦时按钮变亮，API、模型、脱敏 Key 与思考强度从完成条内弹性展开；移出组合区或失焦后回弹收起。再次导入保持 `importConfirmed=true`，下方生图设置不会消失。
+
+### 发布内容与验证
+
+- 功能提交：`7bc5e4e7b5ad67969bae0961b0a580670d206382`；后续 `f49f680a` 只收尾计划，不改变镜像内容。
+- 生产从 `f7839a9d5236130590df6c8044978a0f1c729382` 精确、非删除式同步 `index.tsx` 与对应源码测试两文件；本地和生产逐文件 SHA-256 一致，清单 SHA-256 为 `67e721d3008b56be4e554cce3e586079c2000c8f696cbdf05c64ed9c0ba78a5c`。
+- 本地验证为 54 项快速启动测试全部通过，TypeScript、定向 ESLint、Prettier、六语言同步和生产构建通过；1280x720、390x844、键盘及 reduced-motion 浏览器闭环通过。
+- 生产主入口 `/static/js/index.2f46b5d28b.js`：SHA-256 `e2d4051761dfc4a567343fca9cf4411edf125aaa2ddc9abaaf00584de8b7b3e3`，字节数 `3064387`。quick-start chunk `/static/js/async/4963.80d86e7db9.js`：SHA-256 `a095fd82e7bdd86a943d0b3e1ea8e45eccc0927e3f2db5c4b4bdb2308f095fea`，字节数 `46803`；生产重新下载结果与本地构建完全一致。
+
+### 固定 upstream 部署结果
+
+- 发布前确认标准 `new-api`/Caddy healthy，Caddy 文件、挂载及运行时 upstream 都只有 `new-api:3000`，无绿实例。锁为 `/var/lock/yunbay-new-api-deploy.lock`，切换使用独立 60 秒 watchdog；全程未创建绿实例、临时 Caddyfile或调用 Caddy reload/Admin API。
+- 首次执行完成构建，新镜像 `sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d0e` 已固定为 `yunbay-new-api:release-7bc5e4e7`。新容器约 11 秒 healthy，但验证器误把 Rsbuild 的 `4963:"80d86e7db9"` chunk map 当成完整文件名，主动触发 watchdog；旧源码、旧标记和旧镜像均自动恢复，旧实例重新 healthy/200，没有卡住等待人工输入。
+- 修正验证器后重新获取锁、建立新备份并复用同一不可变镜像，不重复构建。最终标准容器 `9d893d41557a2a33e32ee2e09ec45350eae349e600c46bf2915f9b06589ae81b` 在约 12 秒内 healthy，restart count 为 0；watchdog 结果为 `success`。
+- 成功切换的一秒探针为 8 次 502 后连续 12 次 200。Caddy 日志中的 502 从 `14:51:20.124Z` 到 `14:51:28.615Z`，约 8.49 秒，共 44 个请求：4 个标准服务名在替换瞬间的 Docker DNS 抖动、39 个新进程监听前的 connection refused、1 个旧连接关闭。14:51:29 起持续恢复 200，Caddy 本身没有重启或改配置。
+- 最终远端连续 10 轮确认宿主机 `/api/status` 和公网 `/`、`/quick-start`、`/api/status` 全部为 200；新应用严重启动日志为 0。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy 与 worker 的容器 ID、启动时间和 restart count 在最终切换前后完全一致，无 `new-api-green`。
+- `.yunbay-deploy-sha` 与 `.yunbay-source-manifest` 已原子更新到功能提交、两文件清单、新镜像和部署时间。本轮没有数据库迁移，没有修改业务数据、生产环境变量、Caddy 或其它服务。
+
+### 回滚与审计
+
+成功回滚目录：
+
+```text
+/opt/new-api/backups/quick-start-reimport-hover-20260716T145117Z-7bc5e4e7
+```
+
+固定镜像：
+
+```text
+release: yunbay-new-api:release-7bc5e4e7
+rollback: yunbay-new-api:rollback-quick-start-reimport-20260716T145117Z
+old image: sha256:b7af515bac4bfc28de155fa08dfd4f15a2e7f6d2d36d74837c9fcd2b9955472c
+new image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d0e
+```
+
+首次验证器失败备份 `/opt/new-api/backups/quick-start-reimport-hover-20260716T144138Z-7bc5e4e7` 及对应 rollback 标签保留用于审计。需要回滚时，必须获取同一部署锁，从成功回滚目录恢复 `existing-files.txt` 中的两文件，把成功 rollback 标签重标为 `yunbay-new-api:prod`，并在独立 watchdog 保护下只执行 Compose `--no-deps --force-recreate --no-build new-api`。Caddy upstream 始终保持 `new-api:3000`；禁止重启或修改 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP 服务。
 
 ## 2026-07-17 快速启动单一导入条与生图下一步上线
 
@@ -1726,3 +1829,24 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - 实测注册侧峰值约 `1.572 GiB / 208 PID`，API+注册合计约 `2.361 GiB`，内存明显未到 5 GiB 上限；但主机 CPU idle 最低 `18%`，低于 25% 守门线，watchdog 以 `host_cpu_guard` 停止注册。
 - 账号数保持 `3739`，没有导入账号；API 期间 SSE `5/5`，API `healthy / restart=0 / OOM=0`。配置恢复回读为 `restored_verified`，6 个本轮 Redis 临时键已精确清理为 0。
 - 当前生产注册并发保持 1。两路若要再次评估，必须先降低单路 CPU 配额或增加 vCPU；禁止仅因内存尚有余量而直接放开两路。
+
+## 2026-07-19 Grok 永久 refresh 失败收敛与最终 API 稳态
+
+### 修复与发布
+
+- 根因闭环：20 个已持久化 `refresh_invalid=true` 的账号此前在维护扫周期中被重复处理；PostgreSQL 全量账号缓存的并发失效竞态已由 `c84b1f3` 修复。随后 `e7de8cf` 让软清理对已标记账号直接跳过，`8035dba` 修正维护指标，`f6e87e2` 让空扫立即使用基础等待间隔。
+- 最终镜像：`grokcli-2api:20260719-refresh-control-f6e87e2`，digest `sha256:4e4cf2954828b7d4bed3c3da035fc77dfc6e43275d63616a77b9181f7deef804`。部署备份：`/home/deploy/grok-backups/20260718T201019Z-refresh-control-f6e87e2/`；固定回滚标签记录在该目录 `deploy.meta`。通过 `/var/lock/grokcli-adaptive-deploy.lock` 和独立 watchdog 只重建 `grokcli-2api`，watchdog=`success`。
+- 最终 API 容器：`f5a89c8daea5504da4220eb928ef0f84eae97665b1cb420b6fe8dbeba579a04e`，`healthy / restart=0 / OOM=false`。PostgreSQL、Redis、egress、New API、Caddy、Sub2API、CLI Proxy 和 LDXP 容器均未因本轮重启。
+
+### 运行时稳态
+
+- Token 维护已恢复：`token_maintain_enabled=true`、leader `running=true`；正常周期 `refreshed=5 / attempted=5 / failed=0`，随后无候选空扫为 `refreshed=0 / attempted=0 / failed=0 / deleted=0 / terminal_skip=20`，`next_wait=90s`。20 个终态账号不再调用上游 refresh，也不重复写 PG。
+- 数据不变量保持：账号总数 `3739`，`refresh_invalid=20`，账号池 `enabled=3682 / disabled=57`；没有硬删除、账号数漂移或新的 invalid_grant 风暴。
+- 模型健康后台已明确暂停（`model_health_enabled=false / running=false`），原因是重启后全量严格 sweep 会长时间占用维护锁并挤压 API；这不影响真实请求的账号选择和 SSE 反馈。注册自动维护仍关闭，注册 worker、浏览器和邮箱 session 均未运行。
+- 最终维护开启状态下 5 路真实 SSE 为 `5/5`，每路均有业务内容、finish frame 和 `[DONE]`；`api_guard` 服务端 `local p95=334ms`、错误率 `0`。API 容器约 `441 MiB / 49 PID`，宿主机可用内存约 `5.6 GiB`，无 panic/fatal/OOM；Redis 在途租约键为 `0`。
+
+### 以后操作边界
+
+- 不要把 `GROK2API_TOKEN_MAINTAIN=1` 当作运行时开关；以管理 API 返回的持久化 `token_maintain_enabled` 和 leader 状态为准。多 worker 切换后若请求命中非 leader，重复一次幂等开关请求直到 `local_running=true`，确认 leader 已真正接管。
+- 不要直接恢复模型健康全量 sweep 或自动注册来“补数据”。注册仍需新的独立“注册”执行指令，先单账号、并发 1、预取 0；两路试验曾触发 CPU idle 守门线，不得只按内存余量提档。
+- 回滚只使用上述备份中的固定旧镜像，在同一部署锁和 watchdog 内只重建 `grokcli-2api`；禁止回滚 PostgreSQL/Redis Volume、账号数据或其它服务。

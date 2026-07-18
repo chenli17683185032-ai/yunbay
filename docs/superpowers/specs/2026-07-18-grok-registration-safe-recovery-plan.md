@@ -174,3 +174,85 @@
 - CPU idle 最低 `18%`，连续低于用户批准的 `25%` 阈值，watchdog 以 `host_cpu_guard` 立即停止注册侧；账号数保持 `3739`，没有导入账号，也没有提高并发重试。
 - API 活跃期间真实 SSE probe 为 `5/5`，API 始终 `healthy / restart=0 / OOM=0`；配置恢复 `restored_verified`，本轮 6 个 Redis 临时键已删除为 `0`。
 - 结论：当前主机在“至少保留 25% CPU”约束下，生产安全并发仍为 **1 路**。两路不是内存装不下，而是 CPU 余量不成立；需要更低的单路 CPU 配额或更多 vCPU 后才能重新评估。
+
+## 第六轮 API 延迟反馈与自适应注册控制器（2026-07-18）
+
+本轮把用户的两个结果目标合成一条可观测闭环：前台请求优先使用有足够新鲜反馈的低 TTFT 账号，后台注册只在宿主机和 API 都有余量时逐档增加并发。注册默认仍从 1 路开始；任何指标越线只降低注册档位或停止注册，不影响 API 容器。
+
+### 目标与硬约束
+
+- API：真实请求的本地 `pick + local` p95 目标小于 `500ms`；账号选择不等待全量探测，不在请求路径同步探测全部账号；上游慢必须在 `up_hdr/up_tok` 中单独可见。
+- 注册：主机 `MemAvailable` 不得低于约 `3.0 GiB`（约 37%），CPU idle 不得连续低于 `25%`；API 必须保持 `healthy`、restart/OOM 不增加。
+- 注册 cgroup 保留内存、PID、CPU 硬上限；预取固定为 0；批次必须有 `batch_id`，配置快照必须非空且恢复回读一致。
+- 自动调档必须有冷却窗口和连续稳定样本；不允许一次性从 1 路跳到高并发，也不允许因注册失败自动重试提档。
+
+### 控制结构
+
+1. **API 延迟反馈**：真实 SSE 首 token 和后台模型探测首 token 分别写入按模型 EWMA；样本带时间新鲜度和成功/失败信息。选路只读取有界 ZSET 窗口，至少有 8 个不同账号反馈才启用快速窗口，每五个请求保留一次全池探索。
+2. **注册资源控制器**：每个采样周期读取宿主机 CPU idle、`MemAvailable`、注册 cgroup memory/PID/OOM、API health/restart/OOM，以及 API 本地 TTFT p95。稳定窗口内按 `1 -> 2` 的固定档位试探；任一越线立即停止活动批次并退回 1 路，连续故障则保持停机冷却。
+3. **安全执行器**：注册 worker 只创建一个有界 batch，维护心跳和租约；停止、超时、异常和进程退出都调用统一清理。API 与注册使用不同容器和资源配额，注册 worker 不拥有 API 端口或 `new-api` 网络。
+
+### 实施节点
+
+- [ ] 节点 1：在同一个代码分支补充模型探测 TTFT 反馈、延迟样本 TTL/错误惩罚和健康状态字段，增加回归测试。
+- [ ] 节点 2：实现资源采样器与自适应注册档位状态机，默认 `1` 路、预取 `0`，补充越线降档、稳定升档、API 异常熔断测试。
+- [ ] 节点 3：本地运行定向测试、Python 编译、Compose 校验和静态差异；构建候选镜像但不切换生产。
+- [ ] 节点 4：在服务器执行只读基线和隔离 canary；先 1 路稳定窗口，再最多尝试 2 路，CPU idle/内存/API 任一越线立即停止。
+- [ ] 节点 5：通过真实 SSE、账号导入、资源峰值和清理验收后，才部署 API 侧候选；自动注册保持关闭，除非新的明确执行指令批准 canary。
+- [ ] 节点 6：把结果、镜像摘要、回滚目录和本地/服务器运维记录写回本计划与唯一维护手册，并只提交本轮必要文件到 `main`。
+
+### 失败判据与回滚
+
+- API 本地 p95 连续越过 `500ms`、CPU idle 连续低于 `25%`、`MemAvailable < 3.0 GiB`、注册 cgroup 越过软线、OOM/restart 增加、SSE 失败或批次契约异常：立即停止注册侧，保留 API 容器不动。
+- 延迟路由 Redis 不可用时降级为现有轮询，不得把 Redis 故障放大为 API 故障；样本过少或过期时不启用快速窗口。
+- 候选部署仅允许在有界 watchdog 和部署锁内重建 `grokcli-2api`；失败在 60 秒内恢复固定旧镜像。不得回滚 PostgreSQL、Redis、账号数据或其它服务。
+
+## 第七轮永久 refresh 失败重试风暴修正（2026-07-19）
+
+注册 canary 前置检查发现，API leader 持续对同一批 20 个已撤销 refresh token 发起续期：单个 API worker 长时间占用约 56% CPU，维护周期重复输出 `invalid_grant`。注册 worker 全程未启动；为立即降低负载，已通过运行时设置暂停 Token 自动续期，不停止 API、不删除账号。
+
+### 根因假设与证据
+
+- PostgreSQL 中 20 条账号均已持久化 `payload.refresh_invalid=true`，对应 `account_pool.enabled=false`，说明永久失败识别和禁用动作本身成功。
+- `store/accounts_pg.read_auth_map()` 在缓存未命中时先释放缓存锁再读取数据库。若永久标记事务在这次读取期间提交并执行缓存失效，旧读取仍可能随后把提交前快照重新写回进程缓存；同一维护周期的 `refresh_all_accounts()` 因而再次选择已标记账号。
+- PostHog 的 OAuth refresh sweep 同样把无限重试永久失败视为资源与可观测性故障：对 `invalid_grant` 使用有界重试后进入 terminal，后续 sweep 直接跳过。参考：<https://github.com/PostHog/posthog/blob/266a72955d657afc02cccef4c11b56bac56022fe/posthog/models/integration.py#L93-L177>。
+
+### 目标与不变量
+
+- 已提交的账号变更之后，旧数据库快照不得重新进入进程缓存；`refresh_invalid` 账号在任何后台周期都不得再次调用上游 refresh endpoint。
+- 修复只收紧 PostgreSQL 全量账号缓存的一致性，不改变账号数据结构、硬删除策略、正常 token 刷新、API 选路或注册参数。
+- 自动续期恢复前必须证明：竞争回归可重复通过、永久失败被跳过、API 本地 p95/5 路 SSE 正常、CPU idle 恢复到 25% 以上且无 OOM/restart。
+- 注册继续保持关闭；只有 API 维护负载稳定后，才重新执行单路 canary。
+
+### 实施节点
+
+- [x] 节点 1：增加可控线程竞争回归，复现“旧全量读取在失效后回填缓存”，并断言下一次读取看到提交后的 `refresh_invalid`。
+- [x] 节点 2：对 `accounts_pg.read_auth_map()` 做最小同步修正，确保数据库读取、缓存发布与失效之间有明确顺序；补充已标记账号不进入 refresh 候选的行为测试。
+- [x] 节点 3：运行定向测试、既有 64 项相关回归、Python 编译、Compose 校验和静态差异；确认没有扩大请求路径锁范围到 Redis/上游网络。
+- [x] 节点 4：构建候选镜像并使用部署锁、固定回滚镜像和服务器端 watchdog 仅重建 API 容器；其它服务不重启。
+- [x] 节点 5：先保持自动续期关闭做真实 SSE/资源基线，再恢复自动续期一次；确认 20 条终态账号为 skipped、CPU 回落、正常账号可刷新。
+- [ ] 节点 6：API 稳定后重跑单路注册 canary；任一 guard 越线立即只停止注册侧，随后更新唯一运维手册并提交必要文档。
+
+### 节点 4 部署与停续期基线（2026-07-19）
+
+- 候选镜像 `grokcli-2api:20260719-refresh-cache-c84b1f3` 在服务器端构建；镜像内 66 项回归、Python 编译和 Compose 校验通过。
+- 通过 `/var/lock/grokcli-adaptive-deploy.lock` 和独立 watchdog 只重建 `grokcli-2api`。PostgreSQL、Redis、egress 及其它容器未重启；备份目录为 `/home/deploy/grok-backups/20260719T031651-refresh-cache-c84b1f3/`。
+- 切换后 API `healthy / restart=0 / OOM=false`，镜像 digest 为 `sha256:129a15c06c29b3ec0aeee1ce4eede985a02f26e079444a5cb589efc5b1b9454e`。宿主机 `MemAvailable` 约 `5.59 GiB`，API 空闲约 `435 MiB / 40 PID`。
+- 运行时设置仍为 `token_maintain_enabled=false`，维护线程 `running=false`；环境变量中的 `GROK2API_TOKEN_MAINTAIN=1` 只作启动默认值，不覆盖已持久化的运行时开关。注册自动维护为关闭、注册并发为 1、预取为 0。
+- 新鲜 5 路真实 SSE 为 `5/5`：全部 HTTP 200、首数据帧、业务内容和 `[DONE]` 完整；API guard 收到 5 个样本，服务端 `local p95=108ms`、错误率 `0`。该基线满足恢复续期前的 API 可用性门槛。
+
+### 节点 5 首轮恢复观察（2026-07-19）
+
+- 通过运行中的管理 API 恢复 `token_maintain_enabled=true`；注册自动维护仍为关闭，未创建注册容器或邮箱会话。
+- 首轮及后续有界批次均为正常账号 `attempted=80 / refreshed=80 / failed=0 / invalidated=0`；`purge(dry_run)` 返回 `already_invalid=20 / would_disable=0`，证明终态账号没有再次写 PG 或请求上游 refresh。
+- 维护器运行期间 API 容器约 `0.5 GiB / 55 PID`，短时 CPU 峰值约 `71%`（不足 1 个主机核心）；宿主机 load 约 `0.46`，`MemAvailable` 约 `5.5 GiB`。5 路真实 SSE 再次为 `5/5`，服务端 `local p95=248ms`、错误率 `0`。
+- 发现旧维护日志把 `skipped(reason=refresh_invalid)` 计入 `invalidated`，显示为 `deleted=20`；数据库账号数和 `refresh_invalid=20` 未变化，没有实际删除。下一补丁将终态跳过与真实永久失败分开统计，并让无候选空扫使用基础间隔，避免误报和不必要的 30 秒轮询。
+
+### 节点 5 收口与最终候选（2026-07-19）
+
+- 提交 `e7de8cf` 让已标记 `refresh_invalid` 的账号在软清理中直接 `skipped`；提交 `8035dba` 将终态跳过与真实永久失败分开计数；最终提交 `f6e87e2` 让当前空扫结果直接参与等待计算，并把 `terminal_skipped` 纳入健康摘要。服务器端 71 项完整回归及候选容器回归均通过。
+- 最终镜像 `grokcli-2api:20260719-refresh-control-f6e87e2`，digest `sha256:4e4cf2954828b7d4bed3c3da035fc77dfc6e43275d63616a77b9181f7deef804`；部署备份 `/home/deploy/grok-backups/20260718T201019Z-refresh-control-f6e87e2/`，切换只重建 API，watchdog 标记为 `success`。最终容器 `f5a89c8daea5504da4220eb928ef0f84eae97665b1cb420b6fe8dbeba579a04e`，`healthy / restart=0 / OOM=false`。
+- Token 维护恢复后实测日志为 `refreshed=5 attempted=5 failed=0 deleted=0 terminal_skip=20`；随后空扫为 `refreshed=0 attempted=0 failed=0 deleted=0 terminal_skip=20`，健康摘要 `next_wait=90s`。PostgreSQL 账号总数保持 `3739`，`refresh_invalid=20`、pool `enabled=3682 / disabled=57`，没有删除或重复标记。
+- 模型健康后台在重启后的长 sweep 会占用维护锁；为保证 API 优先，运行时已设 `model_health_enabled=false` 且 `running=false`。Token 维护为 `enabled=true / running=true`，注册维护仍 `enabled=false / running=false`。这是有意的低资源稳态，不恢复自动注册。
+- 最终维护开启状态下再跑 5 路真实 SSE 为 `5/5`，均有业务内容、finish 和 `[DONE]`；`api_guard` `local p95=334ms`、错误率 `0`。API 容器约 `441 MiB / 49 PID`，宿主机 `MemAvailable` 约 `5.6 GiB`，无 panic/fatal/OOM；Redis 在途租约键为 `0`，注册状态仅保留长期状态键，无活动 runner。
+- 节点 6 仍保持未执行：本轮没有新的独立“注册”执行指令，因此不创建邮箱/session、不启动注册容器；安全注册并发继续固定为 1。只有新的明确触发才从单账号 canary 开始。
