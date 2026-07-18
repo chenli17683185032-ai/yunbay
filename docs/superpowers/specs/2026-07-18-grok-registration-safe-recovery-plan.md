@@ -140,3 +140,8 @@
 - 活跃期间真实 SSE probe 为 `5/5`，5 路均有业务成功、finish 和 `[DONE]`，最慢总耗时约 `4.12s`；API 始终 `healthy / restart=0 / OOM=0`。
 - 本次请求使用 `captcha_provider=local` 和本机 Solver，未调用外部 YesCaptcha/YesChatUp。临时 Redis 前缀曾产生 3 个 session/index 键，已按精确前缀删除为 `0`；容器、浏览器、锁和临时启动脚本均已回收。
 - 运行时配置自动快照为空，不能视为恢复成功；已将当前状态保留在审计目录，并用上一轮已验证的 YYDS 基线快照手动原样恢复。后续 runner 必须把“快照文件非空 + 恢复回读一致”设为注册前置条件，否则直接停止，不创建 session。
+
+## 第四轮文档收尾
+
+- 本轮恢复结果和运维记录已作为提交 `da401a11` fast-forward 推送到 `yunbay/main`；本地其他未提交文件保持原样。
+- 当前生产仍处于 API-only 稳态，注册 worker 已清理；下一次仍需新的独立“注册”执行指令，并先通过非空配置快照与回读校验。
