@@ -48,9 +48,11 @@ Chat/Responses 误用基线均为 HTTP 500、`invalid_request`，可用于发布
 - [x] 为边缘拦截、鉴权拒绝、路由不匹配、上游策略、限流和载荷超限定义稳定错误码。
 - [x] 在已有 `RelayErrorHandler` 中按状态码、Content-Type、Cloudflare 标记和错误正文进行保守分类。
 - [x] 添加错误合同测试和 race 回归；边缘/载荷错误跳过重试，429 保持可重试，401/404/策略错误保留现有跨渠道 failover 行为。
-- [ ] 发布分类器并用真实上游响应验证日志、客户端错误字段和渠道自动禁用边界。
+- [x] 定位首次生产部署在切换前失败的根因：部署器把新增的 `service/error_classification.go` 误列为既有文件，备份断言主动停止；没有构建、容器重建或流量切换。
+- [x] 将部署器拆分为 `existing-files.txt` 与 `new-files.txt`，回滚时恢复既有文件并删除本轮新增文件；同时为前置断言增加命名日志和 HTTP 200 短重试。
+- [x] 发布分类器并用真实上游 401 响应验证 `auth_rejected` 分类；线上无计费探针确认错误字段、CF-Ray/Request-ID 和消费日志为零，未触发渠道自动禁用。
 
-本循环只增加错误可观测性和两个明确不可重试边界，不改变渠道选择、计费、Key 状态或有效生图行为。
+本循环只增加错误可观测性和两个明确不可重试边界，不改变渠道选择、计费、Key 状态或有效生图行为。真实上游 401 只在本地用生产同版本函数复核，未把无效凭证注入生产渠道；生产自动禁用边界由 `ShouldDisableChannel` 的既有逻辑和 `skip_retry` 回归确认。
 
 ### 0. 基线与凭证安全
 
@@ -95,10 +97,10 @@ Chat/Responses 误用基线均为 HTTP 500、`invalid_request`，可用于发布
 
 - [ ] 在项目自有客户端提供可配置稳定 User-Agent 兜底；不把伪装 curl 作为长期依赖。
 - [ ] 透传/记录 CF-Ray 与 Request-ID（脱敏）。
-- [ ] 统一 edge_blocked/auth_rejected/route_mismatch/upstream_policy/rate_limited/payload_too_large 分类。
-- [ ] 只对 429/可恢复 5xx 重试，避免重复生图扣费。
+- [x] 统一 edge_blocked/auth_rejected/route_mismatch/upstream_policy/rate_limited/payload_too_large 分类。
+- [x] 只对 429/可恢复 5xx 重试，边缘拦截和载荷超限不重试，避免重复生图扣费。
 
-本轮已发布的代码将图像模型误用 `/v1/chat/completions` 或 `/v1/responses` 的本地校验响应固定为 HTTP 400、`invalid_request` 且不重试；边缘 403、源站鉴权和上游策略分类仍待后续统一。发布切换窗口约 8 秒，watchdog=`success`。
+本轮已发布的代码将图像模型误用 `/v1/chat/completions` 或 `/v1/responses` 的本地校验响应固定为 HTTP 400、`invalid_request` 且不重试；边缘 403、源站鉴权和上游策略已纳入统一分类。发布切换窗口约 8 秒，watchdog=`success`；分类器发布切换窗口约 8 秒，watchdog=`success`。
 
 放行条件：错误响应能指导下一步，不再出现无上下文的通用 PermissionDeniedError。
 
@@ -115,6 +117,7 @@ Chat/Responses 误用基线均为 HTTP 500、`invalid_request`，可用于发布
 
 - [x] 添加 Python/curl 的端到端合同探针（Node SDK 仍待补齐）。
 - [x] 添加 generations/edits、代理/直连和错误矩阵的无计费探针；单图/多图真实生图仍待受控执行。
+- [x] 发布后复核 `/v1/models`、Chat/Responses 误用、generations/edits 无效体均为预期 HTTP 合同；五个探针 Request-ID 未产生消费日志。
 - [ ] 每分钟免费探测 models；每日一次受控低成本 generation/edit。
 - [ ] 建立边缘 403、图片成功率、错误分类和重复扣费告警。
 
@@ -123,6 +126,7 @@ Chat/Responses 误用基线均为 HTTP 500、`invalid_request`，可用于发布
 ### 6. Canary 发布与运维收尾
 
 - [x] 先发布源站代码/测试，再启用 Cloudflare canary 规则。（源站代码已发布；规则已保存并补齐 SBFM 阶段）
+- [x] 发布错误分类器：生产镜像 `sha256:f16936c20ddf6f16eefc3c1581efd31b9586f7a1bbf8bad8df7d5e70ca089f8b`，备份 `/opt/new-api/backups/image-error-classification-20260718T080814Z-b119464b`，watchdog=`success`。
 - [ ] 观察 30 分钟后逐步放量，失败自动回滚。（代码已发布；Cloudflare canary 的持续观测仍待完成）
 - [x] 生产部署后更新唯一 `docs/yunbay-maintenance.md` 运维记录。
 - [ ] 轮换旧 Key（备用 Key 已创建并验证；旧 Key 已恢复启用，切换暂停，必须等待用户明确批准）。

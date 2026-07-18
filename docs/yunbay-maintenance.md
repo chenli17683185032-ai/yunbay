@@ -2,6 +2,33 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-18 上游错误分类上线
+
+### 变更与安全边界
+
+- 本轮提交 `b119464b6e0739c7514369381056f9dc610c167f` 增加 `edge_blocked`、`auth_rejected`、`route_mismatch`、`upstream_policy`、`rate_limited` 和 `payload_too_large` 六个稳定错误码；`RelayErrorHandler` 按状态码、Content-Type、Cloudflare 标记和正文做保守分类。
+- 只有边缘拦截与载荷超限显式跳过重试；429 保持可重试，401/404/策略错误继续走既有跨渠道 failover 和渠道治理逻辑。没有修改计费、渠道选择或 Key 状态。
+- 定向 Go 回归、`go test -race ./service ./controller` 与 `git diff --check` 通过。全仓既有 `infra/sub2api/backend` 独立依赖缺失仍未纳入本轮回归结论。
+
+### 首次失败与修正
+
+- 首次发布在切换前主动失败，备份 `/opt/new-api/backups/image-error-classification-20260718T075447Z-b119464b` 状态为 `failed_pre_switch`；部署器把新增的 `service/error_classification.go` 当作既有文件执行存在性断言，因而没有构建、重建容器或切换流量。
+- 部署器已拆分 `existing-files.txt` / `new-files.txt`：既有文件只恢复备份，新文件回滚时删除；前置检查增加命名日志和公网 HTTP 200 的三次短重试。该修正没有触碰生产业务文件或 Key。
+
+### 固定 upstream 发布结果
+
+- 成功备份：`/opt/new-api/backups/image-error-classification-20260718T080814Z-b119464b`。旧镜像 `sha256:f95c9dd5de369b8bb21674cb2763c640727f433006363168f3b484e88bb0843c`，新镜像 `sha256:f16936c20ddf6f16eefc3c1581efd31b9586f7a1bbf8bad8df7d5e70ca089f8b`；release 标签 `yunbay-new-api:release-b119464b`，回滚标签 `yunbay-new-api:rollback-image-api-20260718T080814Z`。
+- 按 `/var/lock/yunbay-new-api-deploy.lock` 和独立 60 秒 watchdog，只执行 Compose 标准 `new-api` 重建；watchdog=`success`，标准容器约 12 秒恢复 `healthy`，restart=0。切换探针为 22 次 HTTP 200、8 次 HTTP 502，随后恢复连续 200，Caddy upstream 始终为 `new-api:3000`。
+- Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器快照前后未变；没有创建 `new-api-green`、临时 Caddyfile、Caddy reload/Admin API 或全栈重启。`.yunbay-deploy-sha` 与 `.yunbay-source-manifest` 已原子更新到 `b119464b`，三文件清单 SHA-256 为 `5d77bdd03ac6081b4b0d4260b5000b04f9b219d8460657fc2cf17f446c096b90`。
+
+### 无计费线上验收
+
+- `/v1/models` HTTP 200 且包含 `gpt-image-2`；Chat/Responses 误用均为 HTTP 400、`invalid_request` 并提示 Images 路径；generations/edits 无效 JSON 均为 HTTP 400。响应保留 Cloudflare `CF-Ray` 与源站 `x-oneapi-request-id`，未执行真实 generation/edit。
+- 使用无效上游凭证取得真实 OpenAI 401 响应后，用本轮同一错误处理函数分类为 `auth_rejected`、`skip_retry=false`；没有把该响应注入生产渠道，因此没有触发自动禁用。五个线上无计费探针 Request-ID 在生产 `logs` 中消费记录为 `0`、额度合计为 `0`。
+- 旧 Key 对应 token ID `6`、`339`、`394` 复核均为 `status=1`。本轮没有禁用、删除、轮换或切换任何 Key；备用 Key 仍只存本机钥匙串。
+
+回滚时使用本节成功备份中的 `existing-files.txt` / `new-files.txt`、固定 rollback 标签和同一部署锁/watchdog，只重建标准 `new-api`；不要重启 Caddy、数据库、Redis、Sub2API 或其它服务。
+
 ## 2026-07-18 gpt-image-2 错误合同修正上线
 
 ### 变更与合同验收
