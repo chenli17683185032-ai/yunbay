@@ -1614,3 +1614,26 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - 原 Resend 与 QQ 配置快照、SHA-256、控制脚本和审计材料保存在上述 `0600/0700` 备份目录，不含凭据的公开文档不记录 token。控制脚本 SHA-256 为 `a56fbae4c3ea0160cf55f85bd57eb80c9213b04aef0d7b0c77c63746b23aa982`。
 - `/etc/cron.d/yunbay-resend-restore-20260718` 将在 `2026-07-18 08:05 +08:00` 后恢复原 Resend 快照。每轮有 120 秒硬超时、最多 12 轮；live SMTP 指纹异常时拒绝覆盖并撤销调度，成功后删除 cron 和计数文件，再验证 new-api healthy、源站和公网 `/api/status` 为 200。
 - 最终连续 5 轮源站/公网 `/api/status` 均为 200；new-api、PostgreSQL、Redis、Caddy 均为 healthy/restart=0，应用 panic/fatal 为 0。
+
+## 2026-07-18 Grok 注册事故闭环与手动恢复边界
+
+### 事故根因与现行不变量
+
+- 旧 Grok 容器把 API worker、自动注册 producer、Turnstile Solver 和 Camoufox 放在同一 cgroup；批量补量时同时触发内存、CPU、PID 饱和，最终导致 OOM 和 API 长时间排队。正常 API 请求不是根因。
+- 生产 API 已固定为 `grokcli-2api:20260718-registration-isolation-32bb09f`，硬限制 `2 CPU / 2 GiB / 256 PID`；`GROK2API_INLINE_SOLVER=0`、`GROK2API_REG_AUTO_MAINTAIN=0`。注册服务不属于 API 故障域，不能用 `docker compose up` 直接恢复自动补量。
+- 用户确认历史流程必须收到明确的“注册”执行指令才开始。只有把“注册”作为明确执行指令的独立消息才算触发；讨论、引用或说明该词不算。没有该触发时不创建邮箱、不启动浏览器、不启动注册 worker；当前不放量、不提高并发、不恢复无人值守 producer。
+
+### 受控单账号验证结果
+
+- 手动 canary 运行目录：`/home/deploy/grok-backups/20260718T134046-history-registration-canary`；候选镜像：`grokcli-2api:20260718-registration-host-fields-2b43e9e`。代码修复提交：`2b43e9e`。
+- 运行参数固定为 1 batch / 1 session / 并发 1 / 预取 0 / `restart=no`，注册 cgroup 为 `1 CPU / 1.5 GiB / 220 PID`。邮箱使用历史 MoeMail 配置；验证码使用本地 Solver，未调用外部 YesCaptcha。YYDS 只保留生产配置的原激活槽位。
+- 真实结果：`imported=true`，账号总数 `3737 -> 3738`；新认证记录含 refresh token，单账号 probe 为 `ok=true`、`pool_status=normal`、无冷却。
+- 注册活跃期 cgroup 峰值约 `1.43 GiB / 213 PID`。保护器连续越过内存/PID软线后停止并清理 canary；这是预期熔断，不是账号注册失败。生产 API 全程 `healthy`、`restart=0`、`OOM=0`。
+- 注册期间和收尾后各执行 5 路真实 SSE，均为 `5/5` 业务成功；收尾后 API 约 `726 MiB / 53 PID`，canary Redis 前缀键为 `0`，注册容器、浏览器和临时会话均已删除。
+- canary 前保存的注册配置已原路恢复；生产仍不运行注册 worker。下一次只有在收到“注册”触发后，才允许重复同一单账号步骤；任一 API health/restart/OOM、内存或 PID 越线立即停止注册侧。
+
+### 配置修复与回滚
+
+- `EmailRegistrationBody` / `RegistrationConfigBody` 补齐 `moemail_base_url`、`cfmail_base_url`；此前 provider 切换会丢失 MoeMail host 并复用旧 YYDS 地址。55 项相关回归全部通过。
+- 服务器源码备份：`/home/deploy/grok-backups/20260718T133820-registration-host-fields-2b43e9e`；候选镜像只用于注册侧验证，禁止替换生产 API 镜像。
+- 注册侧回滚只停止/删除 canary 或 `grok-registration`，不停止 API、PostgreSQL、Redis、egress。生产 API 回滚继续使用固定 `20260718T040204-32bb09f-registration-isolation` 备份和原镜像标签，遵循 60 秒有界 watchdog。
