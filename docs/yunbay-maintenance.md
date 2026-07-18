@@ -1645,3 +1645,11 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - 注册 cgroup 峰值约 `1.405 GiB / 202 PID`，硬限 `1.5 GiB / 220 PID`；API 活跃期间真实 SSE `5/5`，API 全程 `healthy / restart=0 / OOM=0`。本次没有外部 YesCaptcha/YesChatUp 调用。
 - canary 产生的 3 个本轮专属 Redis session/index 键已精确删除为 0；注册容器、浏览器、锁和临时脚本均已清理。审计结果和脱敏 probe 输出保留在上述目录。
 - 发现运行时配置快照文件为空，未把它当作“已恢复”；已将当时配置另存为受限审计文件，并用上一轮 YYDS 基线快照手动恢复，复核当前配置为 `mail_provider=yyds`、`captcha_provider=local`、本机 Solver。后续任何 runner 必须在创建 session 前验证快照非空且恢复回读一致，否则立即停止。
+
+### 2026-07-18 两路并发阈值试验结果
+
+- 在用户接受“内存约 37%、CPU 约 25% 余量”的前提下，先完成 dry-run，再启动一次性两路 canary；外部 Docker build 运行期间被前置锁拒绝，未与构建并行。
+- canary 目录：`/home/deploy/grok-backups/20260718T153251-dual-registration-canary`；注册总限 `2 CPU / 3 GiB / 440 PID`，错峰 10 秒、预取 0、自动维护关闭、本地 Solver。
+- 实测注册侧峰值约 `1.572 GiB / 208 PID`，API+注册合计约 `2.361 GiB`，内存明显未到 5 GiB 上限；但主机 CPU idle 最低 `18%`，低于 25% 守门线，watchdog 以 `host_cpu_guard` 停止注册。
+- 账号数保持 `3739`，没有导入账号；API 期间 SSE `5/5`，API `healthy / restart=0 / OOM=0`。配置恢复回读为 `restored_verified`，6 个本轮 Redis 临时键已精确清理为 0。
+- 当前生产注册并发保持 1。两路若要再次评估，必须先降低单路 CPU 配额或增加 vCPU；禁止仅因内存尚有余量而直接放开两路。

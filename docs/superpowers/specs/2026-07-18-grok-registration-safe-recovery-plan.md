@@ -145,3 +145,32 @@
 
 - 本轮恢复结果和运维记录已作为提交 `da401a11` fast-forward 推送到 `yunbay/main`；本地其他未提交文件保持原样。
 - 当前生产仍处于 API-only 稳态，注册 worker 已清理；下一次仍需新的独立“注册”执行指令，并先通过非空配置快照与回读校验。
+
+## 第五轮两路受控 canary 计划（2026-07-18）
+
+用户接受的最低安全余量调整为：主机内存至少保留约 37%、CPU 至少保留 25%；本轮将用户在“两路试验”提议后的明确“可以”视为执行授权。该授权只覆盖一次性两账号 canary，不覆盖常驻 producer、自动补量或三路并发。
+
+### 目标与不变量
+
+- 目标：验证 `count=2 / concurrency=2` 是否能在当前 `4 vCPU / 7941 MiB` 主机上稳定完成，并保持 API 可用。
+- 注册总 cgroup 硬限为 `2 CPU / 3 GiB / 440 PID`；API 继续保持原 `2 CPU / 2 GiB / 256 PID` 容器和镜像，不重建、不改配置。
+- 两个注册 worker 使用适配器允许的最大错峰 10 秒，预取 0；本地 Solver、自动维护关闭、独立 Redis 前缀、`restart=no`。
+- 主机 `MemAvailable < 3.0 GiB`、CPU idle `<25%` 连续两次、API unhealthy/restart/OOM、批次状态异常、配置快照为空或恢复回读不一致时，立即只停止注册侧。
+- 本轮最多导入 2 个账号；任一熔断允许得到 0/1 个结果，不为追求数量重试或提限。
+
+### 执行检查点
+
+- [x] 用户批准两路阈值，建立本轮计划和成功/停止判据。
+- [x] 复核生产基线、无残留注册任务，并审计批次响应结构和上一版 runner。
+- [x] 生成最小两路 runner，完成 shell 语法、静态差异和 dry-run 检查；配置快照非空验证发生在创建容器之前。
+- [x] 启动两路 canary 和 API 真实并发 probe，持续采样 CPU idle、MemAvailable、注册内存/PID、API health/restart/OOM。
+- [x] 核对账号增量和新增账号测活，恢复配置并清理容器、浏览器、锁、Redis 临时键和脚本。
+- [x] 更新本计划、仓库运维记录和桌面唯一服务器手册，只提交本轮文档并 fast-forward 推送 GitHub `main`。
+
+### 第五轮实测结果
+
+- 外部 Docker build 运行期间前置锁正确拒绝启动；build 结束且 CPU idle 恢复后，dry-run 通过，确认配置快照非空并且恢复回读一致。
+- 两路 canary 运行目录：`/home/deploy/grok-backups/20260718T153251-dual-registration-canary`；硬限 `2 CPU / 3 GiB / 440 PID`。资源峰值约注册侧 `1.572 GiB / 208 PID`、API+注册合计 `2.361 GiB`、主机可用内存最低约 `4.35 GiB`。
+- CPU idle 最低 `18%`，连续低于用户批准的 `25%` 阈值，watchdog 以 `host_cpu_guard` 立即停止注册侧；账号数保持 `3739`，没有导入账号，也没有提高并发重试。
+- API 活跃期间真实 SSE probe 为 `5/5`，API 始终 `healthy / restart=0 / OOM=0`；配置恢复 `restored_verified`，本轮 6 个 Redis 临时键已删除为 `0`。
+- 结论：当前主机在“至少保留 25% CPU”约束下，生产安全并发仍为 **1 路**。两路不是内存装不下，而是 CPU 余量不成立；需要更低的单路 CPU 配额或更多 vCPU 后才能重新评估。
