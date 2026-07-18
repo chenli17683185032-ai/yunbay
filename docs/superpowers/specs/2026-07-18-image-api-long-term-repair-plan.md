@@ -25,9 +25,9 @@
 - [x] 将 Chat/Responses 直接使用 `gpt-image-2` 的本地校验结果从 HTTP 500 修正为 HTTP 400。
 - [x] 用控制器级 HTTP 合同测试同时覆盖 `/v1/chat/completions` 与 `/v1/responses`，断言 `invalid_request` 和 Images 路由提示。
 - [x] 完成定向 Go 回归、格式检查和无计费生产前探针。
-- [ ] 在部署锁和 60 秒独立 watchdog 下只重建标准 `new-api`，保持 Caddy upstream 为 `new-api:3000`。
-- [ ] 生产验收旧 Key 仍启用、`/v1/models` 包含 `gpt-image-2`、两条误用请求稳定返回 400；随后提交并推送 GitHub `main`。
-- [ ] 更新本计划和唯一运维记录，清理本轮临时文件，不处理现有 `outputs/` 和其它任务文件。
+- [x] 在部署锁和 60 秒独立 watchdog 下只重建标准 `new-api`，保持 Caddy upstream 为 `new-api:3000`。
+- [x] 生产验收旧 Key 仍启用、`/v1/models` 包含 `gpt-image-2`、两条误用请求稳定返回 400；代码提交已推送 GitHub `main`。
+- [x] 更新本计划和唯一运维记录，清理本轮临时文件，不处理现有 `outputs/` 和其它任务文件。
 
 本循环不轮换、不禁用、不删除任何 Key，也不执行真实计费生图。GitHub 上游
 `Calcium-Ion/new-api@a6cf42c0` 的 `controller/relay.go` 仍把普通请求校验错误包装为默认 HTTP 500，
@@ -89,7 +89,7 @@ Chat/Responses 误用基线均为 HTTP 500、`invalid_request`，可用于发布
 - [ ] 统一 edge_blocked/auth_rejected/route_mismatch/upstream_policy/rate_limited/payload_too_large 分类。
 - [ ] 只对 429/可恢复 5xx 重试，避免重复生图扣费。
 
-本轮未发布的代码已将图像模型误用 `/v1/chat/completions` 或 `/v1/responses` 的本地校验响应固定为 HTTP 400、`invalid_request` 且不重试；边缘 403、源站鉴权和上游策略分类仍待后续统一。生产发布暂缓，避免在用户客户端刚恢复后再次中断。
+本轮已发布的代码将图像模型误用 `/v1/chat/completions` 或 `/v1/responses` 的本地校验响应固定为 HTTP 400、`invalid_request` 且不重试；边缘 403、源站鉴权和上游策略分类仍待后续统一。发布切换窗口约 8 秒，watchdog=`success`。
 
 放行条件：错误响应能指导下一步，不再出现无上下文的通用 PermissionDeniedError。
 
@@ -114,9 +114,16 @@ Chat/Responses 误用基线均为 HTTP 500、`invalid_request`，可用于发布
 ### 6. Canary 发布与运维收尾
 
 - [x] 先发布源站代码/测试，再启用 Cloudflare canary 规则。（源站代码已发布；规则已保存并补齐 SBFM 阶段）
-- [ ] 观察 30 分钟后逐步放量，失败自动回滚。
+- [ ] 观察 30 分钟后逐步放量，失败自动回滚。（代码已发布；Cloudflare canary 的持续观测仍待完成）
 - [x] 生产部署后更新唯一 `docs/yunbay-maintenance.md` 运维记录。
-- [ ] 轮换旧 Key，合并 GitHub `main`，清理临时输出和本地工作文件。（备用 Key 已创建并验证；旧 Key 已恢复启用，切换暂停）
+- [ ] 轮换旧 Key（备用 Key 已创建并验证；旧 Key 已恢复启用，切换暂停，必须等待用户明确批准）。
+- [x] 合并本轮代码/计划/运维记录到 GitHub `main`，清理本轮临时输出和本地工作文件；保留 `outputs/` 与其它任务文件。
+
+本轮错误合同发布证据（2026-07-18）：提交 `0cf8db1be39f909fb73fb63ebf06dc648236ff3c`；生产镜像
+`sha256:f95c9dd5de369b8bb21674cb2763c640727f433006363168f3b484e88bb0843c`；备份
+`/opt/new-api/backups/image-api-error-contract-20260718T072829Z-0cf8db1b`；watchdog=`success`。
+发布只同步 `controller/relay.go`，切换探针为 `22 x 200`、`8 x 502`，随后恢复连续 200；旧 Key
+状态为启用，未执行凭证变更或有效计费生图。
 
 部署证据（2026-07-18）：提交 `5a53c82d002ce36b511d54ccaa03ae38655a037a` 已推送 `main`；生产镜像
 `sha256:2d56fc5524ba82e8d1126f00a5843dc09bf7ed66cb37a4f54569d1803c32b656`，备份

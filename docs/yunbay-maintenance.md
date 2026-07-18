@@ -2,6 +2,47 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-18 gpt-image-2 错误合同修正上线
+
+### 变更与合同验收
+
+- 提交 `0cf8db1be39f909fb73fb63ebf06dc648236ff3c` 将 relay 请求校验错误固定为 HTTP 400、`invalid_request` 并跳过重试；控制器级合同测试覆盖 `/v1/chat/completions` 与 `/v1/responses` 对 `gpt-image-2` 的误用，并断言 Images 路由提示。
+- 定向回归 `go test ./common ./controller ./relay/helper ./relay/channel/openai ./setting/ratio_setting ./service ./types` 通过，`git diff --check` 通过。全仓测试的既有失败仍限于 `infra/sub2api/backend` 缺失独立生成依赖，不属于本轮改动。
+- 发布前旧 Key 无计费探针为：`/v1/models` HTTP 200 且包含 `gpt-image-2`；Chat/Responses 误用均为 HTTP 500。发布后同一旧 Key 仍为启用状态，模型列表保持 200，两个误用请求均为 HTTP 400、`invalid_request`；generations/edits 的无效 JSON 均返回 JSON HTTP 400。未执行有效生图，不产生计费。
+
+### 固定 upstream 发布结果
+
+- 只同步 `controller/relay.go` 一个源码文件；测试文件、计划、`outputs/` 和其它用户文件未同步生产。生产镜像为 `sha256:f95c9dd5de369b8bb21674cb2763c640727f433006363168f3b484e88bb0843c`，release 标签为 `yunbay-new-api:release-0cf8db1b`。
+- 部署备份为 `/opt/new-api/backups/image-api-error-contract-20260718T072829Z-0cf8db1b`，回滚标签为 `yunbay-new-api:rollback-image-api-20260718T072829Z`，旧镜像为 `sha256:2d56fc5524ba82e8d1126f00a5843dc09bf7ed66cb37a4f54569d1803c32b656`。
+- 全程持有 `/var/lock/yunbay-new-api-deploy.lock`，Caddy upstream 始终为 `new-api:3000`，没有创建绿实例、修改 Caddy、重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP。watchdog 在 60 秒硬边界内为 `success`；切换探针为 22 次 200、8 次 502，502 窗口约 8 秒，随后连续恢复 200。
+- 发布后 new-api/Caddy/数据库/Redis 仍 healthy，new-api restart=0；Caddy 配置、挂载和运行时配置前后 SHA-256 一致，启动严重日志为 0。
+
+### 凭证与后续边界
+
+- 旧 Key 没有被切换、禁用或删除；数据库状态复核为启用，Redis 缓存未执行任何轮换动作。备用 Key 继续只保存在本机钥匙串，不切换本地客户端。
+- 下一阶段只做免费 `/v1/models` 观测和错误分类；真实 generation/edit 仍须单独授权，禁止用自动重试代替计费确认。任何 Key 轮换必须先获得用户明确批准并安排双 Key 并行窗口。
+
+## 2026-07-18 gpt-image-2 图像链路代码修复上线
+
+### 变更与验证
+
+- GitHub `main` 已推送提交 `5a53c82d002ce36b511d54ccaa03ae38655a037a`。本轮把 `gpt-image-2` 纳入图像模型能力与 OpenAI 渠道模型列表，补齐输入/输出/图像计费倍率；普通 Chat/Responses 请求明确拒绝图像模型，渠道测试也强制使用 Images 端点。
+- 回归通过：`go test ./common ./controller ./relay/helper ./relay/channel/openai ./setting/ratio_setting ./service ./types`；`git diff --check` 通过。测试覆盖模型识别、端点归一化、Chat/Responses 拒绝、generations/edits 接受及 multipart 默认值。
+- 生产只精确同步 5 个源码文件，组合清单 SHA-256 为 `1945c370823133fbb44b3bd4a02155a71e67e1763f85de067ce8f5243e7e2004`；没有同步测试、计划、`outputs/` 或其它用户文件。
+
+### 固定 upstream 部署结果
+
+- 部署前持有 `/var/lock/yunbay-new-api-deploy.lock`，标准 new-api/Caddy、首页和 `/api/status` 均 healthy/200；Caddy 文件、挂载和运行时 upstream 始终为 `new-api:3000`，没有创建绿实例或调用 Caddy Admin API。
+- 旧镜像已固定为本次备份中的 rollback tag；新镜像为 `sha256:2d56fc5524ba82e8d1126f00a5843dc09bf7ed66cb37a4f54569d1803c32b656`，生产容器约 12 秒恢复 healthy、restart=0。切换只重建 `new-api`，Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP 服务未重启。
+- 服务器 watchdog 在 60 秒硬边界内完成 `success`；最终源站与公网 `/api/status` 均 200，无 `new-api-green` 或残留部署进程。完整备份、源码快照、镜像标签、探针和 watchdog 证据：`/opt/new-api/backups/image-api-long-term-20260718T054153Z-5a53c82d`。
+
+### Cloudflare 与凭证后续动作
+
+- 安全事件已证实免费计划 Bot Management 托管规则 `Manage AI bots` 误拦 `OpenAI/Python 2.24.0`。最小 canary 已保存：规则 `OpenAI Images API canary`，ID `a2b1f205f40c4cb78791965b091207f7`，只匹配带 Authorization 的 `GET /v1/models`、`POST /v1/images/generations`、`POST /v1/images/edits`，跳过 `http_request_firewall_managed` 与 `http_request_sbfm`，保留限速、DDoS、源站鉴权和日志。初始只跳过 WAF 阶段仍被 SBFM 拦截，补齐后默认 SDK/代理/直连均 200。
+- 已创建等价备用 token 并存入本机钥匙串服务 `yunbay.xyz API - gpt-image-2`，官方 OpenAI Python 2.24.0 的 `models.list()` 代理/直连均通过。旧 token 的撤销曾导致本地客户端断连，随后已恢复旧 token 为启用并删除对应 Redis 缓存；当前旧 Key 保持启用，任何再次撤销必须先得到用户确认并安排迁移窗口。
+- 后续错误合同修正已在上方 `2026-07-18 gpt-image-2 错误合同修正上线` 中发布；本节保留首轮图像路由修复、Cloudflare canary 与凭证事故的原始证据。
+- 回滚代码发布时继续使用上述备份、固定旧镜像和同一部署锁/watchdog，只重建 `new-api`。不要删除备份、卷或数据库数据。
+
 ## 2026-07-17 生产服务器 Docker 构建缓存清理（已完成）
 
 ### 目标与基线
