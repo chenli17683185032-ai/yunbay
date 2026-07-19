@@ -1,7 +1,7 @@
 # 超值套餐自定义并发实施计划
 
 **日期：** 2026-07-17
-**状态：** 已完成
+**状态：** 功能已完成，生产部署进行中
 **目标分支：** `main`
 **范围：** 超值套餐管理表单、订阅套餐管理接口、超值套餐运行时并发限流及对应测试
 
@@ -118,9 +118,9 @@
 
 ## 10. 交付与部署边界
 
-- 本轮先完成本地代码、验证和 GitHub `main` 推送。
-- 用户本条指令没有明确要求“部署”，因此不连接生产、不上传文件、不构建或重启生产服务。
-- 工作区已有 `docs/yunbay-maintenance.md`、旧规格文档和 `outputs/` 变更均不属于本任务，不修改、不暂存、不清理。
+- 功能阶段已经完成本地代码、验证和 GitHub `main` 推送；2026-07-19 用户随后明确指令“部署”，现已授权执行生产发布。
+- 生产部署身份固定为功能提交 `9bdb977b`。经 `git diff 9bdb977b..46930c8c -- <四个生产源码文件>` 复核，功能提交之后这些文件没有变化；只同步下方生产源码清单，不把后续文档或其它功能提交宣称为本次发布内容。
+- 工作区已有旧规格文档和 `outputs/` 均不属于本任务，不修改、不暂存、不清理；部署完成后只在既有 `docs/yunbay-maintenance.md` 中追加本次运维记录。
 - 所有测试反馈、最终提交和推送结果继续维护在本文件，不另开计划文件。
 - 功能、测试与本计划已作为 `9bdb977b` 普通 fast-forward 推送 GitHub `main`；提交范围仅包含本任务 9 个文件。
 
@@ -131,3 +131,64 @@
 - 2026-07-17：完成 UI、Zod、管理接口和运行时限流的最小修改；保留非法历史值回退为 `1` 的稳定性保护。
 - 2026-07-17：完成定向与完整包测试、类型检查、生产构建、变更文件 Lint/格式检查，以及桌面/390px 窄屏浏览器闭环；临时数据库实测保存值为 `5` 后已删除。
 - 2026-07-17：功能提交 `9bdb977b` 已普通 fast-forward 推送 GitHub `main`；既有运维手册改动、旧规格文档和 `outputs/` 未纳入提交，生产未部署。
+- 2026-07-19：用户明确授权部署；确认 `main`/`origin/main` 均为 `46930c8c`，并确认 `9bdb977b` 之后本次 4 个生产源码文件没有变化，开始按固定 upstream 流程执行生产发布。
+
+## 12. 生产部署闭环计划（2026-07-19）
+
+### 12.1 发布对象与最小范围
+
+部署身份：`9bdb977b689611a828451dfe751e784a9b9943fe`。
+
+只同步以下生产源码文件：
+
+- `controller/subscription.go`
+- `middleware/value_package.go`
+- `web/default/src/features/subscriptions/components/subscriptions-mutate-drawer.tsx`
+- `web/default/src/features/subscriptions/lib/plan-form.ts`
+
+测试文件、计划、运维文档、`outputs/`、未跟踪文件以及 `9bdb977b` 之后其它提交的文件都不进入生产源码包。本次无数据库迁移，不修改套餐数据、密钥、环境变量、Caddy 或其它服务配置。
+
+### 12.2 控制对象、反馈与不变量
+
+```text
+本地已验证源码设定
+  -> SHA-256 清单测量
+  -> 生产独立 release 目录构建
+  -> 候选镜像静态测量
+  -> 标准 new-api 容器一次有界重建
+  -> 容器健康 + 源站/公网 HTTP + 前端资产反馈
+  -> 成功固化标记，或 watchdog 自动恢复旧源码/旧镜像
+```
+
+稳定性不变量：
+
+- Caddy 文件、挂载与运行时 upstream 全程只能是 `new-api:3000`。
+- 不创建 `new-api-green`，不调用 Caddy Admin API、`caddy reload`，不修改或重启 Caddy。
+- 不重启或修改 PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP 或其它无关服务。
+- 构建期间旧容器持续服务；只有镜像构建、静态检查和回滚材料都通过后才切换。
+- 切换前固定当前运行镜像为不可变 rollback 标签，不能只信任可变 `prod` 标签。
+- SSH 断开不影响独立服务器 watchdog；新服务 45 秒内未 healthy，或在新镜像运行后退出、dead/unhealthy，自动恢复旧源码与旧镜像并只重建标准 `new-api`。watchdog 最迟 60 秒结束。
+
+### 12.3 节点、测量与状态
+
+| 节点 | 动作 | 成功判据 | 状态 |
+| --- | --- | --- | --- |
+| P0 | 固定部署身份与生产文件清单 | 4 个文件在 `9bdb977b..HEAD` 无差异；本地 SHA-256 清单生成 | 已完成，组合清单 `42ce05308585010fc067d8cc3d95897126145fea609a8c7c14fca43b97547d94` |
+| P1 | 更新本计划并同步 GitHub `main` | 本节提交并普通 fast-forward 推送；不纳入用户未跟踪文件 | 进行中 |
+| P2 | 重新运行本地定向回归 | 前端相关测试、Go controller/middleware 测试、typecheck、生产构建通过 | 待执行 |
+| P3 | 生产只读前置检查 | 部署锁空闲；标准 new-api/Caddy healthy；首页和 `/api/status` 为 200；无绿实例；固定 upstream；磁盘足够 | 待执行 |
+| P4 | 建立发布归档与自动回滚材料 | 备份 4 个既有文件、生产标记和容器快照；固定旧镜像 rollback 标签；脚本和清单校验通过 | 待执行 |
+| P5 | 同步并构建候选镜像 | 服务器文件 SHA-256 等于本地清单；构建成功；候选镜像/前端资产静态检查通过；旧实例仍 healthy | 待执行 |
+| P6 | 有界切换标准 `new-api` | 独立 60 秒 watchdog 已启动；Compose 仅执行 `--no-deps --force-recreate --no-build new-api` | 待执行 |
+| P7 | 生产反馈验收 | new-api/Caddy healthy 且 restart=0；首页、源站/公网 `/api/status` 连续 5 次 200；upstream 不变；无严重启动日志 | 待执行 |
+| P8 | 功能资产与合同验收 | 生产 JS 资产包含本次数值输入特征；管理 API 保留鉴权合同；不写生产套餐、不触发计费 | 待执行 |
+| P9 | 固化与记录 | 原子更新 `.yunbay-deploy-sha`/manifest；仓库和桌面唯一手册记录镜像、备份、探针及回滚路径 | 待执行 |
+| P10 | 提交、推送与清理 | 运维记录普通 fast-forward 推送 `main`；只清本任务临时传输物，保留备份/回滚镜像及用户文件 | 待执行 |
+
+### 12.4 停止、回滚与成功条件
+
+切换前停止条件：任一基线异常、锁被占用、生产源码与已记录基线存在无法解释的漂移、固定 upstream 不成立、备份或旧镜像标签不可验证、候选构建/静态检查失败。此时不重建任何生产容器。
+
+切换后自动回滚条件：标准 new-api 在 45 秒内未 healthy，运行新镜像后出现 exited/dead/unhealthy，或源站/公网 `/api/status` 未恢复。自动回滚恢复 4 个源码文件与旧生产标记，把固定 rollback 镜像重标为 `prod`，并使用同一 Compose 命令只重建 `new-api`。
+
+部署成功必须同时满足：watchdog=`success`；new-api/Caddy healthy；new-api restart=0；连续 5 轮首页、源站和公网状态反馈均为 HTTP 200；Caddy upstream 始终为 `new-api:3000`；其它受保护容器身份和 restart count 不变；生产前端资产能证明自定义并发输入代码已进入实际 bundle；没有生产套餐数据写入。
