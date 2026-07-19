@@ -830,7 +830,7 @@
 | 测试约束与最小实现 | 已完成 | 三种输出均使用最新双路由正文，Key 与保存规则不变 |
 | 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
 | GitHub main | 已完成 | 实现提交 `f27f1a05` 已普通推送 main |
-| 生产部署 | 已授权，进行中 | 固定 upstream、旧实例持续服务、watchdog 保护下只切换 new-api |
+| 生产部署 | 已完成 | 固定 upstream 单服务切换成功，watchdog=success，生产标记已更新 |
 
 ### 17.6 实施验证记录
 
@@ -843,7 +843,7 @@
 
 ### 17.7 生产执行计划（2026-07-19）
 
-- 用户已明确发送“部署”，生产授权自本节生效。功能身份固定为 `f27f1a0536e876de3a108e1e1e1ac65f86be7d98`；当前 GitHub `main` 为 `98b450248b7320a7e36d043505cdf5cc578caa48`，目标两个 Quick Start 文件在功能提交之后没有再次变化。
+- 用户已明确发送“部署”，生产授权自本节生效。功能身份固定为 `f27f1a0536e876de3a108e1e1e1ac65f86be7d98`；执行前 GitHub `main` 为 `8cad9fb5f7828135b2195af39282d0b65a852df6`，目标两个 Quick Start 文件在功能提交之后没有再次变化。
 - 本地复用已通过全部门槛的当前 `main` 构建：主入口 `index.76b18de830.js`，SHA-256 `6cc5545a1303bd7d8d2aef152e130ef15e3dbb36792965d21ca59bd2478f0d5a`、字节数 `3065573`；Quick Start chunk `4963.1f05d9fe68.js`，SHA-256 `a3f85013d3028198915b8326b43df01061f3b564f2adb5c4f5b4a83c23f7df30`、字节数 `50384`。
 - 生产前置检查必须确认当前部署标记和两目标文件基线、标准 `new-api`/Caddy healthy、Caddy 文件/挂载/运行时 upstream 都只有 `new-api:3000`、公网 `/`、`/quick-start`、`/api/status` 为 200、部署锁空闲且无绿实例。任一条件不满足立即停止，不同步源码。
 - 生产目录不是可信 Git checkout。本轮只从已提交的当前 `main` 精确打包、非删除式同步 `web/default/src/features/quick-start/quick-start-cc-switch.ts` 与对应测试；锁内先备份两文件和部署标记，并把当前正在运行容器的不可变镜像 ID固定为 rollback tag。
@@ -851,3 +851,12 @@
 - 正式切换前启动独立于 SSH、最迟 60 秒结束的 watchdog；只执行 Compose `up -d --no-deps --force-recreate --no-build new-api`。目标镜像 45 秒内未 healthy/200，或固定 upstream、静态资产、服务不变量任一失败时，自动恢复两文件、部署标记和旧镜像，并再次只重建标准 `new-api`。
 - 成功判据：生产 bundle 与本地入口和 Quick Start chunk 的文件名、SHA-256、字节数一致；双路由文案存在、旧完整地址不存在；宿主机和三个公网入口连续 10 轮为 200；new-api/Caddy healthy，严重启动日志为 0，其它服务容器 ID、启动时间和 restart count 不变。
 - 成功后原子更新生产标记和两文件 manifest，追加仓库及桌面唯一运维手册，清理服务器和本地传输包、脚本、状态文件与临时运行目录；保留源码备份、release/rollback 镜像和审计证据。本轮不修改数据库、环境变量、Caddy 或其它服务。
+
+### 17.8 生产结果
+
+- 生产基线为 `9bdb977b689611a828451dfe751e784a9b9943fe`、旧镜像 `sha256:bcca48d016b6c57abf935cba06c4da4623b9549ce60afa720f33b47b0ea1848b`。部署锁内只同步构造器与对应测试两文件，目标 SHA-256 分别为 `58c8eb7dc418661f99a36b0517234de34bb3195e543e5236ba26c90bba53a1e2`、`c36ce0dac50487459ae67c90a054bb2852da4e09498e28d71220212a53ceebf6`，组合清单为 `11df6ccdf83dfb3a9a3adc210942a24f8a16c02c3b79674686f1831b1b74c463`。
+- 构建期间旧容器保持 `healthy / restart=0` 并持续返回 200。新镜像 `sha256:e0d981f228cad32ff910160ce9345f44fdc7b9e3ffef48f78da8570e11ae38fc` 已固定为 `yunbay-new-api:release-quick-start-prompt-f27f1a05`；最终标准容器 `5cdac5027b0c48751a19cbb2473f450d4a697028d9513fbab21fd11f6400a388` 为 `running / healthy / restart=0`，watchdog=`success`。
+- 切换探针从 `2026-07-19T08:08:52Z` 到 `08:09:02Z` 记录 9 次 502，`08:09:03Z` 起恢复，连续窗口约 11 秒，低于 1 分钟约束。脚本内验证及部署后的独立 10 轮复核均确认宿主机状态与公网 `/`、`/quick-start`、`/api/status` 为 200，新应用与 Caddy 严重启动日志均为 0。
+- 公网入口为 `index.76b18de830.js`，SHA-256 `6cc5545a1303bd7d8d2aef152e130ef15e3dbb36792965d21ca59bd2478f0d5a`、字节数 `3065573`；Quick Start chunk 为 `4963.1f05d9fe68.js`，SHA-256 `a3f85013d3028198915b8326b43df01061f3b564f2adb5c4f5b4a83c23f7df30`、字节数 `50384`。两者与本地构建完全一致；新 chunk 各含一次 generations 双路由首句和 `/v1/images/edits`，旧完整生图地址计数为 0，Key 标签、`outputs/` 和模型规则仍存在。
+- Caddy 文件、只读挂载和运行时配置哈希前后完全相同，upstream 始终只有 `new-api:3000`，无绿实例；Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器 ID、启动时间与 restart count 均未变化。本轮没有数据库、业务数据、环境变量或 Caddy 修改。
+- 成功审计目录为 `/opt/new-api/backups/quick-start-prompt-20260719T080618Z-f27f1a05`；回滚标签为 `yunbay-new-api:rollback-quick-start-prompt-20260719T080618Z`。部署脚本、完整日志、源码备份、探针和 watchdog 证据已归档；服务器顶层传输包、脚本、状态、PID、日志与临时 run dir 已清理。

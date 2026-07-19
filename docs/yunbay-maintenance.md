@@ -2,6 +2,27 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-19 Quick Start 生图双路由提示上线
+
+### 发布范围与验证
+
+- 功能提交 `f27f1a0536e876de3a108e1e1e1ac65f86be7d98` 把生图 Prompt 固定为：文生图走 `POST /v1/images/generations`，图生图、参考图、局部修改和蒙版走 `POST /v1/images/edits`；继续保留 `gpt-image-2` 主聊天模型禁令、动态 Key 规范化/脱敏和 `outputs/` 原图保存规则。
+- 生产从 `9bdb977b689611a828451dfe751e784a9b9943fe` 基线只同步 `quick-start-cc-switch.ts` 与对应测试。两文件 SHA-256 为 `58c8eb7dc418661f99a36b0517234de34bb3195e543e5236ba26c90bba53a1e2`、`c36ce0dac50487459ae67c90a054bb2852da4e09498e28d71220212a53ceebf6`，组合清单为 `11df6ccdf83dfb3a9a3adc210942a24f8a16c02c3b79674686f1831b1b74c463`。
+- 上线前 Quick Start 全量 `54 pass / 0 fail`、定向 `9 pass / 0 fail`，TypeScript、ESLint、Prettier、`git diff --check` 和生产构建均通过。本轮没有数据库、业务数据、环境变量、Key 或 Caddy 变更。
+
+### 固定 upstream 发布结果
+
+- 成功备份：`/opt/new-api/backups/quick-start-prompt-20260719T080618Z-f27f1a05`。旧镜像 `sha256:bcca48d016b6c57abf935cba06c4da4623b9549ce60afa720f33b47b0ea1848b`，回滚标签 `yunbay-new-api:rollback-quick-start-prompt-20260719T080618Z`；新镜像 `sha256:e0d981f228cad32ff910160ce9345f44fdc7b9e3ffef48f78da8570e11ae38fc`，release 标签 `yunbay-new-api:release-quick-start-prompt-f27f1a05`。
+- 构建期间旧实例保持 healthy/200。部署锁和独立 60 秒 watchdog 全程生效，只重建标准 `new-api`；最终容器 `5cdac5027b0c48751a19cbb2473f450d4a697028d9513fbab21fd11f6400a388` 为 `running / healthy / restart=0`，watchdog=`success`。
+- 切换探针从 `2026-07-19T08:08:52Z` 到 `08:09:02Z` 记录 9 次 502，`08:09:03Z` 起恢复，连续窗口约 11 秒。随后独立连续 10 轮共 40 个宿主机与公网探针全部为 200；new-api/Caddy 严重启动日志均为 0。
+- Caddy 文件、只读挂载和运行时配置前后哈希相同，upstream 始终只有 `new-api:3000`，无绿实例；Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器身份、启动时间和 restart count 均未变化。
+
+### 生产反馈与回滚
+
+- 公网入口 `index.76b18de830.js` 的 SHA-256 为 `6cc5545a1303bd7d8d2aef152e130ef15e3dbb36792965d21ca59bd2478f0d5a`、字节数 `3065573`；Quick Start chunk `4963.1f05d9fe68.js` 的 SHA-256 为 `a3f85013d3028198915b8326b43df01061f3b564f2adb5c4f5b4a83c23f7df30`、字节数 `50384`，与本地构建完全一致。新 chunk 包含两个相对 Images 路由和 Key/保存规则，不含旧完整生图地址。
+- `.yunbay-deploy-sha` 已更新为 `f27f1a0536e876de3a108e1e1e1ac65f86be7d98`，`.yunbay-source-manifest` 记录两文件清单、新镜像和部署时间。完整发布日志 SHA-256 为 `6a229f0eb72fb9f355f2a9ddacb3f10dc892f2d40f8d65b81da0336431ae256e`，服务器顶层临时工件和 run dir 已清理。
+- 回滚时从成功备份恢复 `existing-files.txt` 中的两文件，把固定回滚镜像重标为 `yunbay-new-api:prod`，在同一部署锁和独立 watchdog 下只重建标准 `new-api`。Caddy upstream 必须保持 `new-api:3000`；禁止重启或修改 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP 或其它服务。
+
 ## 2026-07-19 超值套餐自定义并发上线
 
 ### 发布范围与验证
