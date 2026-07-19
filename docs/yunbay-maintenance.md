@@ -2,6 +2,26 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-19 超值套餐自定义并发上线
+
+### 发布范围与验证
+
+- 功能提交 `9bdb977b689611a828451dfe751e784a9b9943fe` 将超值套餐并发从固定 `1`/`2` 选择器改为正整数输入，管理接口接受任意正整数，内存与 Redis 限流器按保存值执行且不再把大于 `2` 的值截断。
+- 生产只同步 `controller/subscription.go`、`middleware/value_package.go`、`subscriptions-mutate-drawer.tsx` 和 `plan-form.ts` 4 个源码文件。生产原文件精确等于 `9bdb977b^`，没有无法解释的漂移；组合清单 SHA-256 为 `42ce05308585010fc067d8cc3d95897126145fea609a8c7c14fca43b97547d94`。
+- 上线前重新通过前端 17 项定向测试、`go test ./controller ./middleware -count=1`、`bun run typecheck` 和 `bun run build`。本轮没有数据库迁移、生产套餐写入、计费请求、密钥或环境变量变更。
+
+### 固定 upstream 发布结果
+
+- 成功备份：`/opt/new-api/backups/value-package-concurrency-20260719T071306Z-9bdb977b`。旧镜像 `sha256:f16936c20ddf6f16eefc3c1581efd31b9586f7a1bbf8bad8df7d5e70ca089f8b`，回滚标签 `yunbay-new-api:rollback-value-package-concurrency-20260719T071306Z`；新镜像 `sha256:bcca48d016b6c57abf935cba06c4da4623b9549ce60afa720f33b47b0ea1848b`，release 标签 `yunbay-new-api:release-9bdb977b`。
+- 全程持有 `/var/lock/yunbay-new-api-deploy.lock`，构建时旧实例继续服务；切换前启动独立 60 秒 watchdog，只执行 Compose `--no-deps --force-recreate --no-build new-api`。watchdog=`success`，标准容器约 13 秒恢复 healthy，切换探针记录 9 次 502 后连续 22 次 200，502 窗口约 10 秒。
+- Caddy 文件、只读挂载与运行时 upstream 前后哈希一致，始终包含 `new-api:3000` 且无绿实例；Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器身份、restart count 和启动时间前后未变。最终 new-api/Caddy 均 healthy、restart=0，new-api `OOMKilled=false`，严重启动日志计数为 0。
+
+### 生产反馈与回滚
+
+- 实际生产订阅管理 chunk 从 `253.241cb7d707.js` 更新为 `253.b199721db6.js`；新 chunk SHA-256 `994f8576ca9a0d2a43d8c0a5cfc83c5dc6b79f267547be661b42d8bb4115a32b` 与本地构建完全一致，包含 `type=number`、`min=1`、`step=1` 的自定义并发输入，不再包含旧 1/2 选择器。
+- 发布后额外 5 轮源站 `/api/status`、公网 `/api/status` 和首页共 15 个探针全部为 200；未鉴权管理套餐 GET 保持 HTTP 401。`.yunbay-deploy-sha` 已更新为 `9bdb977b689611a828451dfe751e784a9b9943fe`，`.yunbay-source-manifest` 记录上述 4 文件清单和新镜像。
+- 回滚时从成功备份恢复 `existing-files.txt` 中的 4 个文件，把固定回滚镜像重标为 `yunbay-new-api:prod`，在同一部署锁和独立 watchdog 下只重建标准 `new-api`。Caddy upstream 必须保持 `new-api:3000`；禁止重启或修改 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP 或其它服务。
+
 ## 2026-07-18 上游错误分类上线
 
 ### 变更与安全边界

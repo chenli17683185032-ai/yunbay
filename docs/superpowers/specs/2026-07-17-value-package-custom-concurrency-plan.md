@@ -1,7 +1,7 @@
 # 超值套餐自定义并发实施计划
 
 **日期：** 2026-07-17
-**状态：** 功能已完成，生产部署进行中
+**状态：** 功能与生产部署已完成，记录收尾中
 **目标分支：** `main`
 **范围：** 超值套餐管理表单、订阅套餐管理接口、超值套餐运行时并发限流及对应测试
 
@@ -132,6 +132,7 @@
 - 2026-07-17：完成定向与完整包测试、类型检查、生产构建、变更文件 Lint/格式检查，以及桌面/390px 窄屏浏览器闭环；临时数据库实测保存值为 `5` 后已删除。
 - 2026-07-17：功能提交 `9bdb977b` 已普通 fast-forward 推送 GitHub `main`；既有运维手册改动、旧规格文档和 `outputs/` 未纳入提交，生产未部署。
 - 2026-07-19：用户明确授权部署；确认 `main`/`origin/main` 均为 `46930c8c`，并确认 `9bdb977b` 之后本次 4 个生产源码文件没有变化，开始按固定 upstream 流程执行生产发布。
+- 2026-07-19：生产发布成功；标准 new-api 在约 13 秒内恢复 healthy，切换 502 窗口约 10 秒，watchdog=`success`。4 个源码哈希和实际订阅管理 chunk 均与本地发布物一致，没有修改生产套餐、密钥、数据库或其它服务。
 
 ## 12. 生产部署闭环计划（2026-07-19）
 
@@ -176,19 +177,33 @@
 | P0 | 固定部署身份与生产文件清单 | 4 个文件在 `9bdb977b..HEAD` 无差异；本地 SHA-256 清单生成 | 已完成，组合清单 `42ce05308585010fc067d8cc3d95897126145fea609a8c7c14fca43b97547d94` |
 | P1 | 更新本计划并同步 GitHub `main` | 本节提交并普通 fast-forward 推送；不纳入用户未跟踪文件 | 已完成，`50cf6324` 已推送 |
 | P2 | 重新运行本地定向回归 | 前端相关测试、Go controller/middleware 测试、typecheck、生产构建通过 | 已完成，17/17、两个 Go 包、typecheck、build 均通过 |
-| P3 | 生产只读前置检查 | 部署锁空闲；标准 new-api/Caddy healthy；首页和 `/api/status` 为 200；无绿实例；固定 upstream；磁盘足够 | 待执行 |
-| P4 | 建立发布归档与自动回滚材料 | 备份 4 个既有文件、生产标记和容器快照；固定旧镜像 rollback 标签；脚本和清单校验通过 | 待执行 |
-| P5 | 同步并构建候选镜像 | 服务器文件 SHA-256 等于本地清单；构建成功；候选镜像/前端资产静态检查通过；旧实例仍 healthy | 待执行 |
-| P6 | 有界切换标准 `new-api` | 独立 60 秒 watchdog 已启动；Compose 仅执行 `--no-deps --force-recreate --no-build new-api` | 待执行 |
-| P7 | 生产反馈验收 | new-api/Caddy healthy 且 restart=0；首页、源站/公网 `/api/status` 连续 5 次 200；upstream 不变；无严重启动日志 | 待执行 |
-| P8 | 功能资产与合同验收 | 生产 JS 资产包含本次数值输入特征；管理 API 保留鉴权合同；不写生产套餐、不触发计费 | 待执行 |
-| P9 | 固化与记录 | 原子更新 `.yunbay-deploy-sha`/manifest；仓库和桌面唯一手册记录镜像、备份、探针及回滚路径 | 待执行 |
-| P10 | 提交、推送与清理 | 运维记录普通 fast-forward 推送 `main`；只清本任务临时传输物，保留备份/回滚镜像及用户文件 | 待执行 |
+| P3 | 生产只读前置检查 | 部署锁空闲；标准 new-api/Caddy healthy；首页和 `/api/status` 为 200；无绿实例；固定 upstream；磁盘足够 | 已完成；生产为 `b119464b`/`f16936c2…`，目标文件精确等于 `9bdb977b^`，无漂移 |
+| P4 | 建立发布归档与自动回滚材料 | 备份 4 个既有文件、生产标记和容器快照；固定旧镜像 rollback 标签；脚本和清单校验通过 | 已完成，备份与不可变回滚镜像均已验证 |
+| P5 | 同步并构建候选镜像 | 服务器文件 SHA-256 等于本地清单；构建成功；候选镜像/前端资产静态检查通过；旧实例仍 healthy | 已完成，新镜像 `bcca48d0…`，候选二进制检查通过 |
+| P6 | 有界切换标准 `new-api` | 独立 60 秒 watchdog 已启动；Compose 仅执行 `--no-deps --force-recreate --no-build new-api` | 已完成，只重建标准 new-api，watchdog=`success` |
+| P7 | 生产反馈验收 | new-api/Caddy healthy 且 restart=0；首页、源站/公网 `/api/status` 连续 5 次 200；upstream 不变；无严重启动日志 | 已完成，额外 5 轮共 15 个 HTTP 探针均为 200 |
+| P8 | 功能资产与合同验收 | 生产 JS 资产包含本次数值输入特征；管理 API 保留鉴权合同；不写生产套餐、不触发计费 | 已完成，新 chunk 精确匹配本地且未鉴权管理 GET 为 401 |
+| P9 | 固化与记录 | 原子更新 `.yunbay-deploy-sha`/manifest；仓库和桌面唯一手册记录镜像、备份、探针及回滚路径 | 已完成，生产标记和两份唯一手册均已更新 |
+| P10 | 提交、推送与清理 | 运维记录普通 fast-forward 推送 `main`；只清本任务临时传输物，保留备份/回滚镜像及用户文件 | 进行中 |
 
 ### 12.4 停止、回滚与成功条件
 
 切换前停止条件：任一基线异常、锁被占用、生产源码与已记录基线存在无法解释的漂移、固定 upstream 不成立、备份或旧镜像标签不可验证、候选构建/静态检查失败。此时不重建任何生产容器。
 
-切换后自动回滚条件：标准 new-api 在 45 秒内未 healthy，运行新镜像后出现 exited/dead/unhealthy，或源站/公网 `/api/status` 未恢复。自动回滚恢复 4 个源码文件与旧生产标记，把固定 rollback 镜像重标为 `prod`，并使用同一 Compose 命令只重建 `new-api`。
+切换后自动回滚条件：标准 new-api 最迟在 45 秒内未 healthy，运行新镜像后出现 exited/dead/unhealthy，或源站/公网 `/api/status` 未恢复。复用的成功部署器实际采用更保守的 38 秒候选门槛和 60 秒硬边界，为旧实例恢复预留时间；自动回滚恢复 4 个源码文件与旧生产标记，把固定 rollback 镜像重标为 `prod`，并使用同一 Compose 命令只重建 `new-api`。
 
 部署成功必须同时满足：watchdog=`success`；new-api/Caddy healthy；new-api restart=0；连续 5 轮首页、源站和公网状态反馈均为 HTTP 200；Caddy upstream 始终为 `new-api:3000`；其它受保护容器身份和 restart count 不变；生产前端资产能证明自定义并发输入代码已进入实际 bundle；没有生产套餐数据写入。
+
+### 12.5 生产发布结果
+
+- 发布时间：2026-07-19 15:13-15:16（Asia/Shanghai）。
+- 生产备份：`/opt/new-api/backups/value-package-concurrency-20260719T071306Z-9bdb977b`。
+- 旧镜像：`sha256:f16936c20ddf6f16eefc3c1581efd31b9586f7a1bbf8bad8df7d5e70ca089f8b`；固定回滚标签：`yunbay-new-api:rollback-value-package-concurrency-20260719T071306Z`。
+- 新镜像：`sha256:bcca48d016b6c57abf935cba06c4da4623b9549ce60afa720f33b47b0ea1848b`；固定发布标签：`yunbay-new-api:release-9bdb977b`。
+- `.yunbay-deploy-sha` 已原子更新为 `9bdb977b689611a828451dfe751e784a9b9943fe`，四文件清单 SHA-256 为 `42ce05308585010fc067d8cc3d95897126145fea609a8c7c14fca43b97547d94`。
+- 标准容器约 13 秒恢复 healthy；切换探针记录 9 次 502、随后 22 次 200，502 窗口约 10 秒。发布后额外 5 轮源站状态、公网状态和首页共 15 个探针全部为 200。
+- 生产订阅管理 chunk 从 `253.241cb7d707.js` 切换为 `253.b199721db6.js`；新 chunk SHA-256 为 `994f8576ca9a0d2a43d8c0a5cfc83c5dc6b79f267547be661b42d8bb4115a32b`，与本地构建完全一致，包含正整数数值输入且不含旧 1/2 选择器。
+- new-api/Caddy 最终均 healthy、restart=0，new-api `OOMKilled=false`；Caddy 文件、挂载和运行时配置前后哈希一致，受保护服务容器身份与启动时间前后相同，无绿实例和严重启动日志。
+- 只读管理接口合同为未鉴权 HTTP 401。本轮没有登录后台修改套餐，没有生产数据写入、计费请求、数据库迁移、密钥或环境变量变更。
+
+回滚时使用上述备份恢复 `existing-files.txt` 中的 4 个文件，把固定回滚标签重标为 `yunbay-new-api:prod`，并在同一部署锁和独立 60 秒 watchdog 下只重建标准 `new-api`。Caddy upstream 必须继续保持 `new-api:3000`，禁止重启或修改其它服务。
