@@ -860,3 +860,55 @@
 - 公网入口为 `index.76b18de830.js`，SHA-256 `6cc5545a1303bd7d8d2aef152e130ef15e3dbb36792965d21ca59bd2478f0d5a`、字节数 `3065573`；Quick Start chunk 为 `4963.1f05d9fe68.js`，SHA-256 `a3f85013d3028198915b8326b43df01061f3b564f2adb5c4f5b4a83c23f7df30`、字节数 `50384`。两者与本地构建完全一致；新 chunk 各含一次 generations 双路由首句和 `/v1/images/edits`，旧完整生图地址计数为 0，Key 标签、`outputs/` 和模型规则仍存在。
 - Caddy 文件、只读挂载和运行时配置哈希前后完全相同，upstream 始终只有 `new-api:3000`，无绿实例；Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器 ID、启动时间与 restart count 均未变化。本轮没有数据库、业务数据、环境变量或 Caddy 修改。
 - 成功审计目录为 `/opt/new-api/backups/quick-start-prompt-20260719T080618Z-f27f1a05`；回滚标签为 `yunbay-new-api:rollback-quick-start-prompt-20260719T080618Z`。部署脚本、完整日志、源码备份、探针和 watchdog 证据已归档；服务器顶层传输包、脚本、状态、PID、日志与临时 run dir 已清理。
+
+## 18. 生图主聊天模型禁令扩展计划（2026-07-19）
+
+### 18.1 目标与性能指标
+
+在现有生图 Prompt 中把主聊天模型禁令从只点名 `gpt-image-2` 扩展为：`禁止把 \`gpt-image-2\` 或 \`gpt-image-1.5\` 等生图模型配置为 Codex 主聊天模型`。
+
+- 文生图与编辑双路由、固定使用 `gpt-image-2`、Chat/Responses 禁令、第二行 `outputs/` 与 4K 规则保持不变。
+- `API Key为：` 后仍插入 `normalizeQuickStartApiKey()` 的动态结果；已有 `sk-` 不重复添加，无前缀时自动补齐，预览继续只显示脱敏 Key。
+- 用户文本中的排版制表符继续归一为普通中文句号；模型标识继续使用 Markdown 行内代码，`或` 两侧保留正常空格，不引入隐藏 Tab。
+- 原始正文、页面预览和 `resource=prompt` Deep Link 解码内容必须从同一个 `buildQuickStartImagePrompt()` 派生，三条输出不得漂移。
+- 本轮不改 UI、动效、路由、i18n、状态恢复、后端合同或 CC Switch 参数；没有新的明确部署指令前不连接生产。
+
+### 18.2 GitHub 经验与现有反馈点
+
+- `farion1231/cc-switch` 当前 GitHub README 仍明确支持 Prompts 跨应用同步和 `ccswitch://` Deep Link 导入，因此继续复用现有 `resource=prompt`、UTF-8 Base64 与 `AGENTS.md` 链路，不创建第二套导入协议。
+- 当前项目已有三层反馈：完整正文精确字符串、页面脱敏预览、Deep Link Base64 解码。新增模型禁令应进入这三层既有测试，而不是只检查源码字符串。
+- 本次只是提示词防误配范围扩展，不把 `gpt-image-1.5` 加入网关模型、Codex 默认模型或任何实际 API 请求；实际图片模型仍固定为 `gpt-image-2`。
+
+### 18.3 最小充分动态模型
+
+- 输入：任意带或不带 `sk-` 前缀的 Key。
+- 控制器：唯一 `buildQuickStartImagePrompt()` 生成完整正文；预览仅替换脱敏 Key；Deep Link 仅对同一正文做 Base64 编码。
+- 稳定输出：三条链路都包含 `gpt-image-2`、`gpt-image-1.5` 和“等生图模型”禁令；只有完整正文与 Deep Link 保留规范化真实 Key，预览不泄露真实 Key。
+- 不变量：两个 Images 路由、`/v1/chat/completions`、`/v1/responses`、`outputs/`、4K 与原图保留句的顺序和内容不变；正文不含旧完整域名或隐藏 Tab。
+
+### 18.4 实施与验证闭环
+
+1. 先修改 `quick-start-cc-switch.test.ts` 的完整精确期望，并给预览与 Deep Link 解码结果增加 `gpt-image-1.5` 和“等生图模型”断言；先运行定向测试确认旧实现失败。
+2. 只替换 `quick-start-cc-switch.ts` 中主聊天模型禁令这一句，保留动态 Key 插值和其余正文；再运行同一测试确认闭环转绿。
+3. 运行 Quick Start 全量测试、TypeScript、定向 ESLint、Prettier、`git diff --check` 与生产构建；核对构建 chunk 含新禁令、不含隐藏 Tab，并记录入口和 Quick Start chunk 身份。
+4. 将结果循环回写本节，只暂存计划、构造器与对应测试，提交并普通推送 GitHub `main`；保留用户原有未跟踪规格与 `outputs/`，不部署生产。
+
+### 18.5 实施节点
+
+| 节点 | 状态 | 验收条件 |
+| --- | --- | --- |
+| 现状与 GitHub 依据核验 | 已完成 | 单一构造链路与 CC Switch Prompt Deep Link 复用边界已确认 |
+| 完整闭环计划 | 已完成 | 目标文本、动态 Key、不变量、反馈与发布边界已固定 |
+| 测试先行 | 已完成 | 三层输出已对新增模型禁令形成 3 个预期失败 |
+| 最小实现 | 已完成 | 只修改主聊天模型禁令一句 |
+| 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
+| GitHub main | 待执行 | 只提交本轮三个目标文件并普通推送 |
+| 生产部署 | 未授权 | 不连接、不传文件、不构建、不重启生产服务 |
+
+### 18.6 实施验证记录
+
+- `buildQuickStartImagePrompt()` 的唯一正文变化为把“禁止把 `gpt-image-2` 配置为”替换成“禁止把 `gpt-image-2` 或 `gpt-image-1.5` 等生图模型配置为”；双路由、固定图片模型、Chat/Responses 禁令、动态 Key、`outputs/`、4K 和原图保留句逐字未变。
+- 完整精确字符串、脱敏预览和 Deep Link 解码三层测试先得到预期的 `3 fail`，实现后定向测试为 `9 pass / 0 fail`；Quick Start 全量为 `54 pass / 0 fail`。Key 无前缀补 `sk-`、已有前缀不重复和预览脱敏的原测试继续通过。
+- `bun run typecheck`、定向 ESLint、Prettier、`git diff --check` 与 `bun run build` 全部通过。生产构建入口为 `index.cae768f6fd.js`，SHA-256 `3be9d4a432acaedf568e6151e2239e4ba62c2dcebb345113bd75ff1cfcd0287c`、字节数 `3065573`；Quick Start chunk 为 `4963.27450303c7.js`，SHA-256 `df13a0ded0cc3ce92931d5575b9e006634dcc240fa225b155e2e04677256d38e`、字节数 `50421`。
+- 构建 chunk 中 `gpt-image-1.5` 与“等生图模型配置为 Codex 主聊天模型”各出现 1 次，旧单模型禁令和隐藏 Tab 均为 0。源码词级差异只包含新增禁令片段。
+- 本轮跟踪差异只包括本计划、Prompt 构造器与对应测试；用户原有未跟踪规格和 `outputs/` 未触碰。本轮未连接或修改生产服务器，生产仍运行上一版 Prompt，等待单独部署授权。
