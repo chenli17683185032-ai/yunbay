@@ -902,7 +902,7 @@
 | 测试先行 | 已完成 | 三层输出已对新增模型禁令形成 3 个预期失败 |
 | 最小实现 | 已完成 | 只修改主聊天模型禁令一句 |
 | 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
-| GitHub main | 待执行 | 只提交本轮三个目标文件并普通推送 |
+| GitHub main | 已完成 | 功能提交 `e670b30c` 已普通推送 main |
 | 生产部署 | 未授权 | 不连接、不传文件、不构建、不重启生产服务 |
 
 ### 18.6 实施验证记录
@@ -912,3 +912,4 @@
 - `bun run typecheck`、定向 ESLint、Prettier、`git diff --check` 与 `bun run build` 全部通过。生产构建入口为 `index.cae768f6fd.js`，SHA-256 `3be9d4a432acaedf568e6151e2239e4ba62c2dcebb345113bd75ff1cfcd0287c`、字节数 `3065573`；Quick Start chunk 为 `4963.27450303c7.js`，SHA-256 `df13a0ded0cc3ce92931d5575b9e006634dcc240fa225b155e2e04677256d38e`、字节数 `50421`。
 - 构建 chunk 中 `gpt-image-1.5` 与“等生图模型配置为 Codex 主聊天模型”各出现 1 次，旧单模型禁令和隐藏 Tab 均为 0。源码词级差异只包含新增禁令片段。
 - 本轮跟踪差异只包括本计划、Prompt 构造器与对应测试；用户原有未跟踪规格和 `outputs/` 未触碰。本轮未连接或修改生产服务器，生产仍运行上一版 Prompt，等待单独部署授权。
+- 功能实现、测试与本计划已作为 `e670b30cf5845c8cd9b1028ece43103137c79eef` 普通 fast-forward 推送 GitHub `main`；生产部署节点继续保持未授权。
