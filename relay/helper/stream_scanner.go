@@ -50,26 +50,27 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	// 无条件新建 StreamStatus
 	info.StreamStatus = relaycommon.NewStreamStatus()
 
-	// 确保响应体总是被关闭
-	defer func() {
-		if resp.Body != nil {
-			resp.Body.Close()
-		}
-	}()
-
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
 	if streamingTimeout <= 0 {
 		streamingTimeout = DefaultStreamingTimeout
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	var (
-		stopChan   = make(chan bool, 3) // 增加缓冲区避免阻塞
-		scanner    = NewStreamScanner(resp.Body)
-		ticker     = time.NewTicker(streamingTimeout)
-		pingTicker *time.Ticker
-		writeMutex sync.Mutex     // Mutex to protect concurrent writes
-		wg         sync.WaitGroup // 用于等待所有 goroutine 退出
+		stopChan    = make(chan bool)
+		scanner     = NewStreamScanner(resp.Body)
+		ticker      = time.NewTicker(streamingTimeout)
+		pingTicker  *time.Ticker
+		writeMutex  sync.Mutex
+		wg          sync.WaitGroup
+		stopOnce    sync.Once
+		cleanupOnce sync.Once
 	)
+	stop := func() {
+		stopOnce.Do(func() {
+			close(stopChan)
+		})
+	}
 
 	generalSettings := operation_setting.GetGeneralSetting()
 	pingEnabled := generalSettings.PingIntervalEnabled && !info.DisablePing
@@ -81,6 +82,21 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	if pingEnabled {
 		pingTicker = time.NewTicker(pingInterval)
 	}
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			cancel()
+			stop()
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			ticker.Stop()
+			if pingTicker != nil {
+				pingTicker.Stop()
+			}
+			wg.Wait()
+		})
+	}
+	defer cleanup()
 
 	logger.LogDebug(c, "relay timeout seconds: %d", common.RelayTimeout)
 	logger.LogDebug(c, "relay max idle conns: %d", common.RelayMaxIdleConns)
@@ -88,39 +104,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	logger.LogDebug(c, "streaming timeout seconds: %d", int64(streamingTimeout.Seconds()))
 	logger.LogDebug(c, "ping interval seconds: %d", int64(pingInterval.Seconds()))
 
-	// 改进资源清理，确保所有 goroutine 正确退出
-	defer func() {
-		// 通知所有 goroutine 停止
-		common.SafeSendBool(stopChan, true)
-
-		ticker.Stop()
-		if pingTicker != nil {
-			pingTicker.Stop()
-		}
-
-		// 等待所有 goroutine 退出，最多等待5秒
-		done := make(chan struct{})
-		gopool.Go(func() {
-			wg.Wait()
-			close(done)
-		})
-
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			logger.LogError(c, "timeout waiting for goroutines to exit")
-		}
-
-		close(stopChan)
-	}()
-
 	scanner.Split(bufio.ScanLines)
 	SetEventStreamHeaders(c)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ctx = context.WithValue(ctx, "stop_chan", stopChan)
 
 	// Handle ping data sending with improved error handling
 	if pingEnabled && pingTicker != nil {
@@ -131,7 +116,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				if r := recover(); r != nil {
 					logger.LogError(c, fmt.Sprintf("ping goroutine panic: %v", r))
 					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("ping panic: %v", r))
-					common.SafeSendBool(stopChan, true)
+					stop()
 				}
 				logger.LogDebug(c, "ping goroutine exited")
 			}()
@@ -194,7 +179,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				logger.LogError(c, fmt.Sprintf("data handler goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("handler panic: %v", r))
 			}
-			common.SafeSendBool(stopChan, true)
+			stop()
 		}()
 		sr := newStreamResult(info.StreamStatus)
 		for data := range dataChan {
@@ -218,21 +203,27 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				logger.LogError(c, fmt.Sprintf("scanner goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("scanner panic: %v", r))
 			}
-			common.SafeSendBool(stopChan, true)
+			stop()
 			logger.LogDebug(c, "scanner goroutine exited")
 		}()
 
 		for scanner.Scan() {
-			// 检查是否需要停止
+			// 检查是否需要停止。显式启用 drain 时，下游取消只停止写出，
+			// scanner 继续读取上游终态 usage。
 			select {
 			case <-stopChan:
 				return
 			case <-ctx.Done():
 				return
-			case <-c.Request.Context().Done():
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
-				return
 			default:
+			}
+			if !info.DrainOnClientGone {
+				select {
+				case <-c.Request.Context().Done():
+					info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+					return
+				default:
+				}
 			}
 
 			ticker.Reset(streamingTimeout)
@@ -285,8 +276,24 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		// EndReason already set by the goroutine that triggered stopChan
 	case <-c.Request.Context().Done():
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+		if info.DrainOnClientGone {
+			drainTimeout := min(streamingTimeout, DefaultStreamingTimeout)
+			drainTimer := time.NewTimer(drainTimeout)
+			defer drainTimer.Stop()
+			select {
+			case <-ticker.C:
+				info.StreamStatus.RecordError("upstream idle timeout while draining after client disconnect")
+				_ = resp.Body.Close()
+			case <-drainTimer.C:
+				info.StreamStatus.RecordError("upstream drain timeout after client disconnect")
+				_ = resp.Body.Close()
+			case <-stopChan:
+				// Upstream reached its terminal event and the handler consumed it.
+			}
+		}
 	}
 
+	cleanup()
 	if info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
 		logger.LogInfo(c, fmt.Sprintf("stream ended: %s", info.StreamStatus.Summary()))
 	} else {
