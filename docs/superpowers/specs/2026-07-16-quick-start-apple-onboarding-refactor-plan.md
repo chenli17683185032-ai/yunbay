@@ -903,7 +903,7 @@
 | 最小实现 | 已完成 | 只修改主聊天模型禁令一句 |
 | 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
 | GitHub main | 已完成 | 功能提交 `e670b30c` 已普通推送 main |
-| 生产部署 | 已授权，进行中 | 固定 upstream、旧实例持续服务、watchdog 保护下只切换 new-api |
+| 生产部署 | 已完成 | 固定 upstream 单服务切换成功，watchdog=success，生产标记已更新 |
 
 ### 18.6 实施验证记录
 
@@ -924,3 +924,12 @@
 - 切换前启动独立于 SSH、60 秒硬边界的 watchdog，只执行 Compose `up -d --no-deps --force-recreate --no-build new-api`。新实例未及时 healthy/200、静态资产身份不一致、固定 upstream 或服务快照漂移时，watchdog 自动恢复两文件、部署标记与旧镜像，并只重建标准 `new-api`。
 - 成功判据：生产入口和 Quick Start chunk 的文件名、SHA-256、字节数与本地一致；新禁令存在且旧禁令不存在；宿主机与公网 `/`、`/quick-start`、`/api/status` 连续 10 轮为 200；new-api/Caddy healthy、严重启动日志为 0，其他服务容器 ID、启动时间和 restart count 不变。
 - 成功后原子更新两文件 manifest 和部署标记，追加仓库及桌面唯一运维手册，清理服务器/本地临时包、脚本、状态、PID、日志与 run dir；保留源码备份、release/rollback 镜像和完整审计证据。本轮不修改数据库、业务数据、环境变量、Caddy 或其它服务。
+
+### 18.8 生产结果
+
+- 生产基线为 `f27f1a0536e876de3a108e1e1e1ac65f86be7d98`、旧镜像 `sha256:e0d981f228cad32ff910160ce9345f44fdc7b9e3ffef48f78da8570e11ae38fc`。部署锁内只同步构造器与对应测试两文件，目标 SHA-256 分别为 `9a05322f93f475270840fa16cd085480580550ddab7f1649f66e57a8a41cf238`、`99f3281fc551cae3218bf3713cc180d2bc0dfba6b16a7f9548e5bf7dca53f65c`，组合清单为 `3f9038636f2e96966f8a5081ac8e838fd77c3f9f219b368e1c158f59c608ad49`。
+- 构建期间旧标准容器保持 `healthy / restart=0` 和公网 200。新镜像 `sha256:b5fb68ea933c2f4f9d7fd98e0aa4da0d4e40a6662f6af56052f024ad58b3d8e4` 已固定为 `yunbay-new-api:release-quick-start-image-warning-e670b30c`；最终容器 `e51d42b9e456391365b410bf785f80c68d8bddd1bdf063f9f5de340f9632c970` 为 `running / healthy / restart=0`，watchdog=`success`。
+- 切换探针从 `2026-07-19T09:13:25Z` 到 `09:13:34Z` 记录 9 次 502，`09:13:35Z` 起恢复，窗口约 10 秒，低于 1 分钟约束。脚本内和部署后的独立 10 轮均确认宿主机状态与公网 `/`、`/quick-start`、`/api/status` 为 200；new-api/Caddy 严重启动日志均为 0。
+- 公网入口 `index.cae768f6fd.js` 的 SHA-256 为 `3be9d4a432acaedf568e6151e2239e4ba62c2dcebb345113bd75ff1cfcd0287c`、字节数 `3065573`；Quick Start chunk `4963.27450303c7.js` 的 SHA-256 为 `df13a0ded0cc3ce92931d5575b9e006634dcc240fa225b155e2e04677256d38e`、字节数 `50421`，与本地构建完全一致。新模型禁令存在，旧单模型禁令和旧完整生图地址不存在，双路由、动态 Key 标签与 `outputs/` 规则仍存在。
+- Caddy 文件、只读挂载和运行时配置哈希前后相同，upstream 始终只有 `new-api:3000`，无绿实例；Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器 ID、启动时间和 restart count 均未变化。本轮没有数据库、业务数据、环境变量、Caddy 或其它服务修改。
+- 成功审计目录为 `/opt/new-api/backups/quick-start-image-warning-20260719T091046Z-e670b30c`；回滚标签为 `yunbay-new-api:rollback-quick-start-image-warning-20260719T091046Z`。完整发布日志 SHA-256 为 `67274d630fb8a2e08d2dcf7b9b28ea2c03d7343271afb381d538891538c6d3ed`；服务器与本机临时包、脚本、状态、PID、日志和 run dir 已清理。
