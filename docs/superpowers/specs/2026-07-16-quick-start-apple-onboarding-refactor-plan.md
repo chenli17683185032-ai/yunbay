@@ -903,7 +903,7 @@
 | 最小实现 | 已完成 | 只修改主聊天模型禁令一句 |
 | 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
 | GitHub main | 已完成 | 功能提交 `e670b30c` 已普通推送 main |
-| 生产部署 | 未授权 | 不连接、不传文件、不构建、不重启生产服务 |
+| 生产部署 | 已授权，进行中 | 固定 upstream、旧实例持续服务、watchdog 保护下只切换 new-api |
 
 ### 18.6 实施验证记录
 
@@ -911,5 +911,16 @@
 - 完整精确字符串、脱敏预览和 Deep Link 解码三层测试先得到预期的 `3 fail`，实现后定向测试为 `9 pass / 0 fail`；Quick Start 全量为 `54 pass / 0 fail`。Key 无前缀补 `sk-`、已有前缀不重复和预览脱敏的原测试继续通过。
 - `bun run typecheck`、定向 ESLint、Prettier、`git diff --check` 与 `bun run build` 全部通过。生产构建入口为 `index.cae768f6fd.js`，SHA-256 `3be9d4a432acaedf568e6151e2239e4ba62c2dcebb345113bd75ff1cfcd0287c`、字节数 `3065573`；Quick Start chunk 为 `4963.27450303c7.js`，SHA-256 `df13a0ded0cc3ce92931d5575b9e006634dcc240fa225b155e2e04677256d38e`、字节数 `50421`。
 - 构建 chunk 中 `gpt-image-1.5` 与“等生图模型配置为 Codex 主聊天模型”各出现 1 次，旧单模型禁令和隐藏 Tab 均为 0。源码词级差异只包含新增禁令片段。
-- 本轮跟踪差异只包括本计划、Prompt 构造器与对应测试；用户原有未跟踪规格和 `outputs/` 未触碰。本轮未连接或修改生产服务器，生产仍运行上一版 Prompt，等待单独部署授权。
-- 功能实现、测试与本计划已作为 `e670b30cf5845c8cd9b1028ece43103137c79eef` 普通 fast-forward 推送 GitHub `main`；生产部署节点继续保持未授权。
+- 功能实现阶段的跟踪差异只包括本计划、Prompt 构造器与对应测试；用户原有未跟踪规格和 `outputs/` 未触碰。该阶段未连接或修改生产服务器，生产仍运行上一版 Prompt。
+- 功能实现、测试与本计划已作为 `e670b30cf5845c8cd9b1028ece43103137c79eef` 普通 fast-forward 推送 GitHub `main`；该提交完成时生产尚未授权，后续授权与执行边界见第 18.7 节。
+
+### 18.7 生产执行计划（2026-07-19）
+
+- 用户已明确发送“部署”，生产授权自本节生效。功能身份固定为 `e670b30cf5845c8cd9b1028ece43103137c79eef`；执行前 GitHub `main` 为 `9c9e91369a3bc2f140fed9fb7bbbd0c905ad966d`，目标两个 Quick Start 文件在功能提交后没有再次变化。
+- 本地已测试构建固定为：入口 `index.cae768f6fd.js`，SHA-256 `3be9d4a432acaedf568e6151e2239e4ba62c2dcebb345113bd75ff1cfcd0287c`、字节数 `3065573`；Quick Start chunk `4963.27450303c7.js`，SHA-256 `df13a0ded0cc3ce92931d5575b9e006634dcc240fa225b155e2e04677256d38e`、字节数 `50421`。
+- 生产前检必须确认部署标记仍为 `f27f1a0536e876de3a108e1e1e1ac65f86be7d98`，运行镜像仍为上一轮 `sha256:e0d981f228cad32ff910160ce9345f44fdc7b9e3ffef48f78da8570e11ae38fc`，两个目标文件与上一轮哈希一致；标准 new-api/Caddy healthy、固定 upstream 只有 `new-api:3000`、部署锁空闲、无绿实例且三个公网入口为 200。任一条件不满足立即停止。
+- 生产目录不是可信 Git checkout。本轮只从已提交的当前 `main` 打包构造器与对应测试两文件，锁内备份旧源码和部署标记，并固定当前不可变镜像为 rollback tag；不删除式同步，不触碰其它源码、配置或数据。
+- 构建新 `yunbay-new-api:prod` 时旧标准容器继续服务。新镜像须固定独立 release tag，并在镜像内验证 `gpt-image-1.5` 和“等生图模型”存在、旧单模型禁令与旧完整生图域名不存在，再允许切换。
+- 切换前启动独立于 SSH、60 秒硬边界的 watchdog，只执行 Compose `up -d --no-deps --force-recreate --no-build new-api`。新实例未及时 healthy/200、静态资产身份不一致、固定 upstream 或服务快照漂移时，watchdog 自动恢复两文件、部署标记与旧镜像，并只重建标准 `new-api`。
+- 成功判据：生产入口和 Quick Start chunk 的文件名、SHA-256、字节数与本地一致；新禁令存在且旧禁令不存在；宿主机与公网 `/`、`/quick-start`、`/api/status` 连续 10 轮为 200；new-api/Caddy healthy、严重启动日志为 0，其他服务容器 ID、启动时间和 restart count 不变。
+- 成功后原子更新两文件 manifest 和部署标记，追加仓库及桌面唯一运维手册，清理服务器/本地临时包、脚本、状态、PID、日志与 run dir；保留源码备份、release/rollback 镜像和完整审计证据。本轮不修改数据库、业务数据、环境变量、Caddy 或其它服务。
