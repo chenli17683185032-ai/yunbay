@@ -830,7 +830,7 @@
 | 测试约束与最小实现 | 已完成 | 三种输出均使用最新双路由正文，Key 与保存规则不变 |
 | 自动化与构建 | 已完成 | 测试、类型、Lint、格式、diff、构建全部通过 |
 | GitHub main | 已完成 | 实现提交 `f27f1a05` 已普通推送 main |
-| 生产部署 | 未授权 | 不连接、不上传、不构建、不重启生产服务 |
+| 生产部署 | 已授权，进行中 | 固定 upstream、旧实例持续服务、watchdog 保护下只切换 new-api |
 
 ### 17.6 实施验证记录
 
@@ -839,4 +839,15 @@
 - 精确字符串、脱敏预览和 Base64 解码三层测试先失败后通过；定向测试为 `9 pass / 0 fail`，Quick Start 全量为 `54 pass / 0 fail`。
 - `bun run typecheck`、定向 ESLint、Prettier、`git diff --check` 与 `bun run build` 全部通过；生产构建生成主入口 `index.76b18de830.js` 和 Quick Start chunk `4963.1f05d9fe68.js`。
 - 本轮目标差异仅为本计划、`quick-start-cc-switch.ts` 和对应测试；既有 `docs/yunbay-maintenance.md`、旧规格与 `outputs/` 保持原状。本轮没有连接或修改生产服务器。
-- 计划、实现与测试已作为 `f27f1a05` 普通 fast-forward 推送 GitHub `main`；生产部署继续保持未授权状态。
+- 计划、实现与测试已作为 `f27f1a05` 普通 fast-forward 推送 GitHub `main`；该实现轮结束时生产尚未授权，后续授权与执行边界见第 17.7 节。
+
+### 17.7 生产执行计划（2026-07-19）
+
+- 用户已明确发送“部署”，生产授权自本节生效。功能身份固定为 `f27f1a0536e876de3a108e1e1e1ac65f86be7d98`；当前 GitHub `main` 为 `98b450248b7320a7e36d043505cdf5cc578caa48`，目标两个 Quick Start 文件在功能提交之后没有再次变化。
+- 本地复用已通过全部门槛的当前 `main` 构建：主入口 `index.76b18de830.js`，SHA-256 `6cc5545a1303bd7d8d2aef152e130ef15e3dbb36792965d21ca59bd2478f0d5a`、字节数 `3065573`；Quick Start chunk `4963.1f05d9fe68.js`，SHA-256 `a3f85013d3028198915b8326b43df01061f3b564f2adb5c4f5b4a83c23f7df30`、字节数 `50384`。
+- 生产前置检查必须确认当前部署标记和两目标文件基线、标准 `new-api`/Caddy healthy、Caddy 文件/挂载/运行时 upstream 都只有 `new-api:3000`、公网 `/`、`/quick-start`、`/api/status` 为 200、部署锁空闲且无绿实例。任一条件不满足立即停止，不同步源码。
+- 生产目录不是可信 Git checkout。本轮只从已提交的当前 `main` 精确打包、非删除式同步 `web/default/src/features/quick-start/quick-start-cc-switch.ts` 与对应测试；锁内先备份两文件和部署标记，并把当前正在运行容器的不可变镜像 ID固定为 rollback tag。
+- 构建 `yunbay-new-api:prod` 期间旧标准容器持续服务。新镜像须先固定 release tag，并在镜像内验证双路由文案、动态 Key 片段、旧完整生图域名缺失，再进入切换阶段。
+- 正式切换前启动独立于 SSH、最迟 60 秒结束的 watchdog；只执行 Compose `up -d --no-deps --force-recreate --no-build new-api`。目标镜像 45 秒内未 healthy/200，或固定 upstream、静态资产、服务不变量任一失败时，自动恢复两文件、部署标记和旧镜像，并再次只重建标准 `new-api`。
+- 成功判据：生产 bundle 与本地入口和 Quick Start chunk 的文件名、SHA-256、字节数一致；双路由文案存在、旧完整地址不存在；宿主机和三个公网入口连续 10 轮为 200；new-api/Caddy healthy，严重启动日志为 0，其它服务容器 ID、启动时间和 restart count 不变。
+- 成功后原子更新生产标记和两文件 manifest，追加仓库及桌面唯一运维手册，清理服务器和本地传输包、脚本、状态文件与临时运行目录；保留源码备份、release/rollback 镜像和审计证据。本轮不修改数据库、环境变量、Caddy 或其它服务。
