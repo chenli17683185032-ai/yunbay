@@ -2,6 +2,35 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-20 Responses 客户端断流计费修复上线
+
+### 故障边界与实现
+
+- 生产证据确认：direct `/v1/responses` 流在客户端提前断开后会停止读取上游，因而错过 `response.completed.usage`；工具调用流又没有可用的文本输出回退，最终会以零 token、零 quota 结算。固定 24 小时窗口内，用户 `180`、令牌 `284`、渠道 `35`、模型 `gpt-5.6-sol` 的 53 次 `client_gone` 中有 52 次 quota 为 0。
+- 功能提交 `ec4420ebdf48d5d02d3d040862c12e8c18f2fa6d` 只让 direct Responses 在**客户端已经断开后**继续有界读取上游终态 usage；正常连接的所有文本和工具调用事件仍照常写给客户端。代码没有“识别工具调用后关闭连接”的逻辑。
+- 下游断开后不再向失效的 writer 写数据，但继续解析 `response.completed` 的输入、缓存和输出 token，再走原有冻结计费表达式结算。空闲超时与绝对 drain 上限同时生效，绝对上限不超过 5 分钟；其它流式渠道默认行为不变。
+- 回归覆盖默认路径隔离、断流后终态消费、绝对超时、工具调用后取消及缓存 usage 精确恢复。new-api 后端包、`controller`、`service`、全部 `relay/...`、新增路径定向 race、`go vet`、`gofmt` 与 `git diff --check` 均通过；全仓既有 `infra/sub2api/backend` 独立依赖缺失不属于本轮失败。
+
+### 固定 upstream 发布结果
+
+- 生产原三文件与 `ec4420eb^` 逐字一致，只同步 `relay/channel/openai/relay_responses.go`、`relay/common/relay_info.go`、`relay/helper/stream_scanner.go`；组合清单 SHA-256 为 `cdfbe606df6a9d4893dbea2f1fab5f1d60122b3a45d2c676baff7a4b4a52d811`。没有数据库迁移、环境变量、Caddy 或业务配置变更。
+- 成功备份：`/opt/new-api/backups/responses-client-gone-billing-20260719T175931Z-ec4420eb`。旧镜像 `sha256:b5fb68ea933c2f4f9d7fd98e0aa4da0d4e40a6662f6af56052f024ad58b3d8e4`，回滚标签 `yunbay-new-api:rollback-responses-billing-20260719T175931Z`；新镜像 `sha256:ae0a0bd862087d0698719c902ac1954895be8ed03eaa4bfc8315f94bce870d88`，release 标签 `yunbay-new-api:release-responses-billing-ec4420eb`。
+- 部署锁和独立 60 秒 watchdog 全程生效，构建时旧实例持续服务，正式切换只重建标准 `new-api`。最终容器 `dff5be19d6792714bde28982a00d2bbe04f930a9c81d27a72d905ee76400bd1e` 为 `running / healthy / restart=0`，watchdog=`success`，严重启动日志为 0。
+- 切换探针在约 14 秒窗口内记录 12 次 502，Caddy 同窗记录 33 次 502，随后独立 10 轮源站、首页、快速启动和公网状态共 40 次全部为 200。Caddy 文件、只读挂载与运行时配置前后哈希一致，upstream 始终只有 `new-api:3000`；Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP 与 Grok API 的容器身份、启动时间和 restart count 前后不变，无绿实例。
+- `.yunbay-deploy-sha` 已原子更新为功能提交 `ec4420ebdf48d5d02d3d040862c12e8c18f2fa6d`；`.yunbay-source-manifest` 记录三文件清单、新镜像与 `2026-07-19T18:03:06Z` 部署时间。后续纯文档提交不得覆盖这个生产功能标记。
+
+### 真实断流计费 canary
+
+- 使用启用、无限额且无模型限制的根测试令牌 ID `6`，没有使用用户 `180` 的令牌 `284`。请求强制生成函数调用，但测试客户端在最早的 `response.created` 事件到达后立即断开，因此测试触发与工具事件识别无关；curl 以预期的写管道关闭码 `23` 退出。
+- 消费日志 `126475` 为 `client_gone`，同时记录渠道 `35`、模型 `gpt-5.6-sol`、prompt `4,468`、completion `528`、quota `5,133`、`billing_source=wallet`，结算错误为 0。新 prompt 的 cache token 为 0；缓存精确恢复由带 `91,904` cached token 的回归测试覆盖。
+- 根测试用户同一批次另有两条并发消费；三条 quota `8,698 + 5,133 + 13,877 = 27,708`，与钱包和 used quota 的批量变化 `27,708` 精确相等，证明 canary 的 `5,133` 已进入真实扣费闭环。canary 后 new-api 保持 healthy/restart=0，源站与公网状态 5/5 均为 200。
+- 令牌明文只短暂存在于服务器权限 `0600` 的 curl 配置中，没有进入命令行、发布日志或审计结果，测试完成后已删除。审计备份只保留无凭证脚本、请求合同、非敏感结算字段和哈希。
+- detached 发布日志和钱包批次对账已固化到成功备份；服务器顶层发布包、脚本、状态、日志与 run dir 以及本机一次性工件均已清理。部署锁空闲、绿实例为 0；release/rollback 标签和审计备份按回滚边界保留。
+
+### 回滚
+
+回滚时获取 `/var/lock/yunbay-new-api-deploy.lock`，从上述成功备份恢复 `existing-files.txt` 中的三份源码及部署标记，把 `yunbay-new-api:rollback-responses-billing-20260719T175931Z` 重标为 `yunbay-new-api:prod`，启动独立 60 秒 watchdog，并且只执行 Compose `--no-deps --force-recreate --no-build new-api`。Caddy upstream 必须始终保持 `new-api:3000`；禁止创建绿实例，禁止修改或重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP、Grok API 或其它服务。本轮没有数据库结构变更。
+
 ## 2026-07-19 Quick Start 生图模型禁令扩展上线
 
 ### 发布范围与验证

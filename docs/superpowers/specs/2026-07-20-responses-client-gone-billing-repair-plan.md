@@ -79,11 +79,11 @@
 - [x] 节点 B：先写失败测试，复现 drain 需求和 direct Responses usage 丢失。
 - [x] 节点 C：实现最小 drain 控制与下游写抑制。
 - [x] 节点 D：定向测试、race 测试、格式与差异检查。
-- [ ] 节点 E：提交并推送 GitHub `main`。
-- [ ] 节点 F：生产备份、构建、最短中断部署和健康检查。
-- [ ] 节点 G：受控真实断流 canary，验证 `client_gone + 非零 usage + 非零 quota`。
-- [ ] 节点 H：更新本仓库维护记录与本地唯一服务器连接手册，提交并推送最终记录。
-- [ ] 节点 I：清理本地和服务器临时工件，确认工作区只保留用户原有未跟踪文件。
+- [x] 节点 E：提交并推送 GitHub `main`。
+- [x] 节点 F：生产备份、构建、最短中断部署和健康检查。
+- [x] 节点 G：受控真实断流 canary，验证 `client_gone + 非零 usage + 非零 quota`。
+- [x] 节点 H：更新本仓库维护记录与本地唯一服务器连接手册，提交并推送最终记录。
+- [x] 节点 I：清理本地和服务器临时工件，确认工作区只保留用户原有未跟踪文件。
 
 ## 7. 发布与回滚
 
@@ -99,3 +99,11 @@
 - 2026-07-20：节点 B 完成。新增 direct Responses 断流回归测试；当前代码在客户端取消后关闭 upstream pipe，测试稳定失败为 `io: read/write on closed pipe`，与生产根因一致。
 - 2026-07-20：节点 C 完成。仅 direct Responses 显式启用 drain；客户端断开后停止下游写入、继续解析上游终态 usage，空闲与绝对 drain 均有边界且绝对上限为 5 分钟。共享 scanner 的停止通道改为 `sync.Once + close`，消除 race 测试发现的关闭/发送竞争；默认路径隔离测试通过。
 - 2026-07-20：节点 D 完成。new-api 全部后端包（显式排除独立依赖不完整的 `infra/sub2api/backend`）普通测试通过，`controller`、`service`、全部 `relay/...` 回归通过；新增 client-gone、drain、绝对超时和 direct Responses usage 恢复测试通过；相关 helper/OpenAI race 测试、`go vet`、`gofmt` 与 `git diff --check` 通过。`go test ./...` 仍仅因仓库既有 Sub2API 独立模块缺少其自身依赖而失败；完整 helper race 仍能看到既有测试并行修改全局 timeout/ping/logger 状态的夹具竞争，本次新增路径的定向 race 为通过。
+- 2026-07-20：节点 E 完成。修复与计划提交为 `ec4420eb`，已推送 GitHub `main`；用户原有未跟踪计划与 `outputs/` 未纳入提交。
+- 2026-07-20：节点 F 开始。生产部署标记为 `e670b30c`；三份目标源码与 `ec4420eb^` 逐字一致，标准 new-api/Caddy healthy、固定 upstream 三层均为 `new-api:3000`、部署锁空闲、无并发发布进程。已重新记录主机重启后的容器基线，开始准备有界备份、候选构建与单服务切换。
+- 2026-07-20：节点 F 完成。成功备份为 `/opt/new-api/backups/responses-client-gone-billing-20260719T175931Z-ec4420eb`；旧镜像固定为 `yunbay-new-api:rollback-responses-billing-20260719T175931Z`，新镜像为 `sha256:ae0a0bd862087d0698719c902ac1954895be8ed03eaa4bfc8315f94bce870d88`。只重建标准 new-api，watchdog=`success`；切换探针在约 14 秒窗口内记录 12 次 502，随后源站、首页、快速启动和公网状态 10 轮共 40 次全部为 200。新容器 healthy/restart=0，启动严重日志为 0；Caddy 三层固定 upstream 与所有受保护服务快照前后完全一致。
+- 2026-07-20：节点 G 开始。专用根测试令牌 ID `6` 为启用、无限额且不限制模型；canary 请求仍强制生成函数调用，但测试客户端在最早的 `response.created` 流起始事件到达后即主动断开，不识别或拦截工具调用。只记录新消费日志的非敏感结算字段，不输出或写入进程参数中的令牌明文。
+- 2026-07-20：节点 G 完成。真实消费日志 `126475` 为 `client_gone`，但准确记录 prompt `4,468`、completion `528`、quota `5,133`，渠道 `35`、模型 `gpt-5.6-sol`、钱包计费且结算错误为 0；测试客户端 curl 以预期的写管道关闭码 `23` 退出。根测试用户同一批次另有两条并发消费，三条 quota `8,698 + 5,133 + 13,877 = 27,708`，与钱包及 used quota 的批量变化 `27,708` 精确相等，证明本 canary 的 `5,133` 已进入真实扣费闭环。生产 new-api 全程 healthy/restart=0，结束后源站和公网状态 5/5 均为 200。
+- 2026-07-20：节点 H 开始。将功能范围、部署身份、真实 canary、短暂中断、回滚点和凭据处理边界写入仓库维护记录及桌面唯一服务器连接手册；生产部署标记继续保持功能提交 `ec4420eb`。
+- 2026-07-20：节点 H 完成。仓库维护记录与桌面唯一服务器连接手册均已更新，后者权限保持 `0600`；最终记录作为纯文档提交推送 GitHub `main`，生产 `.yunbay-deploy-sha` 不跟随文档提交，继续保持功能提交 `ec4420eb`。
+- 2026-07-20：节点 I 完成。detached 发布日志和钱包批次对账已归档到成功备份；服务器顶层发布包、脚本、状态、日志与 run dir 均已删除，锁空闲、绿实例为 0。清理后新容器 healthy/restart=0，release/rollback 标签与审计备份保留，源站和公网状态 5/5 为 200；本机一次性脚本和发布包已删除，只保留用户原有未跟踪计划与 `outputs/`。
