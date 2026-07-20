@@ -8,6 +8,7 @@ import fcntl
 import html
 import json
 import os
+import re
 import shutil
 import smtplib
 import ssl
@@ -25,6 +26,7 @@ from typing import Any
 
 
 DEFAULT_THRESHOLD = 80.0
+ACCOUNT_ACTION_THRESHOLD = 90.0
 DEFAULT_TIMEOUT_SECONDS = 60
 PRIMARY_API_KEY_ID = 1
 SELF_HOSTED_GROUP = "自建池"
@@ -258,10 +260,11 @@ class Sub2APIClient:
             raise MonitorError("Sub2API account details have unexpected shape")
         return payload
 
-    def test_account(self, account_id: int) -> tuple[bool, float]:
+    def test_account(self, account_id: int) -> tuple[bool, float, str]:
         started = time.monotonic()
         raw = self.request_raw(f"/admin/accounts/{account_id}/test", "POST", {})
         latency = time.monotonic() - started
+        error = ""
         for line in raw.decode("utf-8", errors="replace").splitlines():
             if not line.startswith("data: "):
                 continue
@@ -269,9 +272,11 @@ class Sub2APIClient:
                 event = json.loads(line[6:])
             except json.JSONDecodeError:
                 continue
+            if event.get("type") == "error":
+                error = str(event.get("error") or "")
             if event.get("type") == "test_complete":
-                return event.get("success") is True, latency
-        return False, latency
+                return event.get("success") is True, latency, error
+        return False, latency, error
 
 
 @dataclass
@@ -334,6 +339,43 @@ def normal_report_due(
     return (now - last_sent.astimezone(timezone.utc)).total_seconds() >= interval_seconds
 
 
+def is_team_workflow_account(account: dict[str, Any]) -> bool:
+    extra = account.get("extra") if isinstance(account.get("extra"), dict) else {}
+    email = str(extra.get("email") or account.get("name") or "").strip().casefold()
+    return (
+        email.endswith("@icloud.com")
+        and str(extra.get("auth_provider") or "").casefold()
+        == "codex_personal_access_token"
+        and str(extra.get("source") or "").casefold() == "chatgpt_web_session"
+    )
+
+
+def is_unauthorized_error(message: str) -> bool:
+    normalized = str(message or "").casefold()
+    return "authentication failed (401)" in normalized or bool(
+        re.search(r"\b(?:http|api returned)\s+401\b", normalized)
+    )
+
+
+def add_action_problem(
+    report: Report,
+    account: dict[str, Any],
+    *,
+    utilization: float | None = None,
+    test_error: str = "",
+) -> None:
+    if not is_team_workflow_account(account):
+        return
+    name = str(account.get("name") or account.get("id") or "未知账号")
+    error_message = test_error or str(account.get("error_message") or "")
+    if is_unauthorized_error(error_message):
+        report.problems.append(f"自动控制目标账号 {name} 出现 401 认证错误")
+    elif utilization is not None and utilization >= ACCOUNT_ACTION_THRESHOLD:
+        report.problems.append(
+            f"自动控制目标账号 {name} 用量达到 {utilization:.1f}%"
+        )
+
+
 def evaluate(
     client: Sub2APIClient,
     threshold: float = DEFAULT_THRESHOLD,
@@ -363,11 +405,15 @@ def evaluate(
     report.primary_key_name = str(primary_key.get("name") or PRIMARY_API_KEY_ID)
     report.mode = str(primary_group.get("name") or "")
     group_id = int(primary_group["id"])
-    members = [
+    group_accounts = [
         account
         for account in accounts
         if group_id in (account.get("group_ids") or [])
-        and account.get("status") == "active"
+    ]
+    members = [
+        account
+        for account in group_accounts
+        if account.get("status") == "active"
         and account.get("schedulable") is True
     ]
     relay_accounts = [account for account in members if account.get("type") == "apikey"]
@@ -379,7 +425,7 @@ def evaluate(
     usage_by_account: list[tuple[dict[str, Any], float]] = []
     estimated_weights: dict[int, float] = {}
     own_remaining_values: list[float] = []
-    own_liveness: dict[int, tuple[bool, float | None]] = {}
+    own_liveness: dict[int, tuple[bool, float | None, str]] = {}
     for account in own_accounts:
         account_id = int(account["id"])
         try:
@@ -392,20 +438,28 @@ def evaluate(
         try:
             own_liveness[account_id] = client.test_account(account_id)
         except MonitorError:
-            own_liveness[account_id] = (False, None)
+            own_liveness[account_id] = (False, None, "")
+        alive, latency, test_error = own_liveness[account_id]
         try:
             values = collect_utilizations(client.account_usage(int(account["id"])))
         except MonitorError:
             report.quota_checks_failed += 1
+            add_action_problem(report, details, test_error=test_error)
             continue
         if not values:
             report.quota_checks_failed += 1
+            add_action_problem(report, details, test_error=test_error)
             continue
         report.quota_checks_ok += 1
         account_max = max(values)
-        usage_by_account.append((account, account_max))
+        usage_by_account.append((details, account_max))
         own_remaining_values.append(max(0.0, 100 - account_max))
-        alive, latency = own_liveness[int(account["id"])]
+        add_action_problem(
+            report,
+            details,
+            utilization=account_max,
+            test_error=test_error,
+        )
         if account_max < 100 and alive:
             report.own_available += 1
         report.account_details.append(
@@ -414,6 +468,26 @@ def evaluate(
             f"测活 {'成功' if alive else '失败'}"
             + (f"，延迟 {latency:.2f} 秒" if latency is not None else "")
         )
+
+    active_own_ids = {int(account["id"]) for account in own_accounts}
+    for account in group_accounts:
+        account_id = int(account.get("id") or 0)
+        if account_id in active_own_ids or account.get("type") not in {
+            "oauth",
+            "setup-token",
+        }:
+            continue
+        try:
+            details = client.account_details(account_id)
+        except MonitorError:
+            details = account
+        before = len(report.problems)
+        add_action_problem(report, details)
+        if len(report.problems) > before:
+            report.account_details.append(
+                f"自动控制目标账号 {details.get('name')}: "
+                f"状态 {details.get('status') or '未知'}，401 认证失败"
+            )
 
     if own_accounts and report.quota_checks_ok == 0:
         report.emergencies.append("该分组内所有自有账号的额度查询均失败")
@@ -439,7 +513,7 @@ def evaluate(
         for account in relay_accounts:
             report.relay_tested += 1
             try:
-                usable, latency = client.test_account(int(account["id"]))
+                usable, latency, _test_error = client.test_account(int(account["id"]))
             except MonitorError:
                 usable, latency = False, None
             report.account_details.append(
@@ -490,6 +564,24 @@ def evaluate(
 
 
 def smtp_options() -> dict[str, str]:
+    override = {
+        "SMTPServer": os.environ.get("ALERT_SMTP_SERVER", "").strip(),
+        "SMTPPort": os.environ.get("ALERT_SMTP_PORT", "").strip(),
+        "SMTPSSLEnabled": os.environ.get("ALERT_SMTP_SSL_ENABLED", "").strip(),
+        "SMTPAccount": os.environ.get("ALERT_SMTP_ACCOUNT", "").strip(),
+        "SMTPToken": os.environ.get("ALERT_SMTP_TOKEN", ""),
+        "SMTPFrom": os.environ.get("ALERT_SMTP_FROM", "").strip(),
+        "SystemName": os.environ.get("ALERT_SMTP_SYSTEM_NAME", "云贝监控").strip(),
+    }
+    required_override = tuple(key for key in override if key != "SystemName")
+    if any(override[key] for key in required_override):
+        missing = [key for key in required_override if not override[key]]
+        if missing:
+            raise MonitorError(
+                "monitor SMTP override missing: " + ", ".join(missing)
+            )
+        return override
+
     postgres = container_environment("yunbay-postgres")
     user = postgres.get("POSTGRES_USER")
     database = postgres.get("POSTGRES_DB")

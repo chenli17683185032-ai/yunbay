@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import sub2api_pool_monitor as monitor
 
@@ -38,7 +39,7 @@ class FakeClient:
         value = self._relay_results.get(account_id, (True, 1.0))
         if isinstance(value, Exception):
             raise value
-        return value
+        return value if len(value) == 3 else (*value, "")
 
 
 def account(account_id, account_type="oauth", group_id=6):
@@ -49,6 +50,29 @@ def account(account_id, account_type="oauth", group_id=6):
         "schedulable": True,
         "type": account_type,
         "group_ids": [group_id],
+    }
+
+
+def team_account(
+    account_id,
+    *,
+    group_id=9,
+    status="active",
+    schedulable=True,
+    error_message="",
+):
+    email = f"child-{account_id}@icloud.com"
+    return {
+        **account(account_id, group_id=group_id),
+        "name": email,
+        "status": status,
+        "schedulable": schedulable,
+        "error_message": error_message,
+        "extra": {
+            "email": email,
+            "auth_provider": "codex_personal_access_token",
+            "source": "chatgpt_web_session",
+        },
     }
 
 
@@ -70,6 +94,43 @@ class MonitorTests(unittest.TestCase):
     def test_collect_utilizations_recurses(self):
         payload = {"five_hour": {"utilization": 79}, "models": [{"utilization": 81}]}
         self.assertEqual([79.0, 81.0], monitor.collect_utilizations(payload))
+
+    def test_account_test_preserves_401_error_event(self):
+        client = object.__new__(monitor.Sub2APIClient)
+        client.request_raw = lambda *_args: (
+            b'data: {"type":"error","error":"API returned 401: unauthorized"}\n\n'
+        )
+        success, _latency, error = client.test_account(1)
+        self.assertFalse(success)
+        self.assertEqual("API returned 401: unauthorized", error)
+
+    def test_smtp_override_avoids_database_resend_settings(self):
+        values = {
+            "ALERT_SMTP_SERVER": "smtp.qq.com",
+            "ALERT_SMTP_PORT": "465",
+            "ALERT_SMTP_SSL_ENABLED": "true",
+            "ALERT_SMTP_ACCOUNT": "monitor@example.com",
+            "ALERT_SMTP_TOKEN": "app-password",
+            "ALERT_SMTP_FROM": "monitor@example.com",
+            "ALERT_SMTP_SYSTEM_NAME": "测试监控",
+        }
+        with patch.dict(monitor.os.environ, values, clear=True), patch.object(
+            monitor,
+            "container_environment",
+            side_effect=AssertionError("database SMTP lookup should be skipped"),
+        ):
+            options = monitor.smtp_options()
+        self.assertEqual("smtp.qq.com", options["SMTPServer"])
+        self.assertEqual("app-password", options["SMTPToken"])
+        self.assertEqual("monitor@example.com", options["SMTPFrom"])
+
+    def test_incomplete_smtp_override_fails_closed(self):
+        with patch.dict(
+            monitor.os.environ,
+            {"ALERT_SMTP_SERVER": "smtp.qq.com"},
+            clear=True,
+        ), self.assertRaisesRegex(monitor.MonitorError, "SMTP override missing"):
+            monitor.smtp_options()
 
     def test_capacity_is_inferred_from_long_window_metadata(self):
         self.assertEqual(
@@ -169,6 +230,63 @@ class MonitorTests(unittest.TestCase):
         report = monitor.evaluate(client, now=NOW, capacity_weights={1: 200, 2: 15})
         self.assertAlmostEqual(62.7209, report.total_quota_utilization, places=3)
         self.assertFalse(report.alerting)
+
+    def test_team_workflow_account_at_90_alerts_below_group_threshold(self):
+        accounts = [team_account(1), account(2, group_id=9)]
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            accounts,
+            {1: {"utilization": 90}, 2: {"utilization": 0}},
+        )
+        report = monitor.evaluate(
+            client, now=NOW, capacity_weights={1: 15, 2: 200}
+        )
+        self.assertLess(report.total_quota_utilization, monitor.DEFAULT_THRESHOLD)
+        self.assertTrue(
+            any("child-1@icloud.com 用量达到 90.0%" in item for item in report.problems)
+        )
+
+    def test_team_workflow_account_401_alerts_before_usage_is_high(self):
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            [team_account(1)],
+            {1: {"utilization": 20}},
+            {1: (False, 1.0, "API returned 401: unauthorized")},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertTrue(any("出现 401 认证错误" in item for item in report.problems))
+        self.assertFalse(any("用量达到" in item for item in report.problems))
+
+    def test_non_401_liveness_failure_does_not_trigger_action_alert(self):
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            [team_account(1)],
+            {1: {"utilization": 20}},
+            {1: (False, 1.0, "API returned 503: unavailable")},
+        )
+        report = monitor.evaluate(client, now=NOW)
+        self.assertFalse(any("自动控制目标账号" in item for item in report.problems))
+
+    def test_inactive_team_workflow_account_401_is_still_detected(self):
+        target = team_account(
+            1,
+            status="error",
+            schedulable=False,
+            error_message="Authentication failed (401): expired",
+        )
+        report = monitor.evaluate(FakeClient(monitor.SAFE_GROUP, [target]), now=NOW)
+        self.assertTrue(any("出现 401 认证错误" in item for item in report.problems))
+
+    def test_unrelated_account_at_100_does_not_trigger_action_alert(self):
+        client = FakeClient(
+            monitor.SAFE_GROUP,
+            [account(1, group_id=9), account(2, group_id=9)],
+            {1: {"utilization": 100}, 2: {"utilization": 0}},
+        )
+        report = monitor.evaluate(
+            client, now=NOW, capacity_weights={1: 15, 2: 200}
+        )
+        self.assertFalse(any("自动控制目标账号" in item for item in report.problems))
 
     def test_safe_group_new_account_is_auto_estimated(self):
         accounts = [account(1, group_id=9), account(2, group_id=9)]
