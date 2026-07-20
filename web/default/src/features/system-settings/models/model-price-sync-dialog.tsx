@@ -18,11 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { RefreshCcw } from 'lucide-react'
+import { Check, Pencil, RefreshCcw, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import {
   Table,
@@ -57,6 +58,8 @@ const PRICE_DIMENSIONS: Array<keyof CanonicalModelPrice> = [
   'image_input',
   'audio_input',
   'audio_output',
+  'reasoning',
+  'web_search',
 ]
 
 function formatPrice(value: number | undefined): string {
@@ -87,6 +90,10 @@ function getPriceDimensionLabel(
       return t('Audio input')
     case 'audio_output':
       return t('Audio output')
+    case 'reasoning':
+      return t('Reasoning')
+    case 'web_search':
+      return t('Web search')
     default:
       return String(key)
   }
@@ -134,15 +141,22 @@ export function ModelPriceSyncDialog({
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [preview, setPreview] = useState<ModelPriceSyncResult | null>(null)
+  const [overrides, setOverrides] = useState<
+    Record<string, CanonicalModelPrice>
+  >({})
+  const [editingModel, setEditingModel] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) {
       setPreview(null)
+      setOverrides({})
+      setEditingModel(null)
     }
   }, [open])
 
   const requestPayload = () => ({
     models: selectedModels,
+    overrides,
   })
 
   const previewMutation = useMutation({
@@ -153,6 +167,8 @@ export function ModelPriceSyncDialog({
         return
       }
       setPreview(data.data)
+      setOverrides({})
+      setEditingModel(null)
       if (data.data.syncable === 0) {
         toast.warning(t('No selected models can be synced'))
       } else {
@@ -187,7 +203,9 @@ export function ModelPriceSyncDialog({
   })
 
   const canPreview = selectedModels.length > 0
-  const canApply = Boolean(preview && preview.syncable > 0)
+  const canApply = Boolean(
+    preview && (preview.syncable > 0 || Object.keys(overrides).length > 0)
+  )
 
   const handlePreview = () => {
     if (!canPreview) {
@@ -200,6 +218,21 @@ export function ModelPriceSyncDialog({
   const handleApply = () => {
     if (!canApply) return
     applyMutation.mutate(requestPayload())
+  }
+
+  const updateOverride = (
+    model: string,
+    dimension: keyof CanonicalModelPrice,
+    rawValue: string
+  ) => {
+    setOverrides((current) => {
+      const previewPrice =
+        preview?.items.find((item) => item.model_name === model)?.final ?? {}
+      const next = { ...(current[model] ?? previewPrice) }
+      if (rawValue === '') delete next[dimension]
+      else next[dimension] = Number(rawValue)
+      return { ...current, [model]: next }
+    })
   }
 
   const footer = (
@@ -276,40 +309,107 @@ export function ModelPriceSyncDialog({
             </TableHeader>
             <TableBody>
               {preview?.items?.length ? (
-                preview.items.map((item) => (
-                  <TableRow key={item.model_name}>
-                    <TableCell className='font-medium'>
-                      <div className='flex max-w-56 flex-col gap-1'>
-                        <span className='truncate'>{item.model_name}</span>
-                        {item.openrouter_id &&
-                          item.openrouter_id !== item.model_name && (
-                            <span className='text-muted-foreground truncate text-xs'>
-                              {item.openrouter_id}
-                            </span>
+                preview.items.map((item) => {
+                  const finalPrice = overrides[item.model_name] ?? item.final
+                  const isEditing = editingModel === item.model_name
+                  return (
+                    <TableRow key={item.model_name}>
+                      <TableCell className='font-medium'>
+                        <div className='flex max-w-56 flex-col gap-1'>
+                          <span className='truncate'>{item.model_name}</span>
+                          {item.openrouter_id &&
+                            item.openrouter_id !== item.model_name && (
+                              <span className='text-muted-foreground truncate text-xs'>
+                                {item.openrouter_id}
+                              </span>
+                            )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge
+                          label={t(getStatusLabel(item))}
+                          variant={getStatusVariant(item)}
+                          copyable={false}
+                        />
+                      </TableCell>
+                      <TableCell className='text-muted-foreground max-w-64 truncate text-xs'>
+                        {summarizePrice(item.current, t)}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground max-w-64 truncate text-xs'>
+                        {summarizePrice(item.official, t)}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground max-w-64 truncate text-xs'>
+                        {summarizePrice(item.openrouter, t)}
+                      </TableCell>
+                      <TableCell className='min-w-80 text-xs'>
+                        {isEditing ? (
+                          <div className='grid grid-cols-2 gap-2'>
+                            {PRICE_DIMENSIONS.map((dimension) => (
+                              <label
+                                key={dimension}
+                                className='text-muted-foreground space-y-1'
+                              >
+                                <span>
+                                  {getPriceDimensionLabel(dimension, t)}
+                                </span>
+                                <Input
+                                  type='number'
+                                  min='0'
+                                  step='any'
+                                  value={finalPrice[dimension] ?? ''}
+                                  onChange={(event) =>
+                                    updateOverride(
+                                      item.model_name,
+                                      dimension,
+                                      event.target.value
+                                    )
+                                  }
+                                  className='h-8 text-xs'
+                                />
+                              </label>
+                            ))}
+                          </div>
+                        ) : (
+                          summarizePrice(finalPrice, t)
+                        )}
+                        <div className='mt-2 flex gap-1'>
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='sm'
+                            onClick={() =>
+                              setEditingModel(
+                                isEditing ? null : item.model_name
+                              )
+                            }
+                          >
+                            {isEditing ? (
+                              <Check data-icon='inline-start' />
+                            ) : (
+                              <Pencil data-icon='inline-start' />
+                            )}
+                            {t(isEditing ? 'Done' : 'Edit')}
+                          </Button>
+                          {overrides[item.model_name] && !isEditing && (
+                            <Button
+                              type='button'
+                              variant='ghost'
+                              size='sm'
+                              onClick={() =>
+                                setOverrides(
+                                  ({ [item.model_name]: _, ...rest }) => rest
+                                )
+                              }
+                            >
+                              <X data-icon='inline-start' />
+                              {t('Reset')}
+                            </Button>
                           )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge
-                        label={t(getStatusLabel(item))}
-                        variant={getStatusVariant(item)}
-                        copyable={false}
-                      />
-                    </TableCell>
-                    <TableCell className='text-muted-foreground max-w-64 truncate text-xs'>
-                      {summarizePrice(item.current, t)}
-                    </TableCell>
-                    <TableCell className='text-muted-foreground max-w-64 truncate text-xs'>
-                      {summarizePrice(item.official, t)}
-                    </TableCell>
-                    <TableCell className='text-muted-foreground max-w-64 truncate text-xs'>
-                      {summarizePrice(item.openrouter, t)}
-                    </TableCell>
-                    <TableCell className='max-w-72 truncate text-xs'>
-                      {summarizePrice(item.final, t)}
-                    </TableCell>
-                  </TableRow>
-                ))
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
               ) : (
                 <TableRow>
                   <TableCell

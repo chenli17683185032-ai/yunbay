@@ -20,20 +20,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { getApiKeyDisplayGroup } from './api-key-display'
 
-test('API key display shows stored token group with active package billing ratio', () => {
+test('API key display shows the selected token group package ratio', () => {
   const display = getApiKeyDisplayGroup(
     {
       group: 'gpt-plus',
-      effective_group: 'month-card',
-      effective_group_ratio: 1,
-      cross_group_retry: false,
     },
-    { 'gpt-plus': 0.3, 'month-card': 0.8 },
-    1
+    { 'gpt-plus': 2.5 },
+    true
   )
 
   assert.equal(display.group, 'gpt-plus')
-  assert.equal(display.ratio, 1)
+  assert.equal(display.ratio, 2.5)
   assert.equal(display.isEffective, true)
 })
 
@@ -41,9 +38,6 @@ test('API key display falls back to stored group ratio without active package', 
   const display = getApiKeyDisplayGroup(
     {
       group: 'gpt-plus',
-      effective_group: '',
-      effective_group_ratio: undefined,
-      cross_group_retry: false,
     },
     { 'gpt-plus': 0.3 }
   )
@@ -53,19 +47,28 @@ test('API key display falls back to stored group ratio without active package', 
   assert.equal(display.isEffective, false)
 })
 
-test('API key display shows active package billing ratio for auto group', () => {
+test('API key display keeps the backend 1x fallback for an unconfigured package pair', () => {
+  const display = getApiKeyDisplayGroup(
+    { group: 'gpt-pro' },
+    { 'gpt-pro': 1 },
+    true
+  )
+
+  assert.equal(display.group, 'gpt-pro')
+  assert.equal(display.ratio, 1)
+  assert.equal(display.isEffective, true)
+})
+
+test('API key display does not invent a fixed package ratio for auto group', () => {
   const display = getApiKeyDisplayGroup(
     {
       group: 'auto',
-      effective_group: '',
-      effective_group_ratio: undefined,
-      cross_group_retry: true,
     },
     { auto: 1 },
-    1
+    true
   )
 
   assert.equal(display.group, 'auto')
-  assert.equal(display.ratio, 1)
+  assert.equal(display.ratio, undefined)
   assert.equal(display.isEffective, true)
 })

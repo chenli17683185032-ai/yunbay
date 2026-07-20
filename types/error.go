@@ -77,6 +77,12 @@ const (
 	ErrorCodeAwsInvokeError         ErrorCode = "aws_invoke_error"
 	ErrorCodeModelNotFound          ErrorCode = "model_not_found"
 	ErrorCodePromptBlocked          ErrorCode = "prompt_blocked"
+	ErrorCodeEdgeBlocked            ErrorCode = "edge_blocked"
+	ErrorCodeAuthRejected           ErrorCode = "auth_rejected"
+	ErrorCodeRouteMismatch          ErrorCode = "route_mismatch"
+	ErrorCodeUpstreamPolicy         ErrorCode = "upstream_policy"
+	ErrorCodeRateLimited            ErrorCode = "rate_limited"
+	ErrorCodePayloadTooLarge        ErrorCode = "payload_too_large"
 
 	// sql error
 	ErrorCodeQueryDataError  ErrorCode = "query_data_error"

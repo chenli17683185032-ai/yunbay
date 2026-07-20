@@ -25,8 +25,9 @@ import { fileURLToPath } from 'node:url'
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const source = readFileSync(resolve(currentDir, 'api-keys-columns.tsx'), 'utf8')
 
-test('API key columns read package billing ratio from backend state helper', () => {
-  assert.match(source, /getActiveValuePackageBillingRatio\(valuePackageState\)/)
-  assert.doesNotMatch(source, /groupRatios\[packageGroup\]/)
-  assert.match(source, /<GroupBadge group='auto' ratio=\{ratio\} \/>/)
+test('API key columns use per-group package ratios from the user groups endpoint', () => {
+  assert.doesNotMatch(source, /getActiveValuePackageBillingRatio/)
+  assert.match(source, /valuePackageState\?\.billing\?\.active === true/)
+  assert.match(source, /<GroupBadge group='auto' \/>/)
+  assert.doesNotMatch(source, /<GroupBadge group='auto' ratio=/)
 })

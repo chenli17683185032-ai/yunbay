@@ -70,10 +70,17 @@ const defaultBrowserLocale = 'zh-CN'
 const defaultBrowserTimezone = 'Asia/Shanghai'
 const defaultBrowserAcceptLanguage = 'zh-CN,zh;q=0.9,en;q=0.8'
 
-type BrowserLaunchOptions = { headless: boolean }
+type BrowserLaunchOptions = {
+  headless: boolean
+  proxy?: { server: string }
+}
 
 export function buildBrowserLaunchOptions(env: Record<string, string | undefined> = process.env): BrowserLaunchOptions {
-  return { headless: shouldRunHeadless(env) }
+  const proxyServer = parseBrowserProxyServer(env.LDXP_BROWSER_PROXY_SERVER)
+  return {
+    headless: shouldRunHeadless(env),
+    ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
+  }
 }
 
 export function buildBrowserContextOptions(env: Record<string, string | undefined> = process.env): BrowserContextOptions {
@@ -551,6 +558,35 @@ function shouldRunHeadless(env: Record<string, string | undefined> = process.env
   return raw !== 'false' && raw !== '0' && raw !== 'no'
 }
 
+function parseBrowserProxyServer(rawValue: string | undefined): string | undefined {
+  const proxyServer = rawValue?.trim()
+  if (!proxyServer) {
+    return undefined
+  }
+
+  let parsed: URL
+  try {
+    parsed = new URL(proxyServer)
+  } catch {
+    throw new Error('LDXP_BROWSER_PROXY_SERVER must be a valid proxy URL')
+  }
+
+  if (!['socks5:', 'http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('LDXP_BROWSER_PROXY_SERVER must use socks5://, http://, or https://')
+  }
+  if (!parsed.hostname || !parsed.port) {
+    throw new Error('LDXP_BROWSER_PROXY_SERVER must include a host and port')
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error('LDXP_BROWSER_PROXY_SERVER must not contain credentials')
+  }
+  if ((parsed.pathname && parsed.pathname !== '/') || parsed.search || parsed.hash) {
+    throw new Error('LDXP_BROWSER_PROXY_SERVER must not contain a path, query, or fragment')
+  }
+
+  return proxyServer
+}
+
 export async function fillContactInput(page: Page, contactEmail: string, timeout: number): Promise<void> {
   const deadline = Date.now() + timeout
   let lastCandidateCount = 0
@@ -558,6 +594,14 @@ export async function fillContactInput(page: Page, contactEmail: string, timeout
   while (Date.now() < deadline) {
     const remaining = Math.max(1, deadline - Date.now())
     const probeTimeout = Math.min(remaining, 1000)
+
+    const wafChallenge = page.locator(
+      '#aliyunCaptcha-sliding-slider, #captcha-element, #h5_captcha-element',
+    )
+    if (await wafChallenge.count() > 0) {
+      throw new Error('LDXP WAF challenge blocked product page')
+    }
+
     const byPlaceholder = page.getByPlaceholder('请输入联系方式方便查询订单')
     if (await isLocatorVisible(byPlaceholder, probeTimeout)) {
       await byPlaceholder.first().fill(contactEmail, { timeout: remaining })

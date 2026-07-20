@@ -55,3 +55,14 @@ func GetUserAutoGroup(userGroup string) []string {
 func GetUserGroupRatio(userGroup, group string) float64 {
 	return ratio_setting.GetGroupRatioInfo(userGroup, group).GroupRatio
 }
+
+// GetValuePackageGroupRatio mirrors value-package settlement: only an explicit
+// package-group override applies; an unconfigured pair bills at 1x.
+func GetValuePackageGroupRatio(packageGroup, group string) float64 {
+	packageGroup = strings.TrimSpace(packageGroup)
+	group = strings.TrimSpace(group)
+	if ratio, ok := ratio_setting.GetGroupGroupRatio(packageGroup, group); ok {
+		return ratio
+	}
+	return 1
+}

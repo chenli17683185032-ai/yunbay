@@ -21,6 +21,10 @@ type valuePackageResetQuotaRequest struct {
 	UserSubscriptionId *int `json:"user_subscription_id"`
 }
 
+type valuePackageWalletFallbackRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
 func GetValuePackagePlans(c *gin.Context) {
 	userId := c.GetInt("id")
 	plans, err := model.GetValuePackagePlansForUser(userId)
@@ -111,6 +115,21 @@ func ActivateValuePackageSelf(c *gin.Context) {
 func DeactivateValuePackageSelf(c *gin.Context) {
 	userId := c.GetInt("id")
 	state, err := model.DeactivateValuePackage(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, state)
+}
+
+func UpdateValuePackageWalletFallbackSelf(c *gin.Context) {
+	userId := c.GetInt("id")
+	var req valuePackageWalletFallbackRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	state, err := model.UpdateValuePackageWalletFallback(userId, *req.Enabled)
 	if err != nil {
 		common.ApiError(c, err)
 		return

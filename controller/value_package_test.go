@@ -696,6 +696,32 @@ func TestGetValuePackagePurchaseIntentConfirmedCover(t *testing.T) {
 	assert.Equal(t, false, data["requires_confirmation"])
 }
 
+func TestUpdateValuePackageWalletFallbackSelf(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_wallet_fallback_user")
+
+	rec := valuePackageControllerRequest(UpdateValuePackageWalletFallbackSelf, http.MethodPut, "/value-packages/wallet-fallback", gin.H{"enabled": false}, user.Id)
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+	data := body["data"].(map[string]interface{})
+	preference := data["preference"].(map[string]interface{})
+	require.Equal(t, false, preference["wallet_fallback_enabled"])
+
+	var stored model.UserValuePackagePreference
+	require.NoError(t, model.DB.Where("user_id = ?", user.Id).First(&stored).Error)
+	require.NotNil(t, stored.WalletFallbackEnabled)
+	require.False(t, *stored.WalletFallbackEnabled)
+}
+
+func TestUpdateValuePackageWalletFallbackSelfRejectsMissingEnabled(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	user := createLdxpControllerTestUser(t, "vp_wallet_fallback_invalid")
+
+	rec := valuePackageControllerRequest(UpdateValuePackageWalletFallbackSelf, http.MethodPut, "/value-packages/wallet-fallback", gin.H{}, user.Id)
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, false, body["success"], rec.Body.String())
+}
+
 func TestCreateValuePackageLdxpSessionCreatesPendingOrder(t *testing.T) {
 	setupValuePackageControllerTest(t)
 	user := createLdxpControllerTestUser(t, "vp_ldxp_user")
@@ -1176,7 +1202,7 @@ func TestAdminCreateSubscriptionPlanRejectsInvalidValuePackageConfig(t *testing.
 
 	invalidConcurrencyPlan := missingLdxpPlan
 	invalidConcurrencyPlan.Title = "invalid concurrency"
-	invalidConcurrencyPlan.ConcurrencyLimit = 3
+	invalidConcurrencyPlan.ConcurrencyLimit = 0
 	invalidConcurrencyPlan.LdxpProductUrl = "https://ldxp.example.test/day"
 	invalidConcurrencyPlan.LdxpProductName = "Day product"
 	invalidConcurrencyPlan.LdxpProductAmount = 9.9
@@ -1374,7 +1400,7 @@ func TestAdminUpdateSubscriptionPlanPersistsValuePackageFields(t *testing.T) {
 	updated.PackageType = model.ValuePackageTypeMonth
 	updated.PackageLevel = model.ValuePackageLevelMonth
 	updated.ModelGroup = "month-card"
-	updated.ConcurrencyLimit = 2
+	updated.ConcurrencyLimit = 5
 	updated.Limit5hAmount = 2000
 	updated.Limit7dAmount = 8000
 	updated.Benefits = "month benefit"
@@ -1394,7 +1420,7 @@ func TestAdminUpdateSubscriptionPlanPersistsValuePackageFields(t *testing.T) {
 	assert.Equal(t, model.ValuePackageTypeMonth, persisted.PackageType)
 	assert.Equal(t, model.ValuePackageLevelMonth, persisted.PackageLevel)
 	assert.Equal(t, "month-card", persisted.ModelGroup)
-	assert.Equal(t, 2, persisted.ConcurrencyLimit)
+	assert.Equal(t, 5, persisted.ConcurrencyLimit)
 	assert.EqualValues(t, 2000, persisted.Limit5hAmount)
 	assert.EqualValues(t, 8000, persisted.Limit7dAmount)
 	assert.Equal(t, "month benefit", persisted.Benefits)

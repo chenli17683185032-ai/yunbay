@@ -20,14 +20,10 @@ export type QuickStartPurposeId = 'web-coding' | 'chat' | 'other'
 export type QuickStartFullscreenPageId =
   | 'purpose'
   | 'model'
-  | 'wallet'
-  | 'api-key'
-  | 'codex'
+  | 'software'
+  | 'account'
+  | 'readiness'
 export type QuickStartEnterDashboardPath = '/dashboard/overview'
-export type CodexSetupOptionId =
-  | 'macos-new-user'
-  | 'windows-new-user'
-  | 'ccswitch-existing-user'
 
 export type QuickStartPurpose = {
   id: QuickStartPurposeId
@@ -35,22 +31,13 @@ export type QuickStartPurpose = {
   descriptionKey: string
 }
 
-export type CodexSetupOption = {
-  id: CodexSetupOptionId
-  titleKey: string
-}
-
 export type CodexDownloadCard = {
   platform: 'macOS' | 'Windows'
+  titleKey: string
   descriptionKey: string
+  detailKey: string
   buttonLabelKey: string
   downloadHref: string
-  guideTitleKey?: string
-  guideDescriptionKey?: string
-  guideStepKeys?: string[]
-  supportNoteKey?: string
-  quarantineFixCommand?: string
-  terminalInstallCommand?: string
 }
 
 export type QuickStartFullscreenPage = {
@@ -71,25 +58,29 @@ export type QuickStartModelLike = {
 }
 
 export const QUICK_START_DEFAULT_PURPOSE: QuickStartPurposeId = 'web-coding'
+export const QUICK_START_PREFERRED_MODEL = 'gpt-5.6-sol'
+export const QUICK_START_PREFERRED_MODEL_LABEL_KEY = 'GPT 5.6 Sol'
+export const QUICK_START_REASONING_EFFORT = 'xhigh'
+export const QUICK_START_REASONING_EFFORT_LABEL_KEY = 'Extreme reasoning'
 export const QUICK_START_ENTER_DASHBOARD_PATH: QuickStartEnterDashboardPath =
   '/dashboard/overview'
 
 export const quickStartFullscreenPages: QuickStartFullscreenPage[] = [
   { id: 'purpose' },
   { id: 'model' },
-  { id: 'wallet' },
-  { id: 'api-key' },
-  { id: 'codex' },
+  { id: 'software' },
+  { id: 'account' },
+  { id: 'readiness' },
 ]
 
 export const nextStepGuideKeys: Record<
-  Exclude<QuickStartFullscreenPageId, 'codex'>,
+  Exclude<QuickStartFullscreenPageId, 'readiness'>,
   string
 > = {
   purpose: 'Next: choose a model and review its price.',
-  model: 'Next: check your wallet or redeem a code.',
-  wallet: 'Next: generate an API key and copy it automatically.',
-  'api-key': 'Next: download the official Codex app for your computer.',
+  model: 'Next: download CC Switch for your computer.',
+  software: 'Next: prepare your balance and API key.',
+  account: 'Next: review your setup and import it to CC Switch.',
 }
 
 export const purposeOptions: QuickStartPurpose[] = [
@@ -113,51 +104,25 @@ export const purposeOptions: QuickStartPurpose[] = [
   },
 ]
 
-const YUNBAY_CODEX_MACOS_DOWNLOAD_HREF =
-  '/downloads/yunbay-codex-macos-20260624-174731-53933cc047c3.zip'
-const YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH = '$HOME/Downloads/Yunbay Codex.app'
-const YUNBAY_CODEX_WINDOWS_DOWNLOAD_HREF =
-  '/downloads/yunbay-codex-windows-20260625-030300-f5121184b049.exe'
-
-export const codexSetupOptions: CodexSetupOption[] = [
-  {
-    id: 'macos-new-user',
-    titleKey:
-      'I am new to macOS (M-series only; Intel Macs should use CC Switch)',
-  },
-  {
-    id: 'windows-new-user',
-    titleKey: 'I am new to Windows',
-  },
-  {
-    id: 'ccswitch-existing-user',
-    titleKey: 'I already have CC Switch',
-  },
-]
+const CC_SWITCH_RELEASE_VERSION = 'v3.17.0'
+const CC_SWITCH_RELEASE_BASE_URL = `https://github.com/farion1231/cc-switch/releases/download/${CC_SWITCH_RELEASE_VERSION}`
 
 export const codexDownloadCards: CodexDownloadCard[] = [
   {
     platform: 'macOS',
-    descriptionKey: 'Download starts now.',
-    buttonLabelKey: 'Download one-click launcher',
-    downloadHref: YUNBAY_CODEX_MACOS_DOWNLOAD_HREF,
-    supportNoteKey:
-      'Only Apple Silicon / M-series Macs are supported. Intel Mac users should use CC Switch instead.',
-    quarantineFixCommand: `xattr -dr com.apple.quarantine "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}" && open "${YUNBAY_CODEX_MACOS_APP_DOWNLOAD_PATH}"`,
+    titleKey: 'Mac',
+    descriptionKey: 'Universal download for Intel and Apple Silicon Macs.',
+    detailKey: 'macOS 12 or later · Signed and notarized',
+    buttonLabelKey: 'Download for Mac',
+    downloadHref: `${CC_SWITCH_RELEASE_BASE_URL}/CC-Switch-${CC_SWITCH_RELEASE_VERSION}-macOS.dmg`,
   },
   {
     platform: 'Windows',
-    descriptionKey: 'Download starts now.',
-    buttonLabelKey: 'Download one-click launcher',
-    downloadHref: YUNBAY_CODEX_WINDOWS_DOWNLOAD_HREF,
-    guideTitleKey: 'What the Windows one-click launcher can do',
-    guideDescriptionKey:
-      'After downloading and running the installer, open Yunbay Codex and paste your Yunbay API key into Quick Start. It will automatically write a custom API configuration and connect to https://yunbay.xyz/v1. The app also supports model provider management, connectivity testing, balance and usage queries, and Codex session management.',
-    guideStepKeys: [
-      'Download and run the Windows installer.',
-      'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
-      'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
-    ],
+    titleKey: 'Windows',
+    descriptionKey: 'Standard 64-bit installer for Windows 10 and Windows 11.',
+    detailKey: 'Windows 10/11 · 64-bit',
+    buttonLabelKey: 'Download for Windows',
+    downloadHref: `${CC_SWITCH_RELEASE_BASE_URL}/CC-Switch-${CC_SWITCH_RELEASE_VERSION}-Windows.msi`,
   },
 ]
 
@@ -168,7 +133,10 @@ function normalizeModelNameForDefault(modelName: string): string {
 }
 
 export function isPreferredQuickStartModel(modelName: string): boolean {
-  return normalizeModelNameForDefault(modelName).includes('gpt5.5')
+  return (
+    normalizeModelNameForDefault(modelName) ===
+    normalizeModelNameForDefault(QUICK_START_PREFERRED_MODEL)
+  )
 }
 
 export function getDefaultQuickStartModelName(
@@ -180,6 +148,30 @@ export function getDefaultQuickStartModelName(
     models[0]?.model_name ||
     ''
   )
+}
+
+export function orderQuickStartModels(
+  models: QuickStartModelLike[],
+  selectedModelName: string
+): QuickStartModelLike[] {
+  const activeModelName = selectedModelName.trim()
+  if (!activeModelName) return models
+
+  const selectedModel = models.find(
+    (model) => model.model_name === activeModelName
+  )
+  if (!selectedModel) return models
+
+  return [
+    selectedModel,
+    ...models.filter((model) => model.model_name !== activeModelName),
+  ]
+}
+
+export function getQuickStartModelDisplayName(modelName: string): string {
+  return isPreferredQuickStartModel(modelName)
+    ? QUICK_START_PREFERRED_MODEL_LABEL_KEY
+    : modelName
 }
 
 function includesAny(value: string, patterns: RegExp[]): boolean {

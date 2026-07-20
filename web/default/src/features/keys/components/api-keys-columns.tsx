@@ -31,7 +31,6 @@ import {
 } from '@/components/ui/tooltip'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
-import { getActiveValuePackageBillingRatio } from '@/features/value-packages/lib/billing-display'
 import { type ValuePackageState } from '@/features/value-packages/types'
 import { API_KEY_STATUSES } from '../constants'
 import { getApiKeyDisplayGroup } from '../lib/api-key-display'
@@ -74,8 +73,7 @@ export function useApiKeysColumns(
 ): ColumnDef<ApiKey>[] {
   const { t } = useTranslation()
   const groupRatios = useGroupRatios()
-  const activePackageRatio =
-    getActiveValuePackageBillingRatio(valuePackageState)
+  const packageBillingActive = valuePackageState?.billing?.active === true
   return [
     {
       id: 'select',
@@ -203,7 +201,7 @@ export function useApiKeysColumns(
         const displayGroup = getApiKeyDisplayGroup(
           apiKey,
           groupRatios,
-          activePackageRatio
+          packageBillingActive
         )
         const group = displayGroup.group
         const ratio = displayGroup.ratio
@@ -216,7 +214,7 @@ export function useApiKeysColumns(
                   <span className='inline-flex items-center gap-1.5 text-xs' />
                 }
               >
-                <GroupBadge group='auto' ratio={ratio} />
+                <GroupBadge group='auto' />
                 {apiKey.cross_group_retry && (
                   <StatusBadge
                     label={t('Cross-group')}

@@ -2,6 +2,7 @@ package helper
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -484,6 +485,150 @@ func TestStreamScannerHandler_StreamStatus_EOFWithoutDone(t *testing.T) {
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonEOF, info.StreamStatus.EndReason)
 	assert.True(t, info.StreamStatus.IsNormalEnd())
+}
+
+func TestStreamScannerHandler_ClientGoneStopsByDefault(t *testing.T) {
+	upstreamReader, upstreamWriter := io.Pipe()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(requestCtx)
+	resp := &http.Response{Body: upstreamReader}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	var count atomic.Int64
+	go func() {
+		StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+			if count.Add(1) == 1 {
+				close(firstHandled)
+			}
+		})
+		close(handlerDone)
+	}()
+
+	require.NoError(t, writeStreamTestEvent(upstreamWriter, "first"))
+	select {
+	case <-firstHandled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first event was not handled")
+	}
+	cancelRequest()
+	_ = writeStreamTestEvent(upstreamWriter, "second")
+	_ = upstreamWriter.Close()
+
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("default stream did not stop after client disconnect")
+	}
+
+	assert.Equal(t, int64(1), count.Load())
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestStreamScannerHandler_ClientGoneDrainConsumesTerminalEvents(t *testing.T) {
+	upstreamReader, upstreamWriter := io.Pipe()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestCtx)
+	resp := &http.Response{Body: upstreamReader}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:       &relaycommon.ChannelMeta{},
+		DrainOnClientGone: true,
+	}
+
+	firstHandled := make(chan struct{})
+	handlerDone := make(chan struct{})
+	var count atomic.Int64
+	go func() {
+		StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+			if count.Add(1) == 1 {
+				close(firstHandled)
+			}
+		})
+		close(handlerDone)
+	}()
+
+	require.NoError(t, writeStreamTestEvent(upstreamWriter, "first"))
+	select {
+	case <-firstHandled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first event was not handled")
+	}
+	cancelRequest()
+	time.Sleep(20 * time.Millisecond)
+	require.NoError(t, writeStreamTestEvent(upstreamWriter, "terminal"))
+	require.NoError(t, writeStreamTestDone(upstreamWriter))
+	require.NoError(t, upstreamWriter.Close())
+
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("draining stream did not finish after terminal event")
+	}
+
+	assert.Equal(t, int64(2), count.Load())
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+}
+
+func TestStreamScannerHandler_ClientGoneDrainHasAbsoluteTimeout(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 1
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	upstreamReader, upstreamWriter := io.Pipe()
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(requestCtx)
+	resp := &http.Response{Body: upstreamReader}
+	info := &relaycommon.RelayInfo{
+		ChannelMeta:       &relaycommon.ChannelMeta{},
+		DrainOnClientGone: true,
+	}
+
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		defer upstreamWriter.Close()
+		for {
+			if err := writeStreamTestEvent(upstreamWriter, "keepalive"); err != nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+
+	cancelRequest()
+	startedAt := time.Now()
+	StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {})
+	elapsed := time.Since(startedAt)
+
+	select {
+	case <-writerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("upstream writer did not stop after drain timeout")
+	}
+
+	assert.Less(t, elapsed, 2*time.Second)
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
+	assert.True(t, info.StreamStatus.HasErrors())
+}
+
+func writeStreamTestEvent(w io.Writer, value string) error {
+	_, err := fmt.Fprintf(w, "data: %s\n", value)
+	return err
+}
+
+func writeStreamTestDone(w io.Writer) error {
+	_, err := fmt.Fprintln(w, "data: [DONE]")
+	return err
 }
 
 func TestStreamScannerHandler_StreamStatus_HandlerStop(t *testing.T) {

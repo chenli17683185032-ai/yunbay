@@ -482,6 +482,15 @@ test('buildErrorPayload classifies paid result parse errors after qr callback', 
   assert.equal(payload.snapshot_path, 'sess-1.html')
 })
 
+test('buildErrorPayload classifies Aliyun ESA challenge failures', () => {
+  const payload = buildErrorPayload(
+    new Error('Browser flow failed: LDXP WAF challenge blocked product page'),
+    config(),
+  )
+
+  assert.equal(payload.error_code, 'waf_challenge')
+})
+
 test('buildErrorPayload preserves snapshot path without leaking sensitive data', async () => {
   const payload = buildErrorPayload(
     new Error(

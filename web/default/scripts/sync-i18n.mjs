@@ -41,6 +41,7 @@ const BRAND_AND_LITERAL_KEYS = new Set([
   'Baidu V2',
   'ChatGPT',
   'ChatGPT Subscription (Codex)',
+  'CC Switch',
   'Claude',
   'Client ID',
   'Client Secret',
@@ -53,6 +54,7 @@ const BRAND_AND_LITERAL_KEYS = new Set([
   'Gemini',
   'Gemini Image 4K',
   'GitHub',
+  'GPT 5.6 Sol',
   'Jimeng',
   'JustSong',
   'LingYiWanWu',
@@ -97,6 +99,7 @@ const BRAND_AND_LITERAL_KEYS = new Set([
   'Waffo Pancake MoR',
   'WeChat',
   'WeChat Pay',
+  'Windows',
   'Webhook URL',
   'Webhook URL:',
   'Well-Known URL',
@@ -317,4 +320,3 @@ main().catch((err) => {
   console.error(err)
   process.exitCode = 1
 })
-

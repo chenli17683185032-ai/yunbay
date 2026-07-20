@@ -124,9 +124,10 @@ type RelayInfo struct {
 	RelayFormat            types.RelayFormat
 	SendResponseCount      int
 	ReceivedResponseCount  int
-	FinalPreConsumedQuota  int // 最终预消耗的配额
-	RealtimeActualQuota    int // realtime WebSocket actual cumulative quota observed so far
-	RealtimeReservedQuota  int // realtime WebSocket funding reservation target already requested
+	FinalPreConsumedQuota  int  // 最终预消耗的配额
+	RealtimeActualQuota    int  // realtime WebSocket actual cumulative quota observed so far
+	RealtimeReservedQuota  int  // realtime WebSocket funding reservation target already requested
+	DrainOnClientGone      bool // continue upstream for terminal usage; handler must stop downstream writes
 	// ForcePreConsume 为 true 时禁用 BillingSession 的信任额度旁路，
 	// 强制预扣全额。用于异步任务（视频/音乐生成等），因为请求返回后任务仍在运行，
 	// 必须在提交前锁定全额。
@@ -154,6 +155,8 @@ type RelayInfo struct {
 	ValuePackageBillingGroup   string
 	ValuePackageModelGroup     string
 	ValuePackagePackageType    string
+	ValuePackageWalletFallback bool
+	ValuePackageUseWallet      bool
 	// SubscriptionAmountTotal / SubscriptionAmountUsedAfterPreConsume are used to compute remaining in logs.
 	SubscriptionAmountTotal               int64
 	SubscriptionAmountUsedAfterPreConsume int64
@@ -492,6 +495,8 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		ValuePackageBillingGroup:   valuePackageGroup,
 		ValuePackageModelGroup:     valuePackageGroup,
 		ValuePackagePackageType:    common.GetContextKeyString(c, constant.ContextKeyValuePackagePackageType),
+		ValuePackageWalletFallback: common.GetContextKeyBool(c, constant.ContextKeyValuePackageWalletFallback),
+		ValuePackageUseWallet:      common.GetContextKeyBool(c, constant.ContextKeyValuePackageUseWallet),
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 

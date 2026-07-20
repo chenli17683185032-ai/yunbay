@@ -466,6 +466,9 @@ export function buildErrorPayload(error: unknown, config: WorkerConfig): WorkerE
 }
 
 function errorCodeFromWorkerFailure(message: string): string {
+  if (message.includes('LDXP WAF challenge')) {
+    return 'waf_challenge'
+  }
   if (message.includes('qr=called') && (
     message.includes('Unable to extract amount from page text') ||
     message.includes('Unable to extract card key')

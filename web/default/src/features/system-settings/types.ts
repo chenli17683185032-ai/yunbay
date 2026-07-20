@@ -446,6 +446,7 @@ export type ModelPriceSyncItem = {
 export type ModelPriceSyncRequest = {
   openrouter_channel_id?: number
   models: string[]
+  overrides?: Record<string, CanonicalModelPrice>
 }
 
 export type ModelPriceSyncResult = {

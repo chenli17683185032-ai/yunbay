@@ -57,6 +57,8 @@ const (
 	ContextKeyValuePackagePlanId         ContextKey = "value_package_plan_id"
 	ContextKeyValuePackageModelGroup     ContextKey = "value_package_model_group"
 	ContextKeyValuePackagePackageType    ContextKey = "value_package_package_type"
+	ContextKeyValuePackageWalletFallback ContextKey = "value_package_wallet_fallback"
+	ContextKeyValuePackageUseWallet      ContextKey = "value_package_use_wallet"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 

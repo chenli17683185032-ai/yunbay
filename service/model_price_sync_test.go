@@ -236,6 +236,26 @@ func TestModelPriceSync_BuildBillingExprRequiresInputPrice(t *testing.T) {
 	}
 }
 
+func TestModelPriceSync_OverridesCanMakeSkippedModelSyncable(t *testing.T) {
+	input, output := 3.0, 15.0
+	preview := ModelPriceSyncResult{Items: []ModelPriceSyncItem{{
+		ModelName: "grok-3", Status: "skipped", Reason: "no_openrouter_match",
+	}}, SkippedCount: 1}
+	err := applyModelPriceSyncOverrides(&preview, map[string]CanonicalModelPrice{
+		"grok-3": {Input: &input, Output: &output},
+	})
+	if err != nil {
+		t.Fatalf("apply overrides: %v", err)
+	}
+	item := preview.Items[0]
+	if !item.WouldApply || item.Status != "ready" || item.BillingExpr == "" {
+		t.Fatalf("override was not made applyable: %+v", item)
+	}
+	if preview.Syncable != 1 || preview.SkippedCount != 0 {
+		t.Fatalf("unexpected counts: %+v", preview)
+	}
+}
+
 func assertPrice(t *testing.T, got *float64, want float64) {
 	t.Helper()
 	if got == nil {

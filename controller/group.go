@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -29,11 +30,24 @@ func GetUserGroups(c *gin.Context) {
 	userId := c.GetInt("id")
 	userGroup, _ = model.GetUserGroup(userId, false)
 	userUsableGroups := service.GetUserUsableGroups(userGroup)
+	packageGroup := ""
+	valuePackage, err := model.GetActiveValuePackageForRelay(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if valuePackage != nil && valuePackage.Billing != nil && valuePackage.Billing.Active {
+		packageGroup = valuePackage.Billing.PackageGroup
+	}
 	for groupName, _ := range ratio_setting.GetGroupRatioCopy() {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
+			ratio := service.GetUserGroupRatio(userGroup, groupName)
+			if packageGroup != "" {
+				ratio = service.GetValuePackageGroupRatio(packageGroup, groupName)
+			}
 			usableGroups[groupName] = map[string]interface{}{
-				"ratio": service.GetUserGroupRatio(userGroup, groupName),
+				"ratio": ratio,
 				"desc":  desc,
 			}
 		}

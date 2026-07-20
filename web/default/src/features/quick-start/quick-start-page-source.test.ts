@@ -28,26 +28,129 @@ const ccSwitchSource = readFileSync(
   resolve(currentDir, 'quick-start-cc-switch.ts'),
   'utf8'
 )
+const dataSource = readFileSync(
+  resolve(currentDir, 'quick-start-data.ts'),
+  'utf8'
+)
+const motionSource = readFileSync(
+  resolve(currentDir, 'quick-start-motion.tsx'),
+  'utf8'
+)
+const motionConfigSource = readFileSync(
+  resolve(currentDir, 'quick-start-motion-config.ts'),
+  'utf8'
+)
+const completionDialogSource = readFileSync(
+  resolve(currentDir, 'quick-start-completion-dialog.tsx'),
+  'utf8'
+)
+const landingSnapFrameSource = readFileSync(
+  resolve(currentDir, '../home/components/landing-snap-frame.tsx'),
+  'utf8'
+)
+const appHeaderSource = readFileSync(
+  resolve(currentDir, '../../components/layout/components/app-header.tsx'),
+  'utf8'
+)
+const providerPanelSource = pageSource.slice(
+  pageSource.indexOf('function CCSwitchImportPanel'),
+  pageSource.indexOf('function ImageSettingsImportPanel')
+)
+const promptPanelSource = pageSource.slice(
+  pageSource.indexOf('function ImageSettingsImportPanel'),
+  pageSource.indexOf('function QuickStartPage')
+)
+const providerReimportHandlerSource = pageSource.slice(
+  pageSource.indexOf('const handleReimportToCCSwitch'),
+  pageSource.indexOf('const handleImportPromptToCCSwitch')
+)
+const promptImportHandlerStart = pageSource.indexOf(
+  'const handleImportPromptToCCSwitch'
+)
+const promptImportHandlerSource = pageSource.slice(
+  promptImportHandlerStart,
+  pageSource.indexOf('\n\n  return (', promptImportHandlerStart)
+)
 
-test('quick start bottom controls make the primary CTA more prominent without changing flow logic', () => {
-  assert.match(pageSource, /shadow-\[0_18px_60px_rgba\(255,255,255,0\.22\)\]/)
+test('quick start controls are centered, enlarged, and keep one primary action', () => {
+  assert.match(pageSource, /inset-x-0/)
+  assert.match(pageSource, /mx-auto/)
+  assert.match(pageSource, /h-12 min-w-12/)
+  assert.match(pageSource, /min-w-32 justify-self-end/)
+  assert.match(pageSource, /shadow-\[0_16px_48px_rgba\(255,255,255,0\.2\)\]/)
   assert.match(pageSource, /ring-1 ring-white\/30/)
   assert.match(pageSource, /font-black/)
-  assert.match(pageSource, /hover:-translate-y-0\.5/)
-  assert.match(pageSource, /const nextLabel = props\.api\.canGoNext \? t\('Next'\) : t\('Enter dashboard'\)/)
   assert.match(
     pageSource,
-    /const handleNext = props\.api\.canGoNext\s*\?\s*props\.api\.goNext\s*:\s*props\.onEnterDashboard/
+    /whileHover=\{props\.reducedMotion \? undefined : \{ y: -2 \}\}/
   )
+  assert.match(pageSource, /grid-cols-\[minmax\(0,1fr\)_auto_minmax\(0,1fr\)\]/)
+  assert.match(pageSource, /justify-self-start/)
+  assert.match(pageSource, /justify-self-end/)
+  assert.match(pageSource, /grid-cols-\[3rem_auto_minmax\(0,1fr\)\]/)
+  assert.match(pageSource, /data-quick-start-controls-state/)
+  assert.match(
+    pageSource,
+    /controlsCollapsed = isFinalPage && props\.canFinish/
+  )
+  assert.match(pageSource, /w-\[min\(calc\(100%-1\.5rem\),34rem\)\]/)
+  assert.match(pageSource, /w-\[min\(calc\(100%-1\.5rem\),19rem\)\]/)
+  assert.match(pageSource, /controlsGridClass = 'grid-cols-1'/)
+  assert.match(pageSource, /!controlsCollapsed \? \(/)
+  assert.match(pageSource, /layout=\{props\.reducedMotion \? false : true\}/)
+  assert.match(pageSource, /function QuickStartControlsSlot/)
+  assert.match(pageSource, /controlsElement=\{/)
+  assert.match(pageSource, /<QuickStartControlsSlot/)
+  assert.doesNotMatch(pageSource, /QuickStartControlsContext/)
+  assert.match(landingSnapFrameSource, /controlsElement\?: ReactElement/)
+  assert.match(
+    landingSnapFrameSource,
+    /cloneElement\(props\.element, \{ api: props\.api \}\)/
+  )
+  assert.match(landingSnapFrameSource, /controlsComponent\?: ComponentType/)
+  assert.match(pageSource, /isFinalPage\s*\?\s*props\.onEnterDashboard/)
+  assert.equal(pageSource.match(/t\('Enter dashboard'\)/g)?.length, 1)
 })
 
-test('quick start secondary dashboard CTA remains visible but lower priority', () => {
-  assert.match(pageSource, /border-white\/18/)
-  assert.match(pageSource, /bg-white\/\[0\.07\]/)
-  assert.match(pageSource, /text-white\/82/)
-  assert.match(pageSource, /hover:bg-white\/\[0\.11\]/)
-  assert.match(pageSource, /onClick=\{props\.onEnterDashboard\}/)
-  assert.match(pageSource, /onClick=\{handleNext\}/)
+test('quick start uses guided in-page motion with reduced-motion fallbacks', () => {
+  assert.match(pageSource, /LayoutGroup id='quick-start-purpose-selection'/)
+  assert.match(pageSource, /LayoutGroup id='quick-start-model-selection'/)
+  assert.match(pageSource, /LayoutGroup id='quick-start-software-selection'/)
+  assert.match(pageSource, /layout=\{reducedMotion \? false : 'position'\}/)
+  assert.match(pageSource, /QuickStartSelectionSurface/)
+  assert.match(pageSource, /QuickStartSelectionCheck/)
+  assert.match(pageSource, /QuickStartStepMarker/)
+  assert.match(motionConfigSource, /QUICK_START_SPRING_TRANSITION/)
+  assert.match(motionConfigSource, /QUICK_START_REDUCED_TRANSITION/)
+  assert.match(motionSource, /props\.reducedMotion/)
+})
+
+test('software download rows use accurate platform marks and aligned actions', () => {
+  assert.match(pageSource, /import \{ FaWindows \} from 'react-icons\/fa6'/)
+  assert.match(pageSource, /import \{ SiApple \} from 'react-icons\/si'/)
+  assert.match(
+    pageSource,
+    /props\.card\.platform === 'macOS' \? SiApple : FaWindows/
+  )
+  assert.doesNotMatch(pageSource, /\n\s*Apple,\n/)
+  assert.match(pageSource, /sm:grid-cols-\[minmax\(0,1fr\)_14rem\]/)
+  assert.match(pageSource, /sm:grid-cols-\[11rem_minmax\(0,1fr\)_11rem\]/)
+  assert.match(pageSource, /className='relative z-10 h-12 w-full/)
+})
+
+test('quick start keeps DOM content above the WebGL background in filtered app shells', () => {
+  assert.match(pageSource, /fixed inset-0 h-\[100dvh\] w-full overflow-hidden/)
+  assert.match(
+    pageSource,
+    /PointCloudMorphCanvas[\s\S]*className='absolute z-0'/
+  )
+  assert.match(pageSource, /LandingSnapFrame[\s\S]*className='relative z-10'/)
+})
+
+test('quick start keeps skip as a low-priority text action', () => {
+  assert.match(pageSource, /Set up later and enter dashboard/)
+  assert.match(pageSource, /text-white\/44/)
+  assert.doesNotMatch(pageSource, /secondary dashboard CTA/)
 })
 
 test('quick start keeps generated API key when clipboard copy fails', () => {
@@ -60,24 +163,161 @@ test('quick start keeps generated API key when clipboard copy fails', () => {
   assert.match(pageSource, /setGeneratedApiKeyCopied\(result\.copied\)/)
 })
 
+test('quick start uses the corrected model slug and keeps reasoning as a separate setting', () => {
+  assert.match(dataSource, /QUICK_START_PREFERRED_MODEL = 'gpt-5\.6-sol'/)
+  assert.match(dataSource, /QUICK_START_REASONING_EFFORT = 'xhigh'/)
+  assert.doesNotMatch(dataSource, /gpt-5\.6-sol-thinking/)
+  assert.match(pageSource, /QUICK_START_REASONING_EFFORT_LABEL_KEY/)
+})
 
-test('quick start fifth page keeps Codex downloads, software guide, and CC Switch one-click import', () => {
-  assert.match(pageSource, /Codex one-click launcher/)
-  assert.match(pageSource, /Codex one-click setup/)
-  assert.match(pageSource, /Download the Codex one-click launcher and connect it to your Yunbay API key\./)
-  assert.match(pageSource, /card\.guideTitleKey/)
-  assert.match(pageSource, /card\.guideDescriptionKey/)
-  assert.match(pageSource, /card\.guideStepKeys/)
+test('quick start software and account steps match the new five-page flow', () => {
+  assert.match(pageSource, /Download CC Switch/)
+  assert.match(pageSource, /codexDownloadCards\.map/)
+  assert.match(
+    dataSource,
+    /CC-Switch-\$\{CC_SWITCH_RELEASE_VERSION\}-macOS\.dmg/
+  )
+  assert.match(
+    dataSource,
+    /CC-Switch-\$\{CC_SWITCH_RELEASE_VERSION\}-Windows\.msi/
+  )
+  assert.match(pageSource, /Add balance or redeem a code/)
+  assert.match(pageSource, /Create your API key/)
+  assert.match(pageSource, /recoverLatestQuickStartApiKey/)
+  assert.match(pageSource, /queryClient\.setQueryData/)
+  assert.match(pageSource, /const balanceReady = currentBalance > 0/)
+})
+
+test('quick start final page merges provider feedback and reveals image settings next', () => {
+  assert.match(pageSource, /Have you finished installing CC Switch\?/)
   assert.match(pageSource, /Import current setup to CC Switch/)
-  assert.match(pageSource, /Launch CC Switch from your browser with this API and model prefilled\./)
   assert.match(pageSource, /buildQuickStartCCSwitchImportURL/)
+  assert.match(pageSource, /buildQuickStartCCSwitchPromptImportURL/)
   assert.match(pageSource, /handleImportToCCSwitch/)
-  assert.match(pageSource, /QuickStartConfigPill/)
+  assert.match(pageSource, /handleImportPromptToCCSwitch/)
+  assert.match(pageSource, /imported=\{importAttempted\}/)
+  assert.match(pageSource, /onImport=\{handleImportToCCSwitch\}/)
+  assert.match(pageSource, /onReimport=\{handleReimportToCCSwitch\}/)
+  assert.match(pageSource, /softwareConfirmed && effectiveApiKey/)
+  assert.doesNotMatch(pageSource, /effectiveApiKey && !importConfirmed/)
+  assert.equal(pageSource.match(/<CCSwitchImportPanel/g)?.length, 1)
+  assert.equal(pageSource.match(/data-quick-start-provider-status/g)?.length, 1)
+  assert.match(providerPanelSource, /data-quick-start-provider-panel/)
+  assert.match(
+    providerPanelSource,
+    /data-quick-start-provider-status=\{props\.imported \? 'confirmed' : 'ready'\}/
+  )
+  assert.doesNotMatch(pageSource, /Did CC Switch open\?/)
+  assert.doesNotMatch(pageSource, /handleConfirmImport/)
+  assert.doesNotMatch(pageSource, /t\('It opened'\)/)
+  assert.doesNotMatch(pageSource, /t\('Try again'\)/)
+  assert.doesNotMatch(providerPanelSource, /onImportPrompt/)
+  assert.doesNotMatch(providerPanelSource, /handleImportPromptToCCSwitch/)
+  assert.match(pageSource, /data-quick-start-provider-reimport/)
+  assert.match(pageSource, /data-quick-start-provider-details/)
+  assert.match(pageSource, /onDetailsCollapsed=\{scrollPromptIntoView\}/)
+  assert.match(providerPanelSource, /props\.onDetailsCollapsed\(\)/)
+  assert.match(providerPanelSource, /aria-expanded=\{props\.detailsExpanded\}/)
+  assert.match(pageSource, /aria-controls='quick-start-provider-details'/)
+  assert.match(
+    providerPanelSource,
+    /onPointerEnter=\{\(\) => props\.onDetailsExpandedChange\(true\)\}/
+  )
+  assert.match(
+    providerPanelSource,
+    /onPointerLeave=\{\(\) => props\.onDetailsExpandedChange\(false\)\}/
+  )
+  assert.match(
+    providerPanelSource,
+    /onFocus=\{\(\) => props\.onDetailsExpandedChange\(true\)\}/
+  )
+  assert.match(pageSource, /event\.currentTarget\.contains/)
+  assert.match(pageSource, /height: 'auto'/)
+  assert.match(pageSource, /onAnimationComplete=\{\(\) =>/)
+  assert.match(
+    pageSource,
+    /expandedButton\?\.getAttribute\('aria-expanded'\) !==\s*'true'/
+  )
+  assert.match(pageSource, /QUICK_START_REDUCED_TRANSITION/)
+  assert.match(providerReimportHandlerSource, /openCCSwitchProviderImport\(\)/)
+  assert.doesNotMatch(
+    providerReimportHandlerSource,
+    /setImportConfirmed\(false\)/
+  )
+  assert.match(promptImportHandlerSource, /setImportConfirmed\(true\)/)
+  assert.match(promptImportHandlerSource, /importConfirmed: true/)
+  assert.match(pageSource, /canFinish=\{importConfirmed\}/)
+  assert.match(pageSource, /canFinish=\{props\.canFinish\}/)
+  assert.match(pageSource, /layout=\{reducedMotion \? false : true\}/)
+  assert.match(pageSource, /step='04'/)
+  assert.equal(
+    pageSource.match(/className='size-9 rounded-full text-\[11px\]'/g)?.length,
+    3
+  )
+  assert.match(pageSource, /data-quick-start-prompt-panel/)
+  assert.match(
+    pageSource,
+    /data-quick-start-prompt-imported=\{props\.imported\}/
+  )
+  assert.match(pageSource, /buildQuickStartImagePromptPreview/)
+  assert.match(pageSource, /One-click import image settings/)
+  assert.match(promptPanelSource, /data-quick-start-prompt-status/)
+  assert.match(
+    promptPanelSource,
+    /data-quick-start-prompt-status=\{props\.imported \? 'confirmed' : 'ready'\}/
+  )
+  assert.match(promptPanelSource, /mode='popLayout'/)
+  assert.match(promptPanelSource, /key='prompt-ready'/)
+  assert.match(promptPanelSource, /key='prompt-imported'/)
+  assert.match(promptPanelSource, /step='05'/)
+  assert.match(promptPanelSource, /Image settings imported/)
+  assert.match(
+    promptPanelSource,
+    /Setup complete\. You can now enter the dashboard\./
+  )
+  assert.match(promptPanelSource, /data-quick-start-prompt-reimport/)
+  assert.match(promptPanelSource, /t\('Import again'\)/)
+  assert.match(pageSource, /onCollapsed=\{scrollPromptIntoView\}/)
+  assert.match(promptPanelSource, /onAnimationComplete=\{props\.onCollapsed\}/)
+  const providerPanelPosition = pageSource.indexOf('<CCSwitchImportPanel')
+  const promptConditionPosition = pageSource.indexOf('{importAttempted ? (')
+  const promptPanelPosition = pageSource.indexOf('<ImageSettingsImportPanel')
+  assert.ok(providerPanelPosition < promptConditionPosition)
+  assert.ok(promptConditionPosition < promptPanelPosition)
+  assert.match(pageSource, /imported=\{importConfirmed\}/)
   assert.match(pageSource, /Configured API/)
   assert.match(pageSource, /Configured model/)
   assert.match(pageSource, /Generated API key/)
+  assert.match(pageSource, /importConfirmed/)
+  assert.match(pageSource, /navigationCompletedRef/)
+  assert.match(
+    pageSource,
+    /importAttempted[\s\S]*\? promptPanelRef\.current[\s\S]*: importPanelRef\.current/
+  )
+  assert.match(
+    pageSource,
+    /const promptPanelRef = useRef<HTMLDivElement>\(null\)/
+  )
+  assert.doesNotMatch(pageSource, /importStatusRef/)
+  assert.match(pageSource, /target\?\.scrollIntoView/)
+  assert.match(pageSource, /exitSurface\.animate\(keyframes/)
+  assert.match(pageSource, /fill: 'forwards'/)
+  assert.match(pageSource, /scroll-mb-4 sm:scroll-mb-\[8rem\]/)
+  assert.match(
+    pageSource,
+    /h-\[calc\(100dvh-7\.75rem-env\(safe-area-inset-bottom\)\)\][\s\S]*sm:h-full/
+  )
+  assert.match(pageSource, /window\.setTimeout/)
+  assert.match(pageSource, /clipPath/)
   assert.match(ccSwitchSource, /ccswitch:\/\/v1\/import/)
-  assert.match(pageSource, /CC Switch/)
-  assert.doesNotMatch(pageSource, /Official Codex/)
-  assert.doesNotMatch(pageSource, /Download Codex/)
+})
+
+test('console completion guide waits for required announcements and offers both outcomes', () => {
+  assert.match(appHeaderSource, /quickStartSession\.completionPromptPending/)
+  assert.match(appHeaderSource, /!notifications\.loading/)
+  assert.match(appHeaderSource, /!notifications\.requiredDialogOpen/)
+  assert.match(appHeaderSource, /to: '\/quick-start', hash: 'readiness'/)
+  assert.match(completionDialogSource, /I need to review it again/)
+  assert.match(completionDialogSource, /No, start now/)
+  assert.match(completionDialogSource, /showCloseButton=\{false\}/)
 })

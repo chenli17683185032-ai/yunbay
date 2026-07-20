@@ -20,10 +20,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   buildQuickStartCCSwitchImportURL,
+  buildQuickStartCCSwitchPromptImportURL,
+  buildQuickStartImagePrompt,
+  buildQuickStartImagePromptPreview,
   getQuickStartCCSwitchImportState,
   maskQuickStartApiKey,
   normalizeQuickStartApiKey,
   normalizeQuickStartCodexEndpoint,
+  QUICK_START_CC_SWITCH_PROMPT_NAME,
 } from './quick-start-cc-switch'
 
 test('quick start CC Switch import URL enables a Codex provider with the selected model', () => {
@@ -56,6 +60,67 @@ test('quick start CC Switch import URL preserves an existing sk prefix', () => {
   const parsed = new URL(url)
 
   assert.equal(parsed.searchParams.get('apiKey'), 'sk-live-key')
+})
+
+test('quick start image prompt preserves the imported API key and required routing rules', () => {
+  const prompt = buildQuickStartImagePrompt(' test-import-key ')
+
+  assert.equal(
+    prompt,
+    '文生图请求端点走POST /v1/images/generations；图生图、参考图、局部修改、蒙版请求端点走POST /v1/images/edits。模型固定使用 `gpt-image-2`。禁止把 `gpt-image-2` 或 `gpt-image-1.5` 等生图模型配置为 Codex 主聊天模型，也禁止通过 `/v1/chat/completions` 或 `/v1/responses` 直接调用它。API Key为：sk-test-import-key\n收到图片的 Base64 数据后，先解码并将原图保存到当前工作区的 `outputs/` 目录；需要 4K 时再另外处理，并保留原始图片。'
+  )
+})
+
+test('quick start image prompt preview masks the key without changing the rules', () => {
+  const preview = buildQuickStartImagePromptPreview('sk-test-import-key')
+
+  assert.match(preview, /API Key为：sk-••••••••-key/)
+  assert.doesNotMatch(preview, /sk-test-import-key/)
+  assert.match(preview, /文生图请求端点走POST \/v1\/images\/generations/)
+  assert.match(
+    preview,
+    /图生图、参考图、局部修改、蒙版请求端点走POST \/v1\/images\/edits/
+  )
+  assert.doesNotMatch(preview, /https:\/\/yunbay\.xyz\/v1\/images\/generations/)
+  assert.doesNotMatch(preview, /\t/)
+  assert.match(preview, /gpt-image-2/)
+  assert.match(preview, /gpt-image-1\.5/)
+  assert.match(preview, /等生图模型配置为 Codex 主聊天模型/)
+  assert.match(preview, /outputs\//)
+  assert.ok(preview.endsWith('并保留原始图片。'))
+})
+
+test('quick start CC Switch prompt URL imports and enables the image prompt', () => {
+  const parsed = new URL(
+    buildQuickStartCCSwitchPromptImportURL({ apiKey: 'sk-test-import-key' })
+  )
+  const encodedContent = parsed.searchParams.get('content')
+
+  assert.equal(parsed.protocol, 'ccswitch:')
+  assert.equal(parsed.hostname, 'v1')
+  assert.equal(parsed.pathname, '/import')
+  assert.equal(parsed.searchParams.get('resource'), 'prompt')
+  assert.equal(parsed.searchParams.get('app'), 'codex')
+  assert.equal(
+    parsed.searchParams.get('name'),
+    QUICK_START_CC_SWITCH_PROMPT_NAME
+  )
+  assert.ok(encodedContent)
+  const decodedContent = Buffer.from(encodedContent, 'base64').toString('utf8')
+  assert.equal(decodedContent, buildQuickStartImagePrompt('sk-test-import-key'))
+  assert.ok(
+    decodedContent.startsWith(
+      '文生图请求端点走POST /v1/images/generations；图生图、参考图、局部修改、蒙版请求端点走POST /v1/images/edits。'
+    )
+  )
+  assert.match(decodedContent, /gpt-image-1\.5/)
+  assert.match(decodedContent, /等生图模型配置为 Codex 主聊天模型/)
+  assert.match(decodedContent, /API Key为：sk-test-import-key\n/)
+  assert.ok(decodedContent.endsWith('并保留原始图片。'))
+  assert.equal(parsed.searchParams.get('enabled'), 'true')
+  assert.equal(parsed.searchParams.has('apiKey'), false)
+  assert.equal(parsed.searchParams.has('endpoint'), false)
+  assert.equal(parsed.searchParams.has('model'), false)
 })
 
 test('quick start Codex endpoint normalization avoids duplicate v1 suffixes', () => {

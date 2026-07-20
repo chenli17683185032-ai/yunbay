@@ -67,10 +67,13 @@ const (
 	ValuePackageExhaustedReason7d    = "limit_7d_exhausted"
 )
 
+const valuePackageRenewalExhaustedReasonTotalDust = "total_quota_dust"
+
 const (
 	ValuePackageQuotaResetSourceUserConsumeCount = "user_consume_count"
 	ValuePackageQuotaResetSourceAdminManualReset = "admin_manual_reset"
 	ValuePackageQuotaResetSourceCycleRenewal     = "cycle_renewal"
+	ValuePackageQuotaResetSourcePackageRenewal   = "package_renewal"
 
 	ValuePackageResetCountLedgerSourceAdminSet      = "admin_set"
 	ValuePackageResetCountLedgerSourceAdminAdd      = "admin_add"
@@ -420,10 +423,15 @@ type UserValuePackagePreference struct {
 	Id                       int   `json:"id"`
 	UserId                   int   `json:"user_id" gorm:"uniqueIndex"`
 	Enabled                  bool  `json:"enabled" gorm:"default:false"`
+	WalletFallbackEnabled    *bool `json:"wallet_fallback_enabled" gorm:"column:wallet_fallback_enabled"`
 	ActiveUserSubscriptionId int   `json:"active_user_subscription_id" gorm:"index;default:0"`
 	ResetCount               int   `json:"reset_count" gorm:"default:0"`
 	CreatedAt                int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt                int64 `json:"updated_at" gorm:"bigint"`
+}
+
+func (p UserValuePackagePreference) AllowsWalletFallback() bool {
+	return p.WalletFallbackEnabled == nil || *p.WalletFallbackEnabled
 }
 
 func (p *UserValuePackagePreference) BeforeCreate(tx *gorm.DB) error {
@@ -909,6 +917,47 @@ func extendValuePackageSubscriptionTx(tx *gorm.DB, subscriptionID int, plan *Sub
 	if existing.Status != UserSubscriptionStatusActive {
 		return nil, errors.New("value package subscription is not active")
 	}
+	if err := maybeAdvanceValuePackageCycleTx(tx, &existing, plan, nowUnix); err != nil {
+		return nil, err
+	}
+	usage, err := buildValuePackageUsageSummaryTx(tx, existing.UserId, &existing, plan, nowUnix)
+	if err != nil {
+		return nil, err
+	}
+	renewalExhaustedReason := valuePackageRenewalExhaustedReason(usage)
+	if renewalExhaustedReason != "" {
+		if existing.QuotaEpoch == math.MaxInt64 {
+			return nil, errors.New("value package quota epoch overflow")
+		}
+		fromEpoch := existing.QuotaEpoch
+		amountUsedBefore := existing.AmountUsed
+		existing.AmountTotal = plan.TotalAmount
+		existing.AmountUsed = 0
+		existing.StartTime = nowUnix
+		existing.EndTime = purchasedEndUnix
+		existing.QuotaEpoch++
+		existing.LastResetTime = nowUnix
+		existing.NextResetTime = 0
+		existing.UpdatedAt = common.GetTimestamp()
+		if err := tx.Create(&ValuePackageQuotaReset{
+			UserId:             existing.UserId,
+			UserSubscriptionId: existing.Id,
+			PlanId:             existing.PlanId,
+			PackageType:        plan.PackageType,
+			ResetAt:            nowUnix,
+			FromEpoch:          fromEpoch,
+			ToEpoch:            existing.QuotaEpoch,
+			AmountUsedBefore:   amountUsedBefore,
+			Source:             ValuePackageQuotaResetSourcePackageRenewal,
+			Note:               "exhausted package renewal: " + renewalExhaustedReason,
+		}).Error; err != nil {
+			return nil, err
+		}
+		if err := tx.Save(&existing).Error; err != nil {
+			return nil, err
+		}
+		return &existing, nil
+	}
 	base := existing.EndTime
 	if base < nowUnix {
 		base = nowUnix
@@ -917,15 +966,39 @@ func extendValuePackageSubscriptionTx(tx *gorm.DB, subscriptionID int, plan *Sub
 		return nil, errors.New("value package subscription end time overflow")
 	}
 	existing.EndTime = base + duration
-	if err := maybeAdvanceValuePackageCycleTx(tx, &existing, plan, nowUnix); err != nil {
-		return nil, err
-	}
 	syncValuePackageCycleSchedule(&existing, plan)
 	existing.UpdatedAt = common.GetTimestamp()
 	if err := tx.Save(&existing).Error; err != nil {
 		return nil, err
 	}
 	return &existing, nil
+}
+
+func valuePackageRenewalExhaustedReason(usage *ValuePackageUsageSummary) string {
+	if usage == nil {
+		return ""
+	}
+	if usage.Exhausted {
+		return usage.ExhaustedReason
+	}
+	if usage.TotalLimit <= 0 || usage.TotalRemaining <= 0 {
+		return ""
+	}
+
+	// A rejected final reserve can leave a positive tail. Only treat it as
+	// exhausted when it is both at most one basis point and at most one cent.
+	relativeDustLimit := usage.TotalLimit / 10_000
+	absoluteDustLimit := int64(common.QuotaPerUnit / 100)
+	if relativeDustLimit <= 0 || absoluteDustLimit <= 0 {
+		return ""
+	}
+	if relativeDustLimit > absoluteDustLimit {
+		relativeDustLimit = absoluteDustLimit
+	}
+	if usage.TotalRemaining <= relativeDustLimit {
+		return valuePackageRenewalExhaustedReasonTotalDust
+	}
+	return ""
 }
 
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
@@ -2650,6 +2723,41 @@ func DeactivateValuePackage(userId int) (*ValuePackageState, error) {
 		if err != nil {
 			return err
 		}
+		state.Preference = *pref
+		return nil
+	})
+	return state, err
+}
+
+func UpdateValuePackageWalletFallback(userId int, enabled bool) (*ValuePackageState, error) {
+	if userId <= 0 {
+		return nil, errors.New("invalid userId")
+	}
+	var state *ValuePackageState
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := ensureExistingUserForUpdateTx(tx, userId); err != nil {
+			return err
+		}
+		var err error
+		state, err = getValuePackageStateTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		pref, err := ensureValuePackagePreferenceForUpdateTx(tx, userId)
+		if err != nil {
+			return err
+		}
+		now := common.GetTimestamp()
+		if err := tx.Model(&UserValuePackagePreference{}).
+			Where("user_id = ?", userId).
+			Updates(map[string]interface{}{
+				"wallet_fallback_enabled": enabled,
+				"updated_at":              now,
+			}).Error; err != nil {
+			return err
+		}
+		pref.WalletFallbackEnabled = common.GetPointer(enabled)
+		pref.UpdatedAt = now
 		state.Preference = *pref
 		return nil
 	})

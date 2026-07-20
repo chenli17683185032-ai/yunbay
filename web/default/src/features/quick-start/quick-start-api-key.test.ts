@@ -22,6 +22,7 @@ import type { ApiKeyFormData } from '@/features/keys/types'
 import {
   generateAndCopyQuickStartApiKey,
   getQuickStartApiKeyGroup,
+  recoverLatestQuickStartApiKey,
 } from './quick-start-api-key'
 
 test('quick start API key group requires gpt-plus instead of falling back to another user-available group', () => {
@@ -132,6 +133,57 @@ test('quick start API key creation refuses to create an unusable key without ava
     }),
     /available group/i
   )
+})
+
+test('quick start recovers the newest enabled onboarding key without creating another one', async () => {
+  let revealedId = 0
+  const result = await recoverLatestQuickStartApiKey({
+    searchApiKeys: async ({ keyword }) => ({
+      success: true,
+      data: {
+        items: [
+          { id: 1, name: `${keyword}1700000000000`, status: 1 },
+          { id: 2, name: `${keyword}1800000000000`, status: 2 },
+          { id: 3, name: `${keyword}1750000000000`, status: 1 },
+          { id: 4, name: 'unrelated-key', status: 1 },
+          { id: 5, name: `${keyword}1900000000000`, status: 3 },
+          { id: 6, name: `${keyword}2000000000000`, status: 4 },
+        ],
+      },
+    }),
+    fetchTokenKey: async (id) => {
+      revealedId = id
+      return { success: true, data: { key: 'existing-key' } }
+    },
+  })
+
+  assert.equal(revealedId, 3)
+  assert.deepEqual(result, {
+    name: 'yunbay-quick-start-1750000000000',
+    fullKey: 'sk-existing-key',
+    copied: false,
+  })
+})
+
+test('quick start recovery returns null when no reusable key is available', async () => {
+  const result = await recoverLatestQuickStartApiKey({
+    searchApiKeys: async () => ({
+      success: true,
+      data: {
+        items: [
+          { id: 1, name: 'yunbay-quick-start-1', status: 2 },
+          { id: 3, name: 'yunbay-quick-start-3', status: 3 },
+          { id: 4, name: 'yunbay-quick-start-4', status: 4 },
+          { id: 2, name: 'other-key', status: 1 },
+        ],
+      },
+    }),
+    fetchTokenKey: async () => {
+      throw new Error('fetch should not be called')
+    },
+  })
+
+  assert.equal(result, null)
 })
 
 test('one-click API key creation reveals and copies the new key', async () => {

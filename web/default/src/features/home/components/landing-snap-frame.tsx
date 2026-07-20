@@ -18,12 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Children,
+  cloneElement,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ComponentType,
+  type ReactElement,
   type ReactNode,
 } from 'react'
 import { flushSync } from 'react-dom'
@@ -43,8 +45,10 @@ type LandingSnapFrameProps = {
   sectionIds?: readonly string[]
   navigateEventName?: string
   showControls?: boolean
+  allowContentScroll?: boolean
   onActiveIndexChange?: (activeIndex: number, previousIndex: number) => void
   controlsComponent?: ComponentType<LandingSnapControlsApi>
+  controlsElement?: ReactElement<{ api?: LandingSnapControlsApi }>
 }
 
 type LandingNavigateEvent = CustomEvent<{
@@ -59,6 +63,13 @@ export type LandingSnapControlsApi = {
   goPrevious: () => void
   goNext: () => void
   goToIndex: (index: number) => void
+}
+
+function LandingSnapControlsElement(props: {
+  element: ReactElement<{ api?: LandingSnapControlsApi }>
+  api: LandingSnapControlsApi
+}) {
+  return cloneElement(props.element, { api: props.api })
 }
 
 const PAGE_TRANSITION_LOCK_MS = 980
@@ -89,6 +100,35 @@ function getInitialLandingIndex(sectionIds: readonly string[]): number {
   return normalizeSectionHash(sectionIds, window.location.href) ?? 0
 }
 
+function getLandingScrollContainer(
+  target: EventTarget | null,
+  root: HTMLDivElement
+): HTMLElement | null {
+  if (!(target instanceof Element)) return null
+  const container = target.closest<HTMLElement>('[data-landing-snap-scroll]')
+  return container && root.contains(container) ? container : null
+}
+
+function canScrollLandingContent(
+  element: HTMLElement,
+  deltaY: number
+): boolean {
+  const maxScrollTop = element.scrollHeight - element.clientHeight
+  if (maxScrollTop <= 1) return false
+  if (deltaY > 0) return element.scrollTop < maxScrollTop - 1
+  if (deltaY < 0) return element.scrollTop > 1
+  return false
+}
+
+function isInteractiveLandingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false
+  return Boolean(
+    target.closest(
+      'a, button, input, textarea, select, [contenteditable="true"], [role="button"]'
+    )
+  )
+}
+
 export function LandingSnapFrame(props: LandingSnapFrameProps) {
   const { t } = useTranslation()
   const sectionIds = props.sectionIds ?? LANDING_SECTION_IDS
@@ -107,6 +147,10 @@ export function LandingSnapFrame(props: LandingSnapFrameProps) {
   const transitionLockedRef = useRef(false)
   const transitionTimerRef = useRef<number | null>(null)
   const touchStartYRef = useRef<number | null>(null)
+  const touchScrollStateRef = useRef<{
+    element: HTMLElement
+    scrollTop: number
+  } | null>(null)
 
   const navigateToIndex = useCallback(
     (
@@ -203,6 +247,7 @@ export function LandingSnapFrame(props: LandingSnapFrameProps) {
     const initialSyncId = window.setTimeout(syncFromLocation, 0)
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isInteractiveLandingTarget(event.target)) return
       if (
         event.key !== 'ArrowDown' &&
         event.key !== 'PageDown' &&
@@ -283,6 +328,15 @@ export function LandingSnapFrame(props: LandingSnapFrameProps) {
         event.currentTarget.scrollTop = 0
       }}
       onWheelCapture={(event) => {
+        const scrollContainer = props.allowContentScroll
+          ? getLandingScrollContainer(event.target, event.currentTarget)
+          : null
+        if (
+          scrollContainer &&
+          canScrollLandingContent(scrollContainer, event.deltaY)
+        ) {
+          return
+        }
         event.preventDefault()
         event.currentTarget.scrollTop = 0
         if (transitionLockedRef.current) return
@@ -290,14 +344,33 @@ export function LandingSnapFrame(props: LandingSnapFrameProps) {
       }}
       onTouchStart={(event) => {
         touchStartYRef.current = event.touches[0]?.clientY ?? null
+        const scrollContainer = props.allowContentScroll
+          ? getLandingScrollContainer(event.target, event.currentTarget)
+          : null
+        touchScrollStateRef.current = scrollContainer
+          ? { element: scrollContainer, scrollTop: scrollContainer.scrollTop }
+          : null
       }}
       onTouchEnd={(event) => {
         const startY = touchStartYRef.current
         touchStartYRef.current = null
+        const touchScrollState = touchScrollStateRef.current
+        touchScrollStateRef.current = null
         const endY = event.changedTouches[0]?.clientY
         if (startY == null || endY == null) return
         const deltaY = startY - endY
         if (Math.abs(deltaY) < TOUCH_PAGE_STEP_THRESHOLD) return
+        if (touchScrollState) {
+          const maxScrollTop =
+            touchScrollState.element.scrollHeight -
+            touchScrollState.element.clientHeight
+          if (
+            (deltaY > 0 && touchScrollState.scrollTop < maxScrollTop - 1) ||
+            (deltaY < 0 && touchScrollState.scrollTop > 1)
+          ) {
+            return
+          }
+        }
         if (transitionLockedRef.current) return
         stepByDelta(deltaY)
       }}
@@ -328,7 +401,12 @@ export function LandingSnapFrame(props: LandingSnapFrameProps) {
         ))}
       </div>
       {showControls &&
-        (ControlsComponent ? (
+        (props.controlsElement ? (
+          <LandingSnapControlsElement
+            element={props.controlsElement}
+            api={controlsApi}
+          />
+        ) : ControlsComponent ? (
           <ControlsComponent {...controlsApi} />
         ) : (
           <div

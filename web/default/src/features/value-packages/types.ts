@@ -136,6 +136,7 @@ export interface UserValuePackagePreference {
   id: number
   user_id: number
   enabled: boolean
+  wallet_fallback_enabled?: boolean | null
   active_user_subscription_id: number
   reset_count: number
   created_at: number

@@ -72,15 +72,12 @@ return 0
 
 // valuePackageConcurrencyCounters is the fallback limiter used when Redis is
 // disabled. Production deployments with Redis enabled use a shared Redis slot
-// set so the 1-2 concurrency limit is enforced across app instances.
+// set so the configured concurrency limit is enforced across app instances.
 var valuePackageConcurrencyCounters sync.Map
 
 func normalizeValuePackageConcurrencyLimit(limit int) int {
 	if limit <= 0 {
 		return 1
-	}
-	if limit > 2 {
-		return 2
 	}
 	return limit
 }
@@ -223,6 +220,7 @@ func ValuePackageGroupScope() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		applyValuePackageWalletFallbackPreference(c, state)
 		applyValuePackageGroupScope(c, state)
 		c.Next()
 	}
@@ -246,9 +244,19 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 			return
 		}
 
-		applyValuePackageGroupScope(c, state)
+		walletFallbackEnabled := applyValuePackageWalletFallbackPreference(c, state)
 		if isValuePackageReadOnlyRequest(c) {
+			applyValuePackageGroupScope(c, state)
 			c.Next()
+			return
+		}
+		if state.Subscription.AmountTotal > 0 && state.Subscription.AmountUsed >= state.Subscription.AmountTotal {
+			if walletFallbackEnabled {
+				markValuePackageWalletFallback(c)
+				c.Next()
+				return
+			}
+			abortWithOpenAiMessage(c, http.StatusForbidden, model.ValuePackageQuotaExhaustedUserMessage)
 			return
 		}
 
@@ -262,14 +270,25 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 			usageDetails = &model.ValuePackageWindowUsageDetails{}
 		}
 		if state.Plan.Limit5hAmount > 0 && usageDetails.Used5h >= state.Plan.Limit5hAmount {
+			if walletFallbackEnabled {
+				markValuePackageWalletFallback(c)
+				c.Next()
+				return
+			}
 			abortWithOpenAiMessage(c, http.StatusForbidden, formatValuePackageLimitMessage("5 小时", usageDetails.Used5h, state.Plan.Limit5hAmount, usageDetails.ResetSeconds5h))
 			return
 		}
 		if state.Plan.Limit7dAmount > 0 && usageDetails.Used7d >= state.Plan.Limit7dAmount {
+			if walletFallbackEnabled {
+				markValuePackageWalletFallback(c)
+				c.Next()
+				return
+			}
 			abortWithOpenAiMessage(c, http.StatusForbidden, formatValuePackageLimitMessage("7 天", usageDetails.Used7d, state.Plan.Limit7dAmount, usageDetails.ResetSeconds7d))
 			return
 		}
 
+		applyValuePackageGroupScope(c, state)
 		release, ok, err := acquireValuePackageSlot(state.Subscription.Id, state.Plan.ConcurrencyLimit)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusInternalServerError, "申请超值套餐并发额度失败")
@@ -284,6 +303,16 @@ func ValuePackageEntitlement() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func applyValuePackageWalletFallbackPreference(c *gin.Context, state *model.ValuePackageState) bool {
+	enabled := state != nil && state.Preference.AllowsWalletFallback()
+	common.SetContextKey(c, constant.ContextKeyValuePackageWalletFallback, enabled)
+	return enabled
+}
+
+func markValuePackageWalletFallback(c *gin.Context) {
+	common.SetContextKey(c, constant.ContextKeyValuePackageUseWallet, true)
 }
 
 func formatValuePackageLimitMessage(windowLabel string, used int64, limit int64, resetSeconds int64) string {

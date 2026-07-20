@@ -198,6 +198,7 @@ func SetApiRouter(router *gin.Engine) {
 			valuePackageRoute.POST("/plans/:plan_id/ldxp/session", middleware.CriticalRateLimit(), controller.CreateValuePackageLdxpSession)
 			valuePackageRoute.POST("/activate", controller.ActivateValuePackageSelf)
 			valuePackageRoute.POST("/deactivate", controller.DeactivateValuePackageSelf)
+			valuePackageRoute.PUT("/wallet-fallback", controller.UpdateValuePackageWalletFallbackSelf)
 			valuePackageRoute.POST("/reset-quota", middleware.CriticalRateLimit(), controller.ResetValuePackageQuotaSelf)
 		}
 		subscriptionAdminRoute := apiRouter.Group("/subscription/admin")

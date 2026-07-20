@@ -81,6 +81,13 @@ export async function deactivateValuePackage(): Promise<
   return res.data
 }
 
+export async function updateValuePackageWalletFallback(
+  enabled: boolean
+): Promise<ApiResponse<ValuePackageState>> {
+  const res = await api.put('/api/value-packages/wallet-fallback', { enabled })
+  return res.data
+}
+
 export async function resetValuePackageQuota(
   userSubscriptionId?: number
 ): Promise<ApiResponse<ValuePackageState>> {

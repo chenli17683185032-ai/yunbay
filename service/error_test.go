@@ -150,6 +150,82 @@ func TestRelayErrorHandlerKeepsInvalidJSONBodyInDebugLog(t *testing.T) {
 	require.Contains(t, logBuffer.String(), body)
 }
 
+func TestRelayErrorHandlerClassifiesImagePathFailures(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		headers   http.Header
+		body      string
+		code      types.ErrorCode
+		skipRetry bool
+	}{
+		{
+			name:   "cloudflare edge block",
+			status: http.StatusForbidden,
+			headers: http.Header{
+				"Content-Type": []string{"text/html"},
+				"Server":       []string{"cloudflare"},
+				"CF-Ray":       []string{"abc-NRT"},
+			},
+			body:      "<html><title>Attention Required! | Cloudflare</title><body>Error 1020</body></html>",
+			code:      types.ErrorCodeEdgeBlocked,
+			skipRetry: true,
+		},
+		{
+			name:   "invalid credentials",
+			status: http.StatusUnauthorized,
+			body:   `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error","code":"invalid_api_key"}}`,
+			code:   types.ErrorCodeAuthRejected,
+		},
+		{
+			name:   "route mismatch",
+			status: http.StatusNotFound,
+			body:   `{"error":{"message":"Unknown request URL","type":"invalid_request_error","code":"not_found"}}`,
+			code:   types.ErrorCodeRouteMismatch,
+		},
+		{
+			name:   "upstream policy",
+			status: http.StatusForbidden,
+			headers: http.Header{
+				"Content-Type": []string{"application/json"},
+				"Server":       []string{"cloudflare"},
+				"CF-Ray":       []string{"provider-ray"},
+			},
+			body: `{"error":{"message":"model is not available for this organization","type":"invalid_request_error","code":"model_not_allowed"}}`,
+			code: types.ErrorCodeUpstreamPolicy,
+		},
+		{
+			name:   "rate limited",
+			status: http.StatusTooManyRequests,
+			body:   `{"error":{"message":"slow down","type":"rate_limit_error","code":"rate_limit_exceeded"}}`,
+			code:   types.ErrorCodeRateLimited,
+		},
+		{
+			name:      "payload too large",
+			status:    http.StatusRequestEntityTooLarge,
+			body:      "request body too large",
+			code:      types.ErrorCodePayloadTooLarge,
+			skipRetry: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &http.Response{
+				StatusCode: tt.status,
+				Header:     tt.headers,
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}
+
+			err := RelayErrorHandler(context.Background(), resp, false)
+
+			require.Equal(t, tt.code, err.GetErrorCode())
+			require.Equal(t, tt.status, err.StatusCode)
+			require.Equal(t, tt.skipRetry, types.IsSkipRetryError(err))
+		})
+	}
+}
+
 func withDebugEnabled(t *testing.T, enabled bool) {
 	t.Helper()
 

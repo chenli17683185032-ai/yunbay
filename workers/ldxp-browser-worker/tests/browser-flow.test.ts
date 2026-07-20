@@ -143,6 +143,23 @@ test('does not build paid result from blank result page text', () => {
 test('browser flow uses a real Chrome fingerprint for ldxp item pages', () => {
   assert.deepEqual(buildBrowserLaunchOptions(), { headless: true })
   assert.deepEqual(buildBrowserLaunchOptions({ LDXP_BROWSER_HEADLESS: 'false' }), { headless: false })
+  assert.deepEqual(
+    buildBrowserLaunchOptions({ LDXP_BROWSER_PROXY_SERVER: ' socks5://127.0.0.1:7891 ' }),
+    { headless: true, proxy: { server: 'socks5://127.0.0.1:7891' } },
+  )
+
+  for (const proxyServer of [
+    'ftp://127.0.0.1:7891',
+    'socks5://127.0.0.1',
+    'socks5://user:password@127.0.0.1:7891',
+    'socks5://127.0.0.1:7891/path',
+    'not-a-url',
+  ]) {
+    assert.throws(
+      () => buildBrowserLaunchOptions({ LDXP_BROWSER_PROXY_SERVER: proxyServer }),
+      /LDXP_BROWSER_PROXY_SERVER/,
+    )
+  }
 
   const context = buildBrowserContextOptions()
   assert.match(context.userAgent ?? '', /Chrome\/126\.0\.0\.0 Safari\/537\.36/)
@@ -564,6 +581,9 @@ test('fillContactInput waits for delayed LDXP contact input before failing loadi
       return hiddenPlaceholder
     },
     locator(selector: string) {
+      if (selector.includes('aliyunCaptcha')) {
+        return { count: async () => 0 }
+      }
       assert.match(selector, /input/)
       return delayedInputs
     },
@@ -576,4 +596,18 @@ test('fillContactInput waits for delayed LDXP contact input before failing loadi
 
   assert.deepEqual(filledValues, ['support@yunbay.xyz'])
   assert.ok(inputProbeCount >= 3)
+})
+
+test('fillContactInput fails fast when Aliyun ESA blocks the product page', async () => {
+  const fakePage = {
+    locator(selector: string) {
+      assert.match(selector, /aliyunCaptcha/)
+      return { count: async () => 1 }
+    },
+  }
+
+  await assert.rejects(
+    fillContactInput(fakePage as never, 'support@yunbay.xyz', 30_000),
+    /LDXP WAF challenge/,
+  )
 })

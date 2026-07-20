@@ -21,20 +21,23 @@ import test from 'node:test'
 import {
   QUICK_START_DEFAULT_PURPOSE,
   QUICK_START_ENTER_DASHBOARD_PATH,
+  QUICK_START_PREFERRED_MODEL,
+  QUICK_START_REASONING_EFFORT,
   codexDownloadCards,
-  codexSetupOptions,
   fallbackModels,
   getDefaultQuickStartModelName,
+  getQuickStartModelDisplayName,
   quickStartFullscreenPages,
   getModelTags,
   nextStepGuideKeys,
+  orderQuickStartModels,
   purposeOptions,
 } from './quick-start-data'
 
 test('quick start fullscreen flow exposes the requested five pages in order', () => {
   assert.deepEqual(
     quickStartFullscreenPages.map((page) => page.id),
-    ['purpose', 'model', 'wallet', 'api-key', 'codex']
+    ['purpose', 'model', 'software', 'account', 'readiness']
   )
 })
 
@@ -42,11 +45,11 @@ test('every non-final page explains what the next page does', () => {
   assert.deepEqual(Object.keys(nextStepGuideKeys), [
     'purpose',
     'model',
-    'wallet',
-    'api-key',
+    'software',
+    'account',
   ])
   assert.equal(nextStepGuideKeys.purpose.length > 0, true)
-  assert.equal(nextStepGuideKeys['api-key'].length > 0, true)
+  assert.equal(nextStepGuideKeys.account.length > 0, true)
 })
 
 test('quick start enter dashboard target points to dashboard overview', () => {
@@ -61,90 +64,72 @@ test('quick start exposes exactly the three requested purposes', () => {
   assert.equal(QUICK_START_DEFAULT_PURPOSE, 'web-coding')
 })
 
-test('Codex setup options expose the three requested expandable paths', () => {
-  assert.deepEqual(
-    codexSetupOptions.map((item) => item.id),
-    ['macos-new-user', 'windows-new-user', 'ccswitch-existing-user']
-  )
-  assert.deepEqual(
-    codexSetupOptions.map((item) => item.titleKey),
-    [
-      'I am new to macOS (M-series only; Intel Macs should use CC Switch)',
-      'I am new to Windows',
-      'I already have CC Switch',
-    ]
-  )
-})
-
-test('Codex download cards point to Yunbay-hosted macOS and Windows downloads', () => {
+test('CC Switch download cards expose one official Mac and Windows installer', () => {
   assert.deepEqual(
     codexDownloadCards.map((item) => item.platform),
     ['macOS', 'Windows']
   )
   const macos = codexDownloadCards.find((item) => item.platform === 'macOS')
   const windows = codexDownloadCards.find((item) => item.platform === 'Windows')
-  assert.equal(macos?.descriptionKey, 'Download starts now.')
-  assert.equal(windows?.descriptionKey, 'Download starts now.')
-  assert.match(
-    macos?.downloadHref ?? '',
-    /^\/downloads\/yunbay-codex-macos-\d{8}-\d{6}-[a-f0-9]{12}\.zip$/
-  )
-  assert.notEqual(macos?.downloadHref, '/downloads/yunbay-codex-macos.zip')
-  assert.equal(macos?.buttonLabelKey, 'Download one-click launcher')
-
+  assert.equal(macos?.titleKey, 'Mac')
+  assert.match(macos?.descriptionKey ?? '', /Intel and Apple Silicon/)
+  assert.equal(macos?.buttonLabelKey, 'Download for Mac')
   assert.equal(
-    macos?.quarantineFixCommand,
-    'xattr -dr com.apple.quarantine "$HOME/Downloads/Yunbay Codex.app" && open "$HOME/Downloads/Yunbay Codex.app"'
+    macos?.downloadHref,
+    'https://github.com/farion1231/cc-switch/releases/download/v3.17.0/CC-Switch-v3.17.0-macOS.dmg'
   )
-  assert.equal(macos?.terminalInstallCommand, undefined)
+  assert.equal(windows?.titleKey, 'Windows')
+  assert.equal(windows?.buttonLabelKey, 'Download for Windows')
   assert.equal(
-    macos?.supportNoteKey,
-    'Only Apple Silicon / M-series Macs are supported. Intel Mac users should use CC Switch instead.'
-  )
-  assert.match(
-    windows?.downloadHref ?? '',
-    /^\/downloads\/yunbay-codex-windows-\d{8}-\d{6}-[a-f0-9]{12}\.exe$/
-  )
-  assert.notEqual(
     windows?.downloadHref,
-    'https://get.microsoft.com/installer/download/9PLM9XGG6VKS?cid=website_cta_psi'
+    'https://github.com/farion1231/cc-switch/releases/download/v3.17.0/CC-Switch-v3.17.0-Windows.msi'
   )
-  assert.equal(windows?.buttonLabelKey, 'Download one-click launcher')
-  assert.equal(
-    windows?.guideTitleKey,
-    'What the Windows one-click launcher can do'
-  )
-  assert.ok(windows?.guideDescriptionKey?.includes('Yunbay Codex'))
-  assert.ok(windows?.guideDescriptionKey?.includes('https://yunbay.xyz/v1'))
-  assert.deepEqual(windows?.guideStepKeys, [
-    'Download and run the Windows installer.',
-    'Open Yunbay Codex and paste your Yunbay API key into Quick Start.',
-    'Save and enable it, then start Codex, test model connectivity, and manage historical sessions.',
-  ])
 })
 
 test('quick start does not synthesize fallback models when backend model square is empty', () => {
   assert.deepEqual(fallbackModels, [])
 })
 
-test('quick start defaults to GPT-5.5 when it is available', () => {
+test('quick start defaults to GPT-5.6 Sol with a separate extreme reasoning setting', () => {
   assert.equal(
     getDefaultQuickStartModelName([
       { model_name: 'deepseek-chat' },
-      { model_name: 'GPT-5.5' },
+      { model_name: 'GPT-5.6-Sol' },
       { model_name: 'gpt-4.1' },
     ]),
-    'GPT-5.5'
+    'GPT-5.6-Sol'
   )
+  assert.equal(QUICK_START_PREFERRED_MODEL, 'gpt-5.6-sol')
+  assert.equal(QUICK_START_REASONING_EFFORT, 'xhigh')
+  assert.equal(getQuickStartModelDisplayName('GPT-5.6-Sol'), 'GPT 5.6 Sol')
 })
 
-test('quick start defaults to the first backend model when GPT-5.5 is unavailable', () => {
+test('quick start defaults to the first backend model when GPT-5.6 Sol is unavailable', () => {
   assert.equal(
     getDefaultQuickStartModelName([
       { model_name: 'deepseek-chat' },
       { model_name: 'gpt-4.1' },
     ]),
     'deepseek-chat'
+  )
+})
+
+test('quick start moves the active model to the visible first position', () => {
+  const models = [
+    { model_name: 'grok-4.5' },
+    { model_name: 'gpt-5.6-sol' },
+    { model_name: 'gpt-4.1' },
+  ]
+
+  assert.deepEqual(
+    orderQuickStartModels(models, 'gpt-5.6-sol').map(
+      (model) => model.model_name
+    ),
+    ['gpt-5.6-sol', 'grok-4.5', 'gpt-4.1']
+  )
+  assert.deepEqual(
+    models.map((model) => model.model_name),
+    ['grok-4.5', 'gpt-5.6-sol', 'gpt-4.1']
   )
 })
 
