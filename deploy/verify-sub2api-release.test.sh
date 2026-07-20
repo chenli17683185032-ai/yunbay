@@ -3,7 +3,7 @@ set -euo pipefail
 
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 verifier=$root/deploy/verify-sub2api-release.sh
-expected_image="weishaw/sub2api@sha256:2ca591c2af97eb0e2797cfc7fb7bd587194d94cebdac76f73d677eeab1d4d6c8"
+expected_image="weishaw/sub2api@sha256:45113b2b836626f0baed0f266f36bd739b4243e30bb1448abd9e1ee664bdc56d"
 tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 

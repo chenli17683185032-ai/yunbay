@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly expected_image="weishaw/sub2api@sha256:2ca591c2af97eb0e2797cfc7fb7bd587194d94cebdac76f73d677eeab1d4d6c8"
+readonly expected_image="weishaw/sub2api@sha256:45113b2b836626f0baed0f266f36bd739b4243e30bb1448abd9e1ee664bdc56d"
 
 base=${1:?usage: verify-sub2api-release.sh BASE_COMPOSE [ENV_FILE] [OVERRIDE_COMPOSE]}
 env_file=${2:-}
