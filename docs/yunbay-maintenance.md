@@ -1941,3 +1941,12 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - 不要把 `GROK2API_TOKEN_MAINTAIN=1` 当作运行时开关；以管理 API 返回的持久化 `token_maintain_enabled` 和 leader 状态为准。多 worker 切换后若请求命中非 leader，重复一次幂等开关请求直到 `local_running=true`，确认 leader 已真正接管。
 - 不要直接恢复模型健康全量 sweep 或自动注册来“补数据”。注册仍需新的独立“注册”执行指令，先单账号、并发 1、预取 0；两路试验曾触发 CPU idle 守门线，不得只按内存余量提档。
 - 回滚只使用上述备份中的固定旧镜像，在同一部署锁和 watchdog 内只重建 `grokcli-2api`；禁止回滚 PostgreSQL/Redis Volume、账号数据或其它服务。
+
+## 2026-07-21 Grok 显式单账号注册结果
+
+- 收到明确的“启动注册”指令后，只启动一次隔离 canary：`/home/deploy/grok-backups/20260721T015934-history-registration-canary`。候选镜像仍为 `grokcli-2api:20260718-registration-host-fields-2b43e9e`，参数固定为 1 batch / 1 session / 并发 1 / 预取 0、`restart=no`，注册 cgroup 为 `1 CPU / 1.5 GiB / 220 PID`；生产 API、PostgreSQL、Redis 和 egress 均未重建。
+- 首次前置探针因 `/health` 5 秒超时拒绝启动，当时 API 瞬时约 `159% CPU`。随后 5 次有界复测均为 HTTP 200，耗时 `0.138-1.569s`、CPU idle `61%-78%`、可用内存约 `5.5 GiB`，满足守门条件后才创建 canary。
+- 本次未导入账号，账号总数保持 `3739 -> 3739`，单账号 session 终态为 `error`。本地 Solver 首次等待 120 秒超时，重试返回 `ERROR_CAPTCHA_UNSOLVABLE`；没有调用外部 YesCaptcha/YesChatUp，也没有启动常驻 producer。
+- 注册侧 15 个资源样本峰值为 `1,570,762,752 bytes / 210 PID / OOM 0`，宿主机 CPU idle 最低 `7%`、可用内存最低 `4,746,012 KiB`，控制器以 `resource_guard` 收尾。注册活跃期 5 路真实 SSE 为 `5/5` 业务成功，均返回 HTTP 200、finish 和 `[DONE]`，首模型内容约 `1.94-2.29s`；生产 API 最终 `healthy / restart=0 / OOM=false`。
+- canary 容器已删除，本轮 3 个专属 Redis 临时键已精确清理为 0，自动注册维护仍关闭。最终号池为总数 `3739`、enabled `3682`、补量判定可用 `3667`，目标缺口 `1333`；Token 维护器继续运行。
+- 历史控制脚本的配置快照命令缺少 `docker exec -i`，本轮生成了 0 字节快照，自动恢复因此记录为 `not_captured`。未使用旧快照硬覆盖；根据启动前规范化哈希和仍保留的 provider 专属槽位重建原配置，候选及写后回读 SHA-256 均为 `d0aee77ae37ab0e921622e6cdf79785a4538367173b92652edab3ac8173acf19`，最终精确恢复为 `mail_provider=yyds`、`captcha_provider=local`、`stagger_ms=400`。在修复快照 stdin 并加入“非空 + 写后等值”硬门前，禁止直接复用该历史 runner。
