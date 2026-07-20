@@ -2013,3 +2013,12 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - 注册侧 15 个资源样本峰值为 `1,570,762,752 bytes / 210 PID / OOM 0`，宿主机 CPU idle 最低 `7%`、可用内存最低 `4,746,012 KiB`，控制器以 `resource_guard` 收尾。注册活跃期 5 路真实 SSE 为 `5/5` 业务成功，均返回 HTTP 200、finish 和 `[DONE]`，首模型内容约 `1.94-2.29s`；生产 API 最终 `healthy / restart=0 / OOM=false`。
 - canary 容器已删除，本轮 3 个专属 Redis 临时键已精确清理为 0，自动注册维护仍关闭。最终号池为总数 `3739`、enabled `3682`、补量判定可用 `3667`，目标缺口 `1333`；Token 维护器继续运行。
 - 历史控制脚本的配置快照命令缺少 `docker exec -i`，本轮生成了 0 字节快照，自动恢复因此记录为 `not_captured`。未使用旧快照硬覆盖；根据启动前规范化哈希和仍保留的 provider 专属槽位重建原配置，候选及写后回读 SHA-256 均为 `d0aee77ae37ab0e921622e6cdf79785a4538367173b92652edab3ac8173acf19`，最终精确恢复为 `mail_provider=yyds`、`captcha_provider=local`、`stagger_ms=400`。在修复快照 stdin 并加入“非空 + 写后等值”硬门前，禁止直接复用该历史 runner。
+
+## 2026-07-21 Sub2API 双子号 90%/401 邮件闭环
+
+- 原有 cron 仍每 5 分钟采样，正常资源邮件仍每 1800 秒发送；Team Workflow 导入的 iCloud PAT 子号单账号用量达到 `90%` 或出现明确 HTTP `401` 时立即进入告警邮件通道，不等待下一封正常报告。普通账号、503、模糊测活失败和无关账号不会进入自动控制告警。
+- 监控邮件使用独立 QQ SMTP 覆盖 `/home/deploy/.config/yunbay/sub2api-monitor-smtp.env`，权限 `0600`；cron 先加载原 `/home/deploy/.config/yunbay/sub2api-monitor.env`，再加载覆盖文件。该配置不修改 new-api PostgreSQL 中的全局 Resend SMTP，也不重启 new-api。
+- 授权码从既有受限备份 `/opt/new-api/backups/vip-recharge-rebate-20260717T044732Z/smtp-qq-fallback.tsv` 在服务器内生成环境文件，并经 SSH stdout 直接进入本机 Keychain 加密设置；授权码未进入命令参数、仓库、计划、手册或日志。首次环境生成把换行写成字面量，测试邮件在 SMTP 登录前失败；修正为逐行输出并核对 7 个变量后，真实 `[测试]` 邮件发送成功。
+- 生产脚本 SHA-256 为 `d0f48634cda3f49675cc6d6707567000ebb837703b48dcb7e118a79427387300`，安装器 SHA-256 为 `38af64047266d085691a5385903c4e90f01a9e93180aecc73213a014174e4d52`。脚本、安装器均为 `0750`，使用临时文件和同目录原子 `mv` 替换。
+- 真实 dry-run 显示两个当前 Team 子号约为 `75%` 和 `9%`、均无 401；无关 `bx-001` 为 100%/测活失败但未生成自动控制告警。QQ IMAP 新邮件严格发件人和主题过滤命中，Team Workflow 启动后回读同一结果，queue/run/refresh/action latch 均为空，没有执行真实换班或刷新。
+- 发布没有重启任何业务容器；Sub2API、new-api、Caddy、PostgreSQL、Redis 的容器 ID、启动时间、restart count 前后完全一致且保持 healthy。服务器受限回滚点为 `/opt/new-api/backups/sub2api-alerts-20260720T191838Z`，包含旧脚本、主环境、cron 和容器基线；回滚时恢复这些 `.before` 文件和 `crontab.before`，删除此前不存在的 SMTP 覆盖文件即可，不需要重启业务容器。
