@@ -51,6 +51,27 @@ interface PaymentMethod {
   name?: string
 }
 
+// Backend failure responses look like {message: 'error', data: '<reason>'} —
+// the human-readable reason lives in data, not message.
+function resolvePaymentErrorMessage(
+  message: unknown,
+  data: unknown,
+  fallback: string
+): string {
+  if (message === 'error' && typeof data === 'string' && data.trim()) {
+    return data
+  }
+  if (
+    typeof message === 'string' &&
+    message.trim() &&
+    message !== 'error' &&
+    message !== 'success'
+  ) {
+    return message
+  }
+  return fallback
+}
+
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -122,9 +143,11 @@ export function SubscriptionPurchaseDialog(props: Props) {
         props.onOpenChange(false)
       } else {
         toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
+          resolvePaymentErrorMessage(
+            res.message,
+            res.data,
+            t('Payment request failed')
+          )
         )
       }
     } catch {
@@ -144,9 +167,11 @@ export function SubscriptionPurchaseDialog(props: Props) {
         props.onOpenChange(false)
       } else {
         toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
+          resolvePaymentErrorMessage(
+            res.message,
+            res.data,
+            t('Payment request failed')
+          )
         )
       }
     } catch {
@@ -167,9 +192,11 @@ export function SubscriptionPurchaseDialog(props: Props) {
         window.location.href = res.data.checkout_url
       } else {
         toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
+          resolvePaymentErrorMessage(
+            res.message,
+            res.data,
+            t('Payment request failed')
+          )
         )
       }
     } catch {
@@ -215,9 +242,11 @@ export function SubscriptionPurchaseDialog(props: Props) {
         props.onOpenChange(false)
       } else {
         toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
+          resolvePaymentErrorMessage(
+            res.message,
+            res.data,
+            t('Payment request failed')
+          )
         )
       }
     } catch {
@@ -241,9 +270,11 @@ export function SubscriptionPurchaseDialog(props: Props) {
         props.onOpenChange(false)
       } else {
         toast.error(
-          res.message && res.message !== 'success'
-            ? res.message
-            : t('Payment request failed')
+          resolvePaymentErrorMessage(
+            res.message,
+            res.data,
+            t('Payment request failed')
+          )
         )
       }
     } catch {

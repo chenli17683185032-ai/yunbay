@@ -66,6 +66,12 @@ export function RedemptionsTable() {
     globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [{ columnId: 'status', searchKey: 'status', type: 'array' }],
   })
+  // 状态筛选走服务端：仅在当前页内客户端过滤会导致页内容与总数不一致
+  const statusFilter = (
+    (columnFilters.find((filter) => filter.id === 'status')?.value as
+      | string[]
+      | undefined) ?? []
+  ).join(',')
 
   // Fetch data with React Query
   const { data, isLoading, isFetching } = useQuery({
@@ -74,6 +80,7 @@ export function RedemptionsTable() {
       pagination.pageIndex + 1,
       pagination.pageSize,
       globalFilter,
+      statusFilter,
       refreshTrigger,
     ],
     queryFn: async () => {
@@ -81,6 +88,7 @@ export function RedemptionsTable() {
       const params = {
         p: pagination.pageIndex + 1,
         page_size: pagination.pageSize,
+        status: statusFilter,
       }
 
       const result = hasFilter
@@ -119,7 +127,10 @@ export function RedemptionsTable() {
     onPaginationChange,
     onGlobalFilterChange,
     onColumnFiltersChange,
-    manualPagination: !globalFilter,
+    // 搜索与浏览都由服务端分页；客户端再分页会把非首页切成空白
+    manualPagination: true,
+    // 状态筛选已由服务端完成；关闭客户端过滤避免页内二次筛掉行
+    manualFiltering: true,
     totalCount: data?.total || 0,
     ensurePageInRange,
   })

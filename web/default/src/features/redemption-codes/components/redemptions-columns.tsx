@@ -32,7 +32,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { MaskedValueDisplay } from '@/components/masked-value-display'
-import { StatusBadge } from '@/components/status-badge'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
 import {
   REDEMPTION_FILTER_EXPIRED,
@@ -100,15 +100,16 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
       header: t('Type'),
       cell: ({ row }) => {
         const type = row.original.type || 'quota'
-        return (
-          <StatusBadge
-            label={
-              type === 'subscription' ? t('Subscription Code') : t('Quota Code')
-            }
-            variant={type === 'subscription' ? 'info' : 'neutral'}
-            copyable={false}
-          />
-        )
+        let label = t('Quota Code')
+        let variant: StatusVariant = 'neutral'
+        if (type === 'subscription') {
+          label = t('Subscription Code')
+          variant = 'info'
+        } else if (type === 'reset_card') {
+          label = t('Reset Card Code')
+          variant = 'warning'
+        }
+        return <StatusBadge label={label} variant={variant} copyable={false} />
       },
       size: 130,
     },
@@ -256,6 +257,18 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
         const redemption = row.original
         if (redemption.type === 'subscription') {
           return <span className='text-muted-foreground'>-</span>
+        }
+        if (redemption.type === 'reset_card') {
+          return (
+            <StatusBadge
+              label={t('{{count}} card(s)', {
+                count: redemption.reset_card_count || 0,
+              })}
+              variant='neutral'
+              copyable={false}
+              className='-ml-1.5'
+            />
+          )
         }
         const quota = row.getValue('quota') as number
         return (

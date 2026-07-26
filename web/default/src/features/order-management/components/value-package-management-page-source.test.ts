@@ -161,3 +161,15 @@ test('order management usage summary aliases the shared value package contract',
     /export interface OrderManagementValuePackageUsageSummary/
   )
 })
+
+test('value package management page exposes per-plan gift reset card settings', async () => {
+  const pageSource = await readFile(pageSourcePath, 'utf8')
+
+  assert.match(pageSource, /PlanGiftSettingsCard/)
+  assert.match(pageSource, /getAdminPlans/)
+  assert.match(pageSource, /patchPlanGiftResetCount/)
+  assert.match(pageSource, /gift_reset_count/)
+  assert.match(pageSource, /Gift reset cards on activation/)
+  assert.match(pageSource, /plansQuery\.isError/)
+  assert.match(pageSource, /<Spinner/)
+})

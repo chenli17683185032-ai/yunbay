@@ -105,6 +105,7 @@ export interface SubscriptionPlanLike {
   waffo_pancake_product_id?: string
   max_purchase_per_user: number
   upgrade_group?: string
+  gift_reset_count?: number
   total_amount: number
   quota_reset_period?: SubscriptionQuotaResetPeriod
   quota_reset_custom_seconds?: number
@@ -219,6 +220,7 @@ export interface ValuePackageLdxpSession {
   poll_interval_ms?: number
   error_code?: string
   error_message?: string
+  gift_reset_count?: number
 }
 
 export interface ValuePackageLdxpSessionResponse {

@@ -66,7 +66,7 @@ export function ValuePackageStatusBanner({
   }
 
   const enabled = state.preference.enabled === true
-  const packageLabel = getPackageLevelLabel(state.plan.package_type)
+  const packageLabel = t(getPackageLevelLabel(state.plan.package_type))
 
   return (
     <Alert className='border-primary/20 bg-primary/5'>

@@ -20,7 +20,8 @@ import (
 
 func GetAllRedemptions(c *gin.Context) {
 	pageInfo := common.GetPageQuery(c)
-	redemptions, total, err := model.GetAllRedemptions(pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	statusFilter := c.Query("status")
+	redemptions, total, err := model.GetAllRedemptions(pageInfo.GetStartIdx(), pageInfo.GetPageSize(), statusFilter)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -33,8 +34,9 @@ func GetAllRedemptions(c *gin.Context) {
 
 func SearchRedemptions(c *gin.Context) {
 	keyword := c.Query("keyword")
+	statusFilter := c.Query("status")
 	pageInfo := common.GetPageQuery(c)
-	redemptions, total, err := model.SearchRedemptions(keyword, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	redemptions, total, err := model.SearchRedemptions(keyword, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), statusFilter)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -96,6 +98,8 @@ func AddRedemption(c *gin.Context) {
 		switch {
 		case errors.Is(err, model.ErrRedemptionUnsupportedKind):
 			common.ApiErrorI18n(c, i18n.MsgRedemptionUnsupportedKind)
+		case errors.Is(err, model.ErrRedemptionResetCardCountInvalid):
+			common.ApiErrorI18n(c, i18n.MsgRedemptionResetCardCountInvalid)
 		case redemption.Type == model.RedemptionTypeSubscription:
 			common.ApiErrorI18n(c, i18n.MsgRedemptionInvalid)
 		case redemption.Kind == model.RedemptionKindPaidTopUp:
@@ -112,21 +116,22 @@ func AddRedemption(c *gin.Context) {
 	for i := 0; i < redemption.Count; i++ {
 		key := common.GetUUID()
 		cleanRedemption := model.Redemption{
-			UserId:       c.GetInt("id"),
-			Name:         redemption.Name,
-			Key:          key,
-			Status:       common.RedemptionCodeStatusEnabled,
-			CreatedTime:  common.GetTimestamp(),
-			Quota:        redemption.Quota,
-			Type:         redemption.Type,
-			PlanId:       redemption.PlanId,
-			Kind:         redemption.Kind,
-			Amount:       redemption.Amount,
-			Money:        redemption.Money,
-			CountAsTopUp: redemption.CountAsTopUp,
-			Source:       redemption.Source,
-			BatchId:      redemption.BatchId,
-			ExpiredTime:  redemption.ExpiredTime,
+			UserId:         c.GetInt("id"),
+			Name:           redemption.Name,
+			Key:            key,
+			Status:         common.RedemptionCodeStatusEnabled,
+			CreatedTime:    common.GetTimestamp(),
+			Quota:          redemption.Quota,
+			Type:           redemption.Type,
+			PlanId:         redemption.PlanId,
+			Kind:           redemption.Kind,
+			Amount:         redemption.Amount,
+			Money:          redemption.Money,
+			CountAsTopUp:   redemption.CountAsTopUp,
+			Source:         redemption.Source,
+			BatchId:        redemption.BatchId,
+			ExpiredTime:    redemption.ExpiredTime,
+			ResetCardCount: redemption.ResetCardCount,
 		}
 		err = cleanRedemption.Insert()
 		if err != nil {
@@ -141,17 +146,18 @@ func AddRedemption(c *gin.Context) {
 		keys = append(keys, key)
 	}
 	recordManageAudit(c, "redemption.create", map[string]interface{}{
-		"name":           redemption.Name,
-		"count":          redemption.Count,
-		"quota":          logger.LogQuota(redemption.Quota),
-		"kind":           redemption.Kind,
-		"amount":         redemption.Amount,
-		"money":          redemption.Money,
-		"count_as_topup": redemption.CountAsTopUp,
-		"source":         redemption.Source,
-		"batch_id":       redemption.BatchId,
-		"type":           redemption.Type,
-		"plan_id":        redemption.PlanId,
+		"name":             redemption.Name,
+		"count":            redemption.Count,
+		"quota":            logger.LogQuota(redemption.Quota),
+		"kind":             redemption.Kind,
+		"amount":           redemption.Amount,
+		"money":            redemption.Money,
+		"count_as_topup":   redemption.CountAsTopUp,
+		"source":           redemption.Source,
+		"batch_id":         redemption.BatchId,
+		"type":             redemption.Type,
+		"plan_id":          redemption.PlanId,
+		"reset_card_count": redemption.ResetCardCount,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"success":  true,

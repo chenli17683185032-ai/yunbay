@@ -27,3 +27,10 @@ test('redemption drawer explains when no enabled value package plans exist', () 
   assert.match(source, /setPlansLoaded\(false\)/)
   assert.match(source, /setPlansLoaded\(true\)/)
 })
+
+test('redemption drawer supports reset card codes', () => {
+  assert.match(source, /value === 'reset_card'/)
+  assert.match(source, /reset_card_count/)
+  assert.match(source, /Reset cards per code/)
+  assert.match(source, /Reset card/)
+})

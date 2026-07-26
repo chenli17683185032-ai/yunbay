@@ -345,6 +345,7 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 	user := createValuePackageUser(t, 3060, UserGroupTiyan)
 	week := createValuePackagePlan(t, ValuePackageTypeWeek, ValuePackageLevelWeek, 7, 9.9)
 	week.TotalAmount = 4500
+	week.GiftResetCount = 2
 	require.NoError(t, DB.Save(&week).Error)
 	now := common.GetTimestamp()
 	existing := createActiveValuePackageSub(t, user.Id, week, now-100, now+3*valuePackageDaySeconds)
@@ -360,6 +361,7 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 		TradeNo:         "vp-extension-callback-replay",
 		PaymentMethod:   PaymentMethodLDXP,
 		PaymentProvider: PaymentProviderLDXP,
+		GiftResetCount:  week.GiftResetCount,
 		Status:          common.TopUpStatusPending,
 		CreateTime:      now,
 	}
@@ -389,6 +391,46 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 	require.NoError(t, DB.First(&reloadedOrder, order.Id).Error)
 	require.Equal(t, common.TopUpStatusSuccess, reloadedOrder.Status)
 	require.Equal(t, existing.Id, reloadedOrder.UserSubscriptionId)
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.Equal(t, 2, pref.ResetCount)
+	var giftLedgerCount int64
+	require.NoError(t, DB.Model(&ValuePackageResetCountLedger{}).
+		Where("user_id = ? AND source = ?", user.Id, ValuePackageResetCountLedgerSourcePlanGift).
+		Count(&giftLedgerCount).Error)
+	require.EqualValues(t, 1, giftLedgerCount)
+}
+
+func TestCompleteValuePackageOrderUsesGiftCountSnapshot(t *testing.T) {
+	setupValuePackageTestDB(t)
+	user := createValuePackageUser(t, 3061, UserGroupTiyan)
+	day := createValuePackagePlan(t, ValuePackageTypeDay, ValuePackageLevelDay, 1, 3.9)
+	day.GiftResetCount = 5
+	require.NoError(t, DB.Save(&day).Error)
+	now := common.GetTimestamp()
+	order := SubscriptionOrder{
+		UserId:          user.Id,
+		PlanId:          day.Id,
+		Money:           day.PriceAmount,
+		TradeNo:         "vp-gift-snapshot",
+		PaymentMethod:   PaymentMethodLDXP,
+		PaymentProvider: PaymentProviderLDXP,
+		GiftResetCount:  2,
+		Status:          common.TopUpStatusPending,
+		CreateTime:      now,
+	}
+	require.NoError(t, DB.Create(&order).Error)
+
+	completed, err := CompleteValuePackageOrder(order.TradeNo, "payload", PaymentProviderLDXP, PaymentMethodLDXP, true)
+	require.NoError(t, err)
+	require.NotNil(t, completed)
+
+	var pref UserValuePackagePreference
+	require.NoError(t, DB.Where("user_id = ?", user.Id).First(&pref).Error)
+	require.Equal(t, 2, pref.ResetCount)
+	var ledger ValuePackageResetCountLedger
+	require.NoError(t, DB.Where("user_id = ? AND source = ?", user.Id, ValuePackageResetCountLedgerSourcePlanGift).First(&ledger).Error)
+	require.Equal(t, 2, ledger.Delta)
 }
 
 func TestCreateValuePackageSubscriptionFromPlanTxExtendsTimeWithoutChangingQuota(t *testing.T) {

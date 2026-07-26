@@ -36,7 +36,7 @@ export const redemptionSchema = z.object({
   type: z.preprocess(
     (value) =>
       value === undefined || value === null || value === '' ? 'quota' : value,
-    z.enum(['quota', 'subscription'])
+    z.enum(['quota', 'subscription', 'reset_card'])
   ),
   plan_id: z.preprocess(
     (value) =>
@@ -55,6 +55,7 @@ export const redemptionSchema = z.object({
   batch_id: z.string().catch(''),
   source: z.string().catch(''),
   exported_time: z.number().catch(0),
+  reset_card_count: z.number().catch(0),
 })
 
 export type Redemption = z.infer<typeof redemptionSchema>
@@ -72,6 +73,8 @@ export interface ApiResponse<T = unknown> {
 export interface GetRedemptionsParams {
   p?: number
   page_size?: number
+  /** Server-side status filter: '1' | '2' | '3' | 'expired', comma-separated for multiple */
+  status?: string
 }
 
 export interface GetRedemptionsResponse {
@@ -89,6 +92,8 @@ export interface SearchRedemptionsParams {
   keyword?: string
   p?: number
   page_size?: number
+  /** Server-side status filter: '1' | '2' | '3' | 'expired', comma-separated for multiple */
+  status?: string
 }
 
 export interface RedemptionFormData {
@@ -104,8 +109,9 @@ export interface RedemptionFormData {
   count_as_topup?: boolean
   batch_id?: string
   source?: string
-  type?: 'quota' | 'subscription'
+  type?: 'quota' | 'subscription' | 'reset_card'
   plan_id?: number
+  reset_card_count?: number
 }
 
 export type CreateRedemptionResponse = ApiResponse<string[]> & {

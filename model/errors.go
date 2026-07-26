@@ -21,12 +21,13 @@ var (
 
 // Redemption errors
 var (
-	ErrRedemptionNotProvided     = errors.New("redemption.not_provided")
-	ErrRedemptionInvalid         = errors.New("redemption.invalid")
-	ErrRedemptionUsed            = errors.New("redemption.used")
-	ErrRedemptionExpired         = errors.New("redemption.expired")
-	ErrRedemptionUnsupportedKind = errors.New("redemption.unsupported_kind")
-	ErrRedeemFailed              = errors.New("redeem.failed")
+	ErrRedemptionNotProvided           = errors.New("redemption.not_provided")
+	ErrRedemptionInvalid               = errors.New("redemption.invalid")
+	ErrRedemptionUsed                  = errors.New("redemption.used")
+	ErrRedemptionExpired               = errors.New("redemption.expired")
+	ErrRedemptionUnsupportedKind       = errors.New("redemption.unsupported_kind")
+	ErrRedemptionResetCardCountInvalid = errors.New("redemption.reset_card_count_invalid")
+	ErrRedeemFailed                    = errors.New("redeem.failed")
 )
 
 // 2FA errors

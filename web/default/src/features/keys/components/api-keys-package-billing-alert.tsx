@@ -45,7 +45,7 @@ export function ApiKeysPackageBillingAlert() {
   const currentPlan = valuePackageState?.plan
   const currentSubscription = valuePackageState?.subscription
   const preference = valuePackageState?.preference
-  const currentPackageLabel = getPackageLevelLabel(currentPlan?.package_type)
+  const currentPackageLabel = t(getPackageLevelLabel(currentPlan?.package_type))
   const currentModelGroup = currentPlan
     ? currentPlan.model_group?.trim() || ''
     : ''

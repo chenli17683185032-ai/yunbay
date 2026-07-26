@@ -29,16 +29,17 @@ function currentUnixSeconds(): number {
   return Math.floor(Date.now() / 1000)
 }
 
+// 返回 i18n key（英文源文案），调用方需用 t() 包裹后展示
 export function getPackageLevelLabel(type?: string): string {
   switch ((type || '').trim()) {
     case 'day':
-      return '日卡'
+      return 'Day package'
     case 'week':
-      return '周卡'
+      return 'Week package'
     case 'month':
-      return '月卡'
+      return 'Month package'
     default:
-      return '套餐'
+      return 'Value Package'
   }
 }
 

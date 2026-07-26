@@ -37,6 +37,27 @@ import {
 // Payment Hook
 // ============================================================================
 
+// Backend failure responses look like {message: 'error', data: '<reason>'} —
+// the human-readable reason lives in data, not message.
+function resolvePaymentErrorMessage(
+  message: unknown,
+  data: unknown,
+  fallback: string
+): string {
+  if (message === 'error' && typeof data === 'string' && data.trim()) {
+    return data
+  }
+  if (
+    typeof message === 'string' &&
+    message.trim() &&
+    message !== 'error' &&
+    message !== 'success'
+  ) {
+    return message
+  }
+  return fallback
+}
+
 export function usePayment() {
   const [amount, setAmount] = useState<number>(0)
   const [calculating, setCalculating] = useState(false)
@@ -50,11 +71,14 @@ export function usePayment() {
 
         const isStripe = isStripePayment(paymentType)
         const isPancake = isWaffoPancakePayment(paymentType)
-        const response = isStripe
-          ? await calculateStripeAmount({ amount: topupAmount })
-          : isPancake
-            ? await calculateWaffoPancakeAmount({ amount: topupAmount })
-            : await calculateAmount({ amount: topupAmount })
+        let response
+        if (isStripe) {
+          response = await calculateStripeAmount({ amount: topupAmount })
+        } else if (isPancake) {
+          response = await calculateWaffoPancakeAmount({ amount: topupAmount })
+        } else {
+          response = await calculateAmount({ amount: topupAmount })
+        }
 
         if (isApiSuccess(response) && response.data) {
           const calculatedAmount = parseFloat(response.data)
@@ -95,7 +119,13 @@ export function usePayment() {
             })
 
         if (!isApiSuccess(response)) {
-          toast.error(response.message || i18next.t('Payment request failed'))
+          toast.error(
+            resolvePaymentErrorMessage(
+              response.message,
+              response.data,
+              i18next.t('Payment request failed')
+            )
+          )
           return false
         }
 

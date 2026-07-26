@@ -36,10 +36,12 @@ export interface ApiResponse<T = unknown> {
  */
 export type TopupInfoResponse = ApiResponse<TopupInfo>
 export interface RedemptionResult {
-  type: 'quota' | 'subscription'
+  type: 'quota' | 'subscription' | 'reset_card'
   quota?: number | string | null
   plan_id?: number
   plan_title?: string
+  reset_card_count?: number
+  gift_reset_count?: number
 }
 
 export type RedemptionResponse = ApiResponse<number | RedemptionResult> & {
@@ -99,6 +101,7 @@ export interface LdxpTopupSession {
   poll_interval_ms?: number
   error_code?: string
   error_message?: string
+  gift_reset_count?: number
 }
 
 export type LdxpTopupSessionResponse = ApiResponse<LdxpTopupSession>
@@ -394,7 +397,6 @@ export interface AdminOrderRecord extends TopupRecord {
 }
 
 export type BillingRecord = TopupRecord | AdminOrderRecord
-
 
 /**
  * Billing history response

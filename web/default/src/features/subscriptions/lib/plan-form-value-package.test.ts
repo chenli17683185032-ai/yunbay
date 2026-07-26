@@ -293,6 +293,58 @@ test('planToFormValues preserves per-card ldxp payment config', () => {
   assert.equal(values.package_type, 'day')
 })
 
+test('gift reset count passes through as a plain integer without quota conversion', () => {
+  const values = {
+    ...PLAN_FORM_DEFAULTS,
+    title: '日卡',
+    plan_kind: 'value_package' as const,
+    package_type: 'day' as const,
+    model_group: 'day-card',
+    total_amount: 10,
+    gift_reset_count: 2,
+    ldxp_product_url: 'https://ldxp.example.test/day',
+    ldxp_product_name: '日卡商品',
+    ldxp_product_amount: 9.9,
+  }
+
+  const payload = formValuesToPlanPayload(values)
+  assert.equal(payload.plan.gift_reset_count, 2)
+
+  const regular = formValuesToPlanPayload({
+    ...PLAN_FORM_DEFAULTS,
+    title: '订阅',
+    plan_kind: 'subscription' as const,
+    gift_reset_count: 5,
+  })
+  assert.equal(regular.plan.gift_reset_count, 0)
+})
+
+test('gift reset count round-trips through planToFormValues', () => {
+  const values = planToFormValues({
+    id: 9,
+    title: '日卡',
+    price_amount: 9.9,
+    currency: 'CNY',
+    duration_unit: 'day',
+    duration_value: 1,
+    quota_reset_period: 'never',
+    enabled: true,
+    sort_order: 0,
+    max_purchase_per_user: 0,
+    total_amount: 0,
+    allow_balance_pay: false,
+    plan_kind: 'value_package',
+    package_type: 'day',
+    package_level: 1,
+    model_group: 'day-card',
+    concurrency_limit: 1,
+    limit_5h_amount: 0,
+    limit_7d_amount: 0,
+    gift_reset_count: 3,
+  })
+  assert.equal(values.gift_reset_count, 3)
+})
+
 test('value package plan payload uses CNY currency for user-facing RMB cards', () => {
   const values = {
     ...PLAN_FORM_DEFAULTS,

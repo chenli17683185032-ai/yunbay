@@ -20,10 +20,12 @@ For commercial licensing, please contact support@quantumnous.com
 type QuickStartRedemptionData =
   | number
   | {
-      type?: 'quota' | 'subscription'
+      type?: 'quota' | 'subscription' | 'reset_card'
       quota?: number | string | null
       plan_id?: number
       plan_title?: string
+      reset_card_count?: number
+      gift_reset_count?: number
     }
 
 type QuickStartRedemptionResponse = {

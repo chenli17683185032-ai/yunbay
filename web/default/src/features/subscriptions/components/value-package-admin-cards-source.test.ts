@@ -42,6 +42,6 @@ test('value package admin cards use dynamic total and month-only 7d period label
   assert.match(source, /\{t\('5-hour limit'\)\}/)
   assert.match(
     source,
-    /shouldExposeValuePackage7dPeriodLimit\([\s\S]*?plan\.package_type[\s\S]*?\) && Number\(plan\.limit_7d_amount \|\| 0\) > 0/
+    /shouldExposeValuePackage7dPeriodLimit\([\s\S]*?plan\.package_type[\s\S]*?\)\s*&&\s*Number\(plan\.limit_7d_amount \|\| 0\) > 0/
   )
 })

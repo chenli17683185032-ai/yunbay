@@ -30,9 +30,15 @@ interface StatusConfig {
 }
 
 /**
+ * All topup statuses the backend can persist. Extends the shared
+ * TopupStatus union with 'failed' (persisted for failed topups).
+ */
+export type BillingTopupStatus = TopupStatus | 'failed'
+
+/**
  * Status badge configuration
  */
-export const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
+export const STATUS_CONFIG: Record<BillingTopupStatus, StatusConfig> = {
   success: {
     variant: 'success',
     label: 'Success',
@@ -45,13 +51,23 @@ export const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
     variant: 'danger',
     label: 'Expired',
   },
+  failed: {
+    variant: 'danger',
+    label: 'Failed',
+  },
 }
 
 /**
- * Get status badge configuration
+ * Get status badge configuration.
+ * Unknown statuses fall back to a neutral badge showing the raw status text.
  */
-export function getStatusConfig(status: TopupStatus): StatusConfig {
-  return STATUS_CONFIG[status] || STATUS_CONFIG.pending
+export function getStatusConfig(status: string): StatusConfig {
+  return (
+    STATUS_CONFIG[status as BillingTopupStatus] || {
+      variant: 'neutral',
+      label: status || 'Unknown',
+    }
+  )
 }
 
 export function getOrderTypeLabel(

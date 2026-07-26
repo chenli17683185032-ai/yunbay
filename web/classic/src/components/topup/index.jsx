@@ -176,16 +176,29 @@ const TopUp = () => {
       });
       const { success, message, data } = res.data;
       if (success) {
+        const quotaRedeemed =
+          typeof data === 'number' && Number.isFinite(data) ? data : null;
+        let successContent = t('兑换成功！');
+        if (quotaRedeemed !== null) {
+          successContent = t('成功兑换额度：') + renderQuota(quotaRedeemed);
+        } else if (data?.type === 'subscription' && data.plan_title) {
+          successContent = `${t('兑换成功！')} ${data.plan_title}`;
+        } else if (
+          data?.type === 'reset_card' &&
+          Number.isFinite(Number(data.reset_card_count))
+        ) {
+          successContent = `${t('兑换成功！')} ${Number(data.reset_card_count)}`;
+        }
         showSuccess(t('兑换成功！'));
         Modal.success({
           title: t('兑换成功！'),
-          content: t('成功兑换额度：') + renderQuota(data),
+          content: successContent,
           centered: true,
         });
-        if (userState.user) {
+        if (quotaRedeemed !== null && userState.user) {
           const updatedUser = {
             ...userState.user,
-            quota: userState.user.quota + data,
+            quota: userState.user.quota + quotaRedeemed,
           };
           userDispatch({ type: 'login', payload: updatedUser });
         }

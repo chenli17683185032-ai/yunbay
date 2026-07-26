@@ -33,7 +33,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { TitledCard } from '@/components/ui/titled-card'
 import { getAdminPlans } from '../api'
-import { VALUE_PACKAGE_TYPES } from '../constants'
+import { DURATION_UNITS, VALUE_PACKAGE_TYPES } from '../constants'
 import {
   getValuePackageTotalLimitLabelKey,
   shouldExposeValuePackage7dPeriodLimit,
@@ -108,6 +108,7 @@ function createTemplatePlan(
     concurrency_limit: 1,
     limit_5h_amount: 0,
     limit_7d_amount: 0,
+    gift_reset_count: 0,
     benefits: '',
     ldxp_product_url: '',
     ldxp_product_name: '',
@@ -252,7 +253,12 @@ export function ValuePackageAdminCards() {
                         {t('Duration')}
                       </span>
                       <span className='font-medium'>
-                        {plan.duration_value} {t(plan.duration_unit)}
+                        {plan.duration_value}{' '}
+                        {t(
+                          DURATION_UNITS.find(
+                            (unit) => unit.value === plan.duration_unit
+                          )?.labelKey || plan.duration_unit
+                        )}
                       </span>
                     </div>
                     <div className='flex justify-between gap-3'>
@@ -291,9 +297,16 @@ export function ValuePackageAdminCards() {
                         {quotaUnitsToDollars(Number(plan.limit_5h_amount || 0))}
                       </span>
                     </div>
-                    {shouldExposeValuePackage7dPeriodLimit(
-                      plan.package_type
-                    ) && Number(plan.limit_7d_amount || 0) > 0 ? (
+                    <div className='flex justify-between gap-3'>
+                      <span className='text-muted-foreground'>
+                        {t('Gift reset cards on activation')}
+                      </span>
+                      <span className='font-medium'>
+                        {Number(plan.gift_reset_count || 0)}
+                      </span>
+                    </div>
+                    {shouldExposeValuePackage7dPeriodLimit(plan.package_type) &&
+                    Number(plan.limit_7d_amount || 0) > 0 ? (
                       <div className='flex justify-between gap-3'>
                         <span className='text-muted-foreground'>
                           {t(VALUE_PACKAGE_7D_PERIOD_LIMIT_LABEL_KEY)}

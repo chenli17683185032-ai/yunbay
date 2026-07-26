@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -184,10 +185,17 @@ func normalizeAndValidateSubscriptionPlanRequest(plan *model.SubscriptionPlan) s
 		if requestedTotalAmount < 0 {
 			return "总额度不能为负数"
 		}
+		plan.GiftResetCount = 0
 		return ""
 	}
 	if requestedTotalAmount <= 0 {
 		return "超值套餐总额度必须大于0"
+	}
+	if plan.GiftResetCount < 0 {
+		return "开通赠送重置卡张数不能为负数"
+	}
+	if plan.GiftResetCount > model.MaxSubscriptionPlanGiftResetCount {
+		return fmt.Sprintf("开通赠送重置卡张数不能超过 %d", model.MaxSubscriptionPlanGiftResetCount)
 	}
 
 	plan.UpgradeGroup = ""
@@ -394,6 +402,7 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
 			"quota_reset_custom_seconds": req.Plan.QuotaResetCustomSeconds,
+			"gift_reset_count":           req.Plan.GiftResetCount,
 			"updated_at":                 common.GetTimestamp(),
 		}
 		if req.Plan.AllowBalancePay != nil {
@@ -423,7 +432,8 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 }
 
 type AdminUpdateSubscriptionPlanStatusRequest struct {
-	Enabled *bool `json:"enabled"`
+	Enabled        *bool `json:"enabled,omitempty"`
+	GiftResetCount *int  `json:"gift_reset_count,omitempty"`
 }
 
 type AdminCreateSubscriptionRedemptionsRequest struct {
@@ -443,7 +453,7 @@ func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 		return
 	}
 	var req AdminUpdateSubscriptionPlanStatusRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+	if err := c.ShouldBindJSON(&req); err != nil || (req.Enabled == nil && req.GiftResetCount == nil) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
@@ -452,14 +462,30 @@ func AdminUpdateSubscriptionPlanStatus(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐不存在")
 		return
 	}
-	plan.Enabled = *req.Enabled
-	if plan.Enabled {
-		if msg := normalizeAndValidateSubscriptionPlanRequest(&plan); msg != "" {
-			common.ApiErrorMsg(c, msg)
+	updates := map[string]interface{}{"updated_at": common.GetTimestamp()}
+	if req.GiftResetCount != nil {
+		if *req.GiftResetCount < 0 || *req.GiftResetCount > model.MaxSubscriptionPlanGiftResetCount {
+			common.ApiErrorMsg(c, fmt.Sprintf("开通赠送重置卡张数必须在 0-%d 之间", model.MaxSubscriptionPlanGiftResetCount))
 			return
 		}
+		if !plan.IsValuePackage() && *req.GiftResetCount != 0 {
+			common.ApiErrorMsg(c, "仅超值套餐可配置开通赠送重置卡")
+			return
+		}
+		plan.GiftResetCount = *req.GiftResetCount
+		updates["gift_reset_count"] = *req.GiftResetCount
 	}
-	if err := model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Update("enabled", *req.Enabled).Error; err != nil {
+	if req.Enabled != nil {
+		plan.Enabled = *req.Enabled
+		if plan.Enabled {
+			if msg := normalizeAndValidateSubscriptionPlanRequest(&plan); msg != "" {
+				common.ApiErrorMsg(c, msg)
+				return
+			}
+		}
+		updates["enabled"] = *req.Enabled
+	}
+	if err := model.DB.Model(&model.SubscriptionPlan{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -510,6 +536,8 @@ func AdminCreateSubscriptionRedemptions(c *gin.Context) {
 		return
 	}
 
+	// 同一次生成的所有兑换码共享一个批次号，便于按批检索与导出
+	batchId := model.GenerateRedemptionBatchId(model.RedemptionSourcePromo, 0, common.GetTimestamp())
 	keys := make([]string, 0, req.Count)
 	for i := 0; i < req.Count; i++ {
 		key := common.GetUUID()
@@ -526,7 +554,7 @@ func AdminCreateSubscriptionRedemptions(c *gin.Context) {
 			"money":           0,
 			"count_as_top_up": false,
 			"source":          model.RedemptionSourcePromo,
-			"batch_id":        model.GenerateRedemptionBatchId(model.RedemptionSourcePromo, 0, common.GetTimestamp()),
+			"batch_id":        batchId,
 			"expired_time":    req.ExpiredTime,
 			"status":          common.RedemptionCodeStatusEnabled,
 		}
@@ -545,8 +573,14 @@ func AdminCreateSubscriptionRedemptions(c *gin.Context) {
 		"name":       req.Name,
 		"count":      req.Count,
 		"plan_title": plan.Title,
+		"batch_id":   batchId,
 	})
-	common.ApiSuccess(c, keys)
+	c.JSON(http.StatusOK, gin.H{
+		"success":  true,
+		"message":  "",
+		"data":     keys,
+		"batch_id": batchId,
+	})
 }
 
 type AdminBindSubscriptionRequest struct {

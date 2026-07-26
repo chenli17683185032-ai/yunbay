@@ -231,7 +231,8 @@ export function RedemptionsMutateDrawer({
   }
 
   const handleTypeChange = (value: string | null) => {
-    const type = value === 'subscription' ? 'subscription' : 'quota'
+    const type =
+      value === 'subscription' || value === 'reset_card' ? value : 'quota'
     form.setValue('type', type, { shouldValidate: true })
     if (type === 'subscription') {
       form.setValue('kind', REDEMPTION_KINDS.COUPON, { shouldValidate: true })
@@ -242,6 +243,23 @@ export function RedemptionsMutateDrawer({
       form.setValue('source', REDEMPTION_SOURCES.MANUAL, {
         shouldValidate: true,
       })
+      return
+    }
+    if (type === 'reset_card') {
+      form.setValue('plan_id', 0, { shouldValidate: true })
+      form.setValue('kind', REDEMPTION_KINDS.PROMO_CREDIT, {
+        shouldValidate: true,
+      })
+      form.setValue('quota_dollars', 0, { shouldValidate: true })
+      form.setValue('amount', 0, { shouldValidate: true })
+      form.setValue('money', 0, { shouldValidate: true })
+      form.setValue('count_as_topup', false, { shouldValidate: true })
+      form.setValue('source', REDEMPTION_SOURCES.PROMO, {
+        shouldValidate: true,
+      })
+      if ((form.getValues('reset_card_count') || 0) < 1) {
+        form.setValue('reset_card_count', 1, { shouldValidate: true })
+      }
       return
     }
     form.setValue('plan_id', 0, { shouldValidate: true })
@@ -334,6 +352,7 @@ export function RedemptionsMutateDrawer({
                           label: t('Value package plan'),
                           value: 'subscription',
                         },
+                        { label: t('Reset card'), value: 'reset_card' },
                       ]}
                       value={field.value}
                       onValueChange={handleTypeChange}
@@ -352,12 +371,15 @@ export function RedemptionsMutateDrawer({
                           <SelectItem value='subscription'>
                             {t('Value package plan')}
                           </SelectItem>
+                          <SelectItem value='reset_card'>
+                            {t('Reset card')}
+                          </SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
                     <FormDescription>
                       {t(
-                        'Choose whether this code adds balance or activates a day/week/month card.'
+                        'Choose whether this code adds balance, activates a day/week/month card, or grants reset cards.'
                       )}
                     </FormDescription>
                     <FormMessage />
@@ -420,7 +442,38 @@ export function RedemptionsMutateDrawer({
                 />
               ) : null}
 
-              {form.watch('type') !== 'subscription' ? (
+              {form.watch('type') === 'reset_card' ? (
+                <FormField
+                  control={form.control}
+                  name='reset_card_count'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Reset cards per code')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='number'
+                          min='1'
+                          max='100'
+                          step='1'
+                          disabled={isUpdate}
+                          onChange={(e) =>
+                            field.onChange(parseInt(e.target.value, 10) || 0)
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Reset cards granted when this code is redeemed. Users can reset exhausted package quota with them.'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              ) : null}
+
+              {form.watch('type') === 'quota' ? (
                 <FormField
                   control={form.control}
                   name='kind'
@@ -464,7 +517,7 @@ export function RedemptionsMutateDrawer({
                 />
               ) : null}
 
-              {form.watch('type') !== 'subscription' ? (
+              {form.watch('type') === 'quota' ? (
                 <FormField
                   control={form.control}
                   name='source'
@@ -529,7 +582,7 @@ export function RedemptionsMutateDrawer({
                 )}
               />
 
-              {form.watch('type') !== 'subscription' ? (
+              {form.watch('type') === 'quota' ? (
                 <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
                   <FormField
                     control={form.control}
@@ -581,7 +634,7 @@ export function RedemptionsMutateDrawer({
                 </div>
               ) : null}
 
-              {form.watch('type') !== 'subscription' ? (
+              {form.watch('type') === 'quota' ? (
                 <FormField
                   control={form.control}
                   name='count_as_topup'
@@ -626,7 +679,7 @@ export function RedemptionsMutateDrawer({
                 )}
               />
 
-              {form.watch('type') !== 'subscription' ? (
+              {form.watch('type') === 'quota' ? (
                 <FormField
                   control={form.control}
                   name='quota_dollars'

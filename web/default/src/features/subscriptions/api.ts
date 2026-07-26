@@ -63,6 +63,16 @@ export async function patchPlanStatus(
   return res.data
 }
 
+export async function patchPlanGiftResetCount(
+  id: number,
+  giftResetCount: number
+): Promise<ApiResponse> {
+  const res = await api.patch(`/api/subscription/admin/plans/${id}`, {
+    gift_reset_count: giftResetCount,
+  })
+  return res.data
+}
+
 export async function createSubscriptionRedemptions(
   planId: number,
   data: CreateSubscriptionRedemptionsRequest,

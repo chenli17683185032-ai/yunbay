@@ -19,8 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import { useState, useCallback } from 'react'
 import i18next from 'i18next'
 import { toast } from 'sonner'
-import { getSelf } from '@/lib/api'
 import { formatQuota } from '@/lib/format'
+import type { ResetCardGiftCelebration } from '@/components/reset-card-gift-dialog'
 import { redeemTopupCode } from '../api'
 import { getRedemptionSuccessMessageKey } from '../lib/redemption-result'
 
@@ -36,11 +36,17 @@ function parseFiniteQuota(
   return Number.isFinite(quota) ? quota : null
 }
 
+function parseFiniteCount(value: unknown): number {
+  const count = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(count) && count > 0 ? count : 0
+}
+
 function normalizeRedemptionResult(
   data: unknown
 ):
   | { type: 'quota'; quota: number }
-  | { type: 'subscription'; planTitle: string }
+  | { type: 'subscription'; planTitle: string; giftResetCount: number }
+  | { type: 'reset_card'; resetCardCount: number }
   | null {
   const numericQuota = typeof data === 'number' ? parseFiniteQuota(data) : null
   if (numericQuota !== null) return { type: 'quota', quota: numericQuota }
@@ -49,9 +55,21 @@ function normalizeRedemptionResult(
       type?: string
       quota?: number | string | null
       plan_title?: string
+      reset_card_count?: number
+      gift_reset_count?: number
     }
     if (record.type === 'subscription') {
-      return { type: 'subscription', planTitle: record.plan_title || '' }
+      return {
+        type: 'subscription',
+        planTitle: record.plan_title || '',
+        giftResetCount: parseFiniteCount(record.gift_reset_count),
+      }
+    }
+    if (record.type === 'reset_card') {
+      return {
+        type: 'reset_card',
+        resetCardCount: parseFiniteCount(record.reset_card_count),
+      }
     }
     if (record.type === 'quota') {
       const quota = parseFiniteQuota(record.quota)
@@ -59,14 +77,6 @@ function normalizeRedemptionResult(
     }
   }
   return null
-}
-
-async function refreshSelfBestEffort() {
-  try {
-    await getSelf()
-  } catch {
-    // Refresh is best-effort; the redemption itself already succeeded.
-  }
 }
 
 function getRedemptionErrorMessage(error: unknown): string {
@@ -86,9 +96,16 @@ function getRedemptionErrorMessage(error: unknown): string {
 
 export function useRedemption() {
   const [redeeming, setRedeeming] = useState(false)
+  const [giftCelebration, setGiftCelebration] =
+    useState<ResetCardGiftCelebration | null>(null)
+
+  const clearGiftCelebration = useCallback(() => {
+    setGiftCelebration(null)
+  }, [])
 
   const redeemCode = useCallback(async (code: string): Promise<boolean> => {
-    if (!code || code.trim() === '') {
+    const trimmedCode = code?.trim() ?? ''
+    if (trimmedCode === '') {
       toast.error(i18next.t('Please enter a redemption code'))
       return false
     }
@@ -96,7 +113,7 @@ export function useRedemption() {
     try {
       setRedeeming(true)
       const response = await redeemTopupCode(
-        { key: code },
+        { key: trimmedCode },
         { skipBusinessError: true, skipErrorHandler: true }
       )
 
@@ -108,7 +125,24 @@ export function useRedemption() {
               plan: result.planTitle || i18next.t('Subscription'),
             })
           )
-          await refreshSelfBestEffort()
+          if (result.giftResetCount > 0) {
+            setGiftCelebration({
+              count: result.giftResetCount,
+              planTitle: result.planTitle,
+              fromRedemption: false,
+            })
+          }
+          return true
+        }
+        if (result?.type === 'reset_card') {
+          if (result.resetCardCount > 0) {
+            setGiftCelebration({
+              count: result.resetCardCount,
+              fromRedemption: true,
+            })
+          } else {
+            toast.success(i18next.t('Redemption successful'))
+          }
           return true
         }
         if (result?.type === 'quota') {
@@ -117,11 +151,9 @@ export function useRedemption() {
               quota: formatQuota(result.quota),
             })
           )
-          await refreshSelfBestEffort()
           return true
         }
         toast.success(i18next.t('Redemption successful'))
-        await refreshSelfBestEffort()
         return true
       }
 
@@ -138,5 +170,7 @@ export function useRedemption() {
   return {
     redeeming,
     redeemCode,
+    giftCelebration,
+    clearGiftCelebration,
   }
 }

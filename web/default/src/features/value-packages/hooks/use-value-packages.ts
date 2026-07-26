@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 import { getSelf } from '@/lib/api'
+import type { ResetCardGiftCelebration } from '@/components/reset-card-gift-dialog'
 import {
   cancelLdxpTopupSession,
   getLdxpTopupSession,
@@ -37,12 +38,12 @@ import {
   getValuePackagePurchaseIntent,
   resetValuePackageQuota,
 } from '../api'
+import { valuePackageSelfQueryKey } from '../query-keys'
 import type {
   ValuePackageLdxpSessionResponse,
   ValuePackagePlan,
   ValuePackageState,
 } from '../types'
-import { valuePackageSelfQueryKey } from '../query-keys'
 
 function getErrorMessage(
   responseMessage: string | undefined,
@@ -90,9 +91,12 @@ export function useValuePackages() {
   const [paymentLoading, setPaymentLoading] = useState(false)
   const [paymentError, setPaymentError] = useState<string | null>(null)
   const [pollAttempt, setPollAttempt] = useState(0)
+  const [giftCelebration, setGiftCelebration] =
+    useState<ResetCardGiftCelebration | null>(null)
   const activeSessionIdRef = useRef<string | null>(null)
   const operationSeqRef = useRef(0)
   const handledSuccessSessionIdRef = useRef<string | null>(null)
+  const purchasedPlanRef = useRef<ValuePackagePlan | null>(null)
 
   const syncGlobalState = useCallback(
     (nextState: ValuePackageState | null) => {
@@ -155,6 +159,7 @@ export function useValuePackages() {
       operationSeqRef.current = operationSeq
       activeSessionIdRef.current = null
       handledSuccessSessionIdRef.current = null
+      purchasedPlanRef.current = plan
       setActionKey(`purchase-${plan.id}`)
       setPaymentLoading(true)
       setPaymentError(null)
@@ -286,7 +291,6 @@ export function useValuePackages() {
     }
   }, [syncGlobalState, t])
 
-
   const resetQuota = useCallback(
     async (userSubscriptionId?: number) => {
       const actionSubscriptionId = userSubscriptionId || 0
@@ -377,6 +381,7 @@ export function useValuePackages() {
     operationSeqRef.current += 1
     activeSessionIdRef.current = null
     handledSuccessSessionIdRef.current = null
+    purchasedPlanRef.current = null
     setPaymentSession(null)
     setPaymentError(null)
     setPollAttempt(0)
@@ -454,9 +459,23 @@ export function useValuePackages() {
     }
 
     handledSuccessSessionIdRef.current = session.session_id
+    // 使用服务端订单快照，确保展示张数与实际赠送一致。
+    const purchasedPlan = purchasedPlanRef.current
+    const giftCount = session.gift_reset_count || 0
+    if (giftCount > 0) {
+      setGiftCelebration({
+        count: giftCount,
+        planTitle: purchasedPlan?.title,
+        fromRedemption: false,
+      })
+    }
     void refresh()
     void refreshSelf()
   }, [paymentSession, refresh, refreshSelf])
+
+  const clearGiftCelebration = useCallback(() => {
+    setGiftCelebration(null)
+  }, [])
 
   return {
     plans,
@@ -475,5 +494,7 @@ export function useValuePackages() {
     resetQuota,
     cancelPayment,
     resetPayment,
+    giftCelebration,
+    clearGiftCelebration,
   }
 }

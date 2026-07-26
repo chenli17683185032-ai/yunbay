@@ -63,6 +63,7 @@ redemption.expire_time_invalid: "過期時間不能早於當前時間"
 redemption.unsupported_kind: "不支援的兌換碼類型"
 redemption.paid_topup_invalid: "付費充值兌換碼必須包含大於 0 的金額或額度"
 redemption.promo_invalid: "贈送兌換碼必須包含大於 0 的額度"
+redemption.reset_card_count_invalid: "重置卡張數必須在 1-100 之間"
 redemption.export_batch_required: "匯出兌換碼時必須提供批次 ID"
 redemption.export_empty: "該批次沒有可匯出的兌換碼"
 

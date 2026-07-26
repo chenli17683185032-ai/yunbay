@@ -69,9 +69,10 @@ const (
 	MsgRedemptionFailed              = "redemption.failed"
 	MsgRedemptionNotProvided         = "redemption.not_provided"
 	MsgRedemptionExpireTimeInvalid   = "redemption.expire_time_invalid"
-	MsgRedemptionUnsupportedKind     = "redemption.unsupported_kind"
-	MsgRedemptionPaidTopupInvalid    = "redemption.paid_topup_invalid"
-	MsgRedemptionPromoInvalid        = "redemption.promo_invalid"
+	MsgRedemptionUnsupportedKind       = "redemption.unsupported_kind"
+	MsgRedemptionPaidTopupInvalid      = "redemption.paid_topup_invalid"
+	MsgRedemptionPromoInvalid          = "redemption.promo_invalid"
+	MsgRedemptionResetCardCountInvalid = "redemption.reset_card_count_invalid"
 	MsgRedemptionExportBatchRequired = "redemption.export_batch_required"
 	MsgRedemptionExportEmpty         = "redemption.export_empty"
 )

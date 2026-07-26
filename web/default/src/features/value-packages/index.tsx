@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SectionPageLayout } from '@/components/layout'
+import { ResetCardGiftDialog } from '@/components/reset-card-gift-dialog'
 import { useRedemption } from '@/features/wallet/hooks/use-redemption'
 import { ValuePackageCard } from './components/value-package-card'
 import { ValuePackagePaymentDialog } from './components/value-package-payment-dialog'
@@ -39,7 +40,12 @@ import { useValuePackages } from './hooks/use-value-packages'
 export function ValuePackages() {
   const { t } = useTranslation()
   const valuePackages = useValuePackages()
-  const { redeeming, redeemCode } = useRedemption()
+  const {
+    redeeming,
+    redeemCode,
+    giftCelebration: redeemGiftCelebration,
+    clearGiftCelebration: clearRedeemGiftCelebration,
+  } = useRedemption()
   const [redemptionCodes, setRedemptionCodes] = useState<
     Record<number, string>
   >({})
@@ -155,6 +161,14 @@ export function ValuePackages() {
         error={valuePackages.paymentError}
         onCancel={valuePackages.cancelPayment}
         onClose={valuePackages.resetPayment}
+      />
+
+      <ResetCardGiftDialog
+        celebration={redeemGiftCelebration ?? valuePackages.giftCelebration}
+        onClose={() => {
+          clearRedeemGiftCelebration()
+          valuePackages.clearGiftCelebration()
+        }}
       />
     </>
   )

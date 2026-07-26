@@ -130,6 +130,7 @@ export const REDEMPTION_VALIDATION = {
   NAME_MAX_LENGTH: 20,
   COUNT_MIN: 1,
   COUNT_MAX: 100,
+  RESET_CARD_COUNT_MAX: 100,
 } as const
 
 // ============================================================================
@@ -154,6 +155,8 @@ export const ERROR_MESSAGES = {
     'Paid top-up cards require positive quota, amount, paid money, and top-up accounting.',
   PROMO_CREDIT_INVALID:
     'Promo / gift credit cannot be counted as paid top-up, and amount/money cannot be negative.',
+  RESET_CARD_COUNT_INVALID:
+    'Reset card count must be between {{min}} and {{max}}',
 } as const
 
 /** For form schema only: returns translated messages with interpolation. */
@@ -171,6 +174,10 @@ export function getRedemptionFormErrorMessages(t: TFunction) {
     FACE_AMOUNT_INTEGER_INVALID: t(ERROR_MESSAGES.FACE_AMOUNT_INTEGER_INVALID),
     PAID_TOPUP_INVALID: t(ERROR_MESSAGES.PAID_TOPUP_INVALID),
     PROMO_CREDIT_INVALID: t(ERROR_MESSAGES.PROMO_CREDIT_INVALID),
+    RESET_CARD_COUNT_INVALID: t(ERROR_MESSAGES.RESET_CARD_COUNT_INVALID, {
+      min: 1,
+      max: REDEMPTION_VALIDATION.RESET_CARD_COUNT_MAX,
+    }),
   } as const
 }
 

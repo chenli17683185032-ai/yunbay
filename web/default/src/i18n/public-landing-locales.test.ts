@@ -51,16 +51,32 @@ function readTranslation(localeName: (typeof LOCALE_NAMES)[number]) {
   >
 }
 
-test('yunbay manifesto stays in Chinese in every supported locale', () => {
+test('yunbay manifesto keeps Chinese copy in zh and a non-empty translation everywhere else', () => {
   for (const localeName of LOCALE_NAMES) {
     const translation = readTranslation(localeName)
 
     for (const key of CHINESE_BRAND_COPY) {
-      assert.equal(translation[key], key, `${localeName}: ${key}`)
+      if (localeName === 'zh') {
+        assert.equal(translation[key], key, `${localeName}: ${key}`)
+      } else {
+        assert.ok(
+          typeof translation[key] === 'string' &&
+            translation[key].trim().length > 0,
+          `${localeName}: missing translation for ${key}`
+        )
+      }
     }
 
     for (const [key, value] of CHINESE_MARKETING_TRANSLATIONS) {
-      assert.equal(translation[key], value, `${localeName}: ${key}`)
+      if (localeName === 'zh') {
+        assert.equal(translation[key], value, `${localeName}: ${key}`)
+      } else {
+        assert.ok(
+          typeof translation[key] === 'string' &&
+            translation[key].trim().length > 0,
+          `${localeName}: missing translation for ${key}`
+        )
+      }
     }
   }
 })

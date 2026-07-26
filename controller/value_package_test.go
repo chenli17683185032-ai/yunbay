@@ -1498,6 +1498,48 @@ func TestAdminUpdateSubscriptionPlanStatusAllowsEnabledValuePackageWithoutCustom
 	assert.Zero(t, persisted.LdxpSessionTTLSeconds)
 }
 
+func TestAdminPatchSubscriptionPlanGiftResetCountUpdatesOnlyThatField(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	plan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	originalTitle := plan.Title
+	originalPrice := plan.PriceAmount
+	originalEnabled := plan.Enabled
+
+	rec := valuePackageControllerRequest(AdminUpdateSubscriptionPlanStatus, http.MethodPatch, fmt.Sprintf("/subscription/admin/plans/%d", plan.Id), gin.H{"gift_reset_count": 4}, 1)
+	body := decodeTestResponse(t, rec)
+	require.Equal(t, true, body["success"], rec.Body.String())
+
+	var persisted model.SubscriptionPlan
+	require.NoError(t, model.DB.First(&persisted, plan.Id).Error)
+	assert.Equal(t, 4, persisted.GiftResetCount)
+	assert.Equal(t, originalTitle, persisted.Title)
+	assert.Equal(t, originalPrice, persisted.PriceAmount)
+	assert.Equal(t, originalEnabled, persisted.Enabled)
+}
+
+func TestAdminPatchSubscriptionPlanGiftResetCountValidatesTargetAndRange(t *testing.T) {
+	setupValuePackageControllerTest(t)
+	valuePlan := seedValuePackageControllerPlan(t, model.ValuePackageTypeDay, model.ValuePackageLevelDay)
+	regularPlan := model.SubscriptionPlan{Title: "regular", PriceAmount: 1, DurationUnit: model.SubscriptionDurationMonth, DurationValue: 1, Enabled: true, PlanKind: model.SubscriptionPlanKindSubscription}
+	require.NoError(t, model.DB.Create(&regularPlan).Error)
+
+	for _, tc := range []struct {
+		name  string
+		id    int
+		count int
+	}{
+		{name: "negative", id: valuePlan.Id, count: -1},
+		{name: "over max", id: valuePlan.Id, count: model.MaxSubscriptionPlanGiftResetCount + 1},
+		{name: "regular plan", id: regularPlan.Id, count: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := valuePackageControllerRequest(AdminUpdateSubscriptionPlanStatus, http.MethodPatch, fmt.Sprintf("/subscription/admin/plans/%d", tc.id), gin.H{"gift_reset_count": tc.count}, 1)
+			body := decodeTestResponse(t, rec)
+			require.Equal(t, false, body["success"], rec.Body.String())
+		})
+	}
+}
+
 func TestAdminUpdateSubscriptionPlanStatusReturnsErrorForMissingPlan(t *testing.T) {
 	setupValuePackageControllerTest(t)
 

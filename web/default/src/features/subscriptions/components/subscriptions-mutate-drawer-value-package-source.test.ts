@@ -30,6 +30,7 @@ const requiredFields = [
   'concurrency_limit',
   'limit_5h_amount',
   'limit_7d_amount',
+  'gift_reset_count',
   'benefits',
   'ldxp_product_url',
   'ldxp_product_name',

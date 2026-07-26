@@ -73,7 +73,7 @@ test('value package card uses the shared usage period renderer', async () => {
   assert.doesNotMatch(source, /t=\{t\}/)
   assert.match(
     source,
-    /当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用/
+    /Current quota is used up\. Consider pausing, using the wallet API billing, or waiting for the time window to pass\./
   )
   assert.match(
     source,

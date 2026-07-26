@@ -22,6 +22,7 @@ import { RefreshCw, RotateCcw, Search, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { formatTimestampToDate } from '@/lib/format'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -59,6 +60,7 @@ import {
 } from '@/components/ui/pagination'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/ui/spinner'
 import {
   Table,
   TableBody,
@@ -69,6 +71,10 @@ import {
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { SectionPageLayout } from '@/components/layout'
+import {
+  getAdminPlans,
+  patchPlanGiftResetCount,
+} from '@/features/subscriptions/api'
 import { ValuePackagePeriodList } from '@/features/value-packages/components/value-package-period-list'
 import { getValuePackagePeriodLimits } from '@/features/value-packages/lib/period-limits'
 import {
@@ -245,6 +251,186 @@ function ResetCountDialog({
   )
 }
 
+const valuePackagePlanGiftKeys = {
+  plans: ['order-management', 'value-package-plan-gift'] as const,
+}
+
+function PlanGiftSettingsCard() {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [drafts, setDrafts] = useState<Record<number, number>>({})
+
+  const plansQuery = useQuery({
+    queryKey: valuePackagePlanGiftKeys.plans,
+    queryFn: async () => {
+      const result = await getAdminPlans()
+      if (!result.success) {
+        throw new Error(result.message || '')
+      }
+      return (result.data || []).filter(
+        (record) => record.plan.plan_kind === 'value_package'
+      )
+    },
+  })
+
+  const saveMutation = useMutation({
+    mutationFn: async ({
+      planId,
+      giftResetCount,
+    }: {
+      planId: number
+      giftResetCount: number
+    }) => patchPlanGiftResetCount(planId, giftResetCount),
+    onSuccess: async (result) => {
+      if (!result.success) {
+        toast.error(result.message || t('Failed to update gift reset cards'))
+        return
+      }
+      toast.success(t('Gift reset cards updated'))
+      await queryClient.invalidateQueries({
+        queryKey: valuePackagePlanGiftKeys.plans,
+      })
+    },
+    onError: (error) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t('Failed to update gift reset cards')
+      )
+    },
+  })
+
+  const records = plansQuery.data ?? []
+
+  const renderContent = () => {
+    if (plansQuery.isLoading) {
+      return (
+        <div className='flex flex-col gap-2'>
+          <Skeleton className='h-9 w-full' />
+          <Skeleton className='h-9 w-full' />
+        </div>
+      )
+    }
+
+    if (plansQuery.isError) {
+      return (
+        <Alert variant='destructive'>
+          <AlertDescription className='flex flex-wrap items-center justify-between gap-2'>
+            <span>
+              {plansQuery.error instanceof Error && plansQuery.error.message
+                ? plansQuery.error.message
+                : t('Failed to load value package plans')}
+            </span>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={() => void plansQuery.refetch()}
+            >
+              {t('Retry')}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )
+    }
+
+    if (records.length === 0) {
+      return (
+        <p className='text-muted-foreground text-sm'>
+          {t(
+            'No enabled day, week, or month packages are available. Enable a package plan first.'
+          )}
+        </p>
+      )
+    }
+
+    return (
+      <div className='flex flex-col gap-2'>
+        {records.map(({ plan }) => {
+          const currentGift = Number(plan.gift_reset_count || 0)
+          const draft = drafts[plan.id] ?? currentGift
+          const dirty = draft !== currentGift
+          const saving =
+            saveMutation.isPending && saveMutation.variables?.planId === plan.id
+          return (
+            <div
+              key={plan.id}
+              className='flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2'
+            >
+              <div className='flex items-center gap-2'>
+                <span className='font-medium'>{plan.title}</span>
+                <Badge variant='secondary'>
+                  {packageLabel(plan.package_type || '', t)}
+                </Badge>
+                {!plan.enabled && (
+                  <Badge variant='outline'>{t('Disabled')}</Badge>
+                )}
+              </div>
+              <div className='flex items-center gap-2'>
+                <Input
+                  className='w-24'
+                  type='number'
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={draft}
+                  aria-label={`${plan.title}: ${t('Gift reset cards on activation')}`}
+                  disabled={saveMutation.isPending}
+                  onChange={(event) =>
+                    setDrafts((previous) => ({
+                      ...previous,
+                      [plan.id]: Math.max(
+                        0,
+                        Math.min(
+                          100,
+                          Math.floor(Number(event.target.value) || 0)
+                        )
+                      ),
+                    }))
+                  }
+                />
+                <Button
+                  type='button'
+                  size='sm'
+                  disabled={!dirty || saveMutation.isPending}
+                  onClick={() =>
+                    saveMutation.mutate({
+                      planId: plan.id,
+                      giftResetCount: draft,
+                    })
+                  }
+                >
+                  {saving && <Spinner data-icon='inline-start' />}
+                  {t('Save')}
+                </Button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className='flex items-start gap-3'>
+          <RotateCcw className='text-primary mt-1 size-5' aria-hidden='true' />
+          <div className='flex flex-col gap-1'>
+            <CardTitle>{t('Gift reset cards on activation')}</CardTitle>
+            <CardDescription>
+              {t(
+                'Reset cards gifted to the user each time this package is purchased or redeemed (0 = none).'
+              )}
+            </CardDescription>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>{renderContent()}</CardContent>
+    </Card>
+  )
+}
+
 export function ValuePackageManagementPage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -412,6 +598,8 @@ export function ValuePackageManagementPage() {
                 </div>
               </CardContent>
             </Card>
+
+            <PlanGiftSettingsCard />
 
             <Card className='min-h-[560px]'>
               <CardHeader>

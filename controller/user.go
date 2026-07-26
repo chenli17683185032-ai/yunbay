@@ -1227,6 +1227,8 @@ func redemptionErrorMessageKey(err error) string {
 		return i18n.MsgRedemptionExpired
 	case errors.Is(err, model.ErrRedemptionUnsupportedKind):
 		return i18n.MsgRedemptionUnsupportedKind
+	case errors.Is(err, model.ErrRedemptionResetCardCountInvalid):
+		return i18n.MsgRedemptionResetCardCountInvalid
 	case errors.Is(err, model.ErrRedeemFailed):
 		return i18n.MsgRedeemFailed
 	default:
@@ -1258,17 +1260,26 @@ func TopUp(c *gin.Context) {
 		common.ApiErrorI18n(c, redemptionErrorMessageKey(err))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data": func() interface{} {
-			if result.Type == model.RedemptionTypeSubscription {
-				return result
-			}
-			return result.Quota
-		}(),
-		"redemption": result.Redemption,
-	})
+	c.JSON(http.StatusOK, buildTopUpSuccessResponse(result))
+}
+
+func buildTopUpSuccessResponse(result *model.RedeemResult) gin.H {
+	var data interface{}
+	var redemption interface{}
+	if result != nil {
+		if result.Type == model.RedemptionTypeSubscription || result.Type == model.RedemptionTypeResetCard {
+			data = result
+		} else {
+			data = result.Quota
+		}
+		redemption = result.Redemption
+	}
+	return gin.H{
+		"success":    true,
+		"message":    "",
+		"data":       data,
+		"redemption": redemption,
+	}
 }
 
 type UpdateUserSettingRequest struct {

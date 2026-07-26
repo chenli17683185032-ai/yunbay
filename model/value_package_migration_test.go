@@ -73,6 +73,7 @@ func TestValuePackagePlanFieldsPersist(t *testing.T) {
 		LdxpProductAmount:     9.90,
 		LdxpProductRef:        "day-card-prod",
 		LdxpSessionTTLSeconds: 1800,
+		GiftResetCount:        3,
 	}
 	require.NoError(t, DB.Create(plan).Error)
 
@@ -91,6 +92,7 @@ func TestValuePackagePlanFieldsPersist(t *testing.T) {
 	require.Equal(t, 9.90, got.LdxpProductAmount)
 	require.Equal(t, "day-card-prod", got.LdxpProductRef)
 	require.EqualValues(t, 1800, got.LdxpSessionTTLSeconds)
+	require.Equal(t, 3, got.GiftResetCount)
 }
 
 func TestEnsureSubscriptionPlanTableSQLiteAddsValuePackageColumns(t *testing.T) {
@@ -114,6 +116,7 @@ func TestEnsureSubscriptionPlanTableSQLiteAddsValuePackageColumns(t *testing.T) 
 		"ldxp_product_amount",
 		"ldxp_product_ref",
 		"ldxp_session_ttl_seconds",
+		"gift_reset_count",
 	} {
 		require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, col), "missing column %s", col)
 	}
@@ -127,6 +130,7 @@ func TestEnsureSubscriptionPlanTableSQLiteAddsValuePackageColumns(t *testing.T) 
 		Limit7dAmount         int64
 		LdxpProductAmount     float64
 		LdxpSessionTTLSeconds int64
+		GiftResetCount        int
 	}
 	require.NoError(t, DB.Table("subscription_plans").Where("id = ?", 1).First(&got).Error)
 	require.Equal(t, 1, got.Id)
@@ -137,6 +141,8 @@ func TestEnsureSubscriptionPlanTableSQLiteAddsValuePackageColumns(t *testing.T) 
 	require.EqualValues(t, 0, got.Limit7dAmount)
 	require.Equal(t, 0.0, got.LdxpProductAmount)
 	require.EqualValues(t, 0, got.LdxpSessionTTLSeconds)
+	require.Zero(t, got.GiftResetCount)
+	require.NoError(t, ensureSubscriptionPlanTableSQLite(), "migration must be repeatable")
 }
 
 func TestEnsureUserSubscriptionTableSQLiteAddsCoveredColumns(t *testing.T) {
@@ -261,6 +267,7 @@ func TestValuePackageMigrateDBCreatesTablesAndColumns(t *testing.T) {
 	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "plan_kind"))
 	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "concurrency_limit"))
 	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "ldxp_session_ttl_seconds"))
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionPlan{}, "gift_reset_count"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_by_subscription_id"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "covered_time"))
 	require.True(t, DB.Migrator().HasColumn(&UserSubscription{}, "quota_epoch"))
@@ -281,13 +288,18 @@ func TestValuePackageMigrateDBCreatesTablesAndColumns(t *testing.T) {
 	}
 	require.NoError(t, DB.Raw("PRAGMA table_info(`subscription_plans`)").Scan(&columns).Error)
 	var priceAmountDefault string
+	var giftResetCountDefault string
 	for _, column := range columns {
-		if column.Name == "price_amount" {
+		switch column.Name {
+		case "price_amount":
 			priceAmountDefault = column.DefaultValue
-			break
+		case "gift_reset_count":
+			giftResetCountDefault = column.DefaultValue
 		}
 	}
 	require.Equal(t, "0", priceAmountDefault)
+	require.Equal(t, "0", giftResetCountDefault)
+	require.NoError(t, migrateDB(), "full migration must be repeatable")
 }
 
 func TestValuePackageNewTablesMigrate(t *testing.T) {
@@ -307,13 +319,17 @@ func TestEnsureSubscriptionOrderTableSQLiteAddsUserSubscriptionID(t *testing.T) 
 	require.NoError(t, ensureSubscriptionOrderTableSQLite())
 
 	require.True(t, DB.Migrator().HasColumn(&SubscriptionOrder{}, "user_subscription_id"))
+	require.True(t, DB.Migrator().HasColumn(&SubscriptionOrder{}, "gift_reset_count"))
 	var got struct {
 		Id                 int
 		UserSubscriptionId int
+		GiftResetCount     int
 	}
 	require.NoError(t, DB.Table("subscription_orders").Where("id = ?", 1).First(&got).Error)
 	require.Equal(t, 1, got.Id)
 	require.Equal(t, 0, got.UserSubscriptionId)
+	require.Zero(t, got.GiftResetCount)
+	require.NoError(t, ensureSubscriptionOrderTableSQLite(), "migration must be repeatable")
 
 	require.NoError(t, DB.Table("subscription_orders").Where("id = ?", 1).Update("user_subscription_id", 321).Error)
 	var order SubscriptionOrder

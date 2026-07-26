@@ -36,12 +36,19 @@ type Redemption struct {
 	UsedUserId   int            `json:"used_user_id"`
 	DeletedAt    gorm.DeletedAt `gorm:"index"`
 	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	// 重置卡兑换码：每个码兑换后发放的重置次数
+	ResetCardCount int `json:"reset_card_count" gorm:"default:0"`
+	// 兑换套餐码时按套餐配置赠送的重置卡张数，仅兑换结果使用
+	GiftResetCount int `json:"gift_reset_count,omitempty" gorm:"-:all"`
 }
 
 const (
 	RedemptionTypeQuota        = "quota"
 	RedemptionTypeSubscription = "subscription"
+	RedemptionTypeResetCard    = "reset_card"
 )
+
+const MaxRedemptionResetCardCount = 100
 
 const (
 	RedemptionKindLegacy      = "legacy"
@@ -57,28 +64,75 @@ const (
 )
 
 type RedeemRedemptionMeta struct {
-	Id           int     `json:"id"`
-	Type         string  `json:"type"`
-	PlanId       int     `json:"plan_id,omitempty"`
-	PlanTitle    string  `json:"plan_title,omitempty"`
-	Kind         string  `json:"kind"`
-	Quota        int     `json:"quota"`
-	Amount       int64   `json:"amount"`
-	Money        float64 `json:"money"`
-	CountAsTopUp bool    `json:"count_as_topup"`
-	BatchId      string  `json:"batch_id"`
-	Source       string  `json:"source"`
+	Id             int     `json:"id"`
+	Type           string  `json:"type"`
+	PlanId         int     `json:"plan_id,omitempty"`
+	PlanTitle      string  `json:"plan_title,omitempty"`
+	Kind           string  `json:"kind"`
+	Quota          int     `json:"quota"`
+	Amount         int64   `json:"amount"`
+	Money          float64 `json:"money"`
+	CountAsTopUp   bool    `json:"count_as_topup"`
+	BatchId        string  `json:"batch_id"`
+	Source         string  `json:"source"`
+	ResetCardCount int     `json:"reset_card_count,omitempty"`
 }
 
 type RedeemResult struct {
-	Type       string               `json:"type"`
-	Quota      int                  `json:"quota,omitempty"`
-	PlanId     int                  `json:"plan_id,omitempty"`
-	PlanTitle  string               `json:"plan_title,omitempty"`
-	Redemption RedeemRedemptionMeta `json:"redemption"`
+	Type      string `json:"type"`
+	Quota     int    `json:"quota,omitempty"`
+	PlanId    int    `json:"plan_id,omitempty"`
+	PlanTitle string `json:"plan_title,omitempty"`
+	// 重置卡兑换码发放的重置次数
+	ResetCardCount int `json:"reset_card_count,omitempty"`
+	// 套餐开通时按套餐配置赠送的重置卡张数
+	GiftResetCount int                  `json:"gift_reset_count,omitempty"`
+	Redemption     RedeemRedemptionMeta `json:"redemption"`
 }
 
-func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+// RedemptionStatusFilterExpired is the virtual status filter value for enabled
+// codes whose expired_time has passed; it is not a real DB status.
+const RedemptionStatusFilterExpired = "expired"
+
+// applyRedemptionStatusFilter narrows a redemption list query by the status
+// filter sent from the admin UI. Supported values: "1" (enabled and not
+// expired), "2" (disabled), "3" (used) and the virtual "expired" (enabled but
+// past expired_time). Multiple values may be comma-separated and are OR-ed
+// together; unrecognized values are ignored.
+func applyRedemptionStatusFilter(query *gorm.DB, statusFilter string) *gorm.DB {
+	statusFilter = strings.TrimSpace(statusFilter)
+	if statusFilter == "" {
+		return query
+	}
+	now := common.GetTimestamp()
+	var conditions []string
+	var args []interface{}
+	for _, value := range strings.Split(statusFilter, ",") {
+		switch strings.TrimSpace(value) {
+		case "":
+			continue
+		case RedemptionStatusFilterExpired:
+			conditions = append(conditions, "(status = ? AND expired_time != 0 AND expired_time < ?)")
+			args = append(args, common.RedemptionCodeStatusEnabled, now)
+		case strconv.Itoa(common.RedemptionCodeStatusEnabled):
+			conditions = append(conditions, "(status = ? AND (expired_time = 0 OR expired_time >= ?))")
+			args = append(args, common.RedemptionCodeStatusEnabled, now)
+		default:
+			status, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil {
+				continue
+			}
+			conditions = append(conditions, "status = ?")
+			args = append(args, status)
+		}
+	}
+	if len(conditions) == 0 {
+		return query
+	}
+	return query.Where(strings.Join(conditions, " OR "), args...)
+}
+
+func GetAllRedemptions(startIdx int, num int, statusFilter string) (redemptions []*Redemption, total int64, err error) {
 	// 开始事务
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -90,15 +144,17 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 		}
 	}()
 
+	query := applyRedemptionStatusFilter(tx.Model(&Redemption{}), statusFilter)
+
 	// 获取总数
-	err = tx.Model(&Redemption{}).Count(&total).Error
+	err = query.Count(&total).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
 	// 获取分页数据
-	err = tx.Order("id desc").Limit(num).Offset(startIdx).Find(&redemptions).Error
+	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&redemptions).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -112,7 +168,7 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 	return redemptions, total, nil
 }
 
-func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+func SearchRedemptions(keyword string, startIdx int, num int, statusFilter string) (redemptions []*Redemption, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -133,6 +189,7 @@ func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Re
 	} else {
 		query = query.Where("name LIKE ? OR batch_id LIKE ?", pattern, pattern)
 	}
+	query = applyRedemptionStatusFilter(query, statusFilter)
 
 	// Get total count
 	err = query.Count(&total).Error
@@ -171,6 +228,8 @@ func normalizeRedemptionType(redemptionType string) string {
 		return RedemptionTypeQuota
 	case RedemptionTypeSubscription:
 		return RedemptionTypeSubscription
+	case RedemptionTypeResetCard:
+		return RedemptionTypeResetCard
 	default:
 		return ""
 	}
@@ -184,7 +243,26 @@ func validateRedemptionPlanForCreate(redemption *Redemption) error {
 	if redemption.Type == "" {
 		return ErrRedemptionInvalid
 	}
+	if redemption.Type == RedemptionTypeResetCard {
+		if redemption.ResetCardCount == 0 {
+			redemption.ResetCardCount = 1
+		}
+		if redemption.ResetCardCount < 1 || redemption.ResetCardCount > MaxRedemptionResetCardCount {
+			return ErrRedemptionResetCardCountInvalid
+		}
+		redemption.PlanId = 0
+		redemption.Quota = 0
+		redemption.Kind = RedemptionKindPromoCredit
+		redemption.Amount = 0
+		redemption.Money = 0
+		redemption.CountAsTopUp = false
+		if strings.TrimSpace(redemption.Source) == "" {
+			redemption.Source = RedemptionSourcePromo
+		}
+		return nil
+	}
 	if redemption.Type != RedemptionTypeSubscription {
+		redemption.ResetCardCount = 0
 		return nil
 	}
 	if redemption.PlanId <= 0 {
@@ -193,6 +271,7 @@ func validateRedemptionPlanForCreate(redemption *Redemption) error {
 	if _, err := getSubscriptionPlanByIdFreshTx(nil, redemption.PlanId); err != nil {
 		return err
 	}
+	redemption.ResetCardCount = 0
 	redemption.Quota = 0
 	redemption.Kind = RedemptionKindPromoCredit
 	redemption.Amount = 0
@@ -244,7 +323,7 @@ func NormalizeRedemptionForCreate(redemption *Redemption) error {
 	if err := validateRedemptionPlanForCreate(redemption); err != nil {
 		return err
 	}
-	if redemption.Type == RedemptionTypeSubscription {
+	if redemption.Type == RedemptionTypeSubscription || redemption.Type == RedemptionTypeResetCard {
 		if redemption.BatchId == "" {
 			redemption.BatchId = GenerateRedemptionBatchId(redemption.Source, redemption.Amount, common.GetTimestamp())
 		}
@@ -302,22 +381,25 @@ func normalizeRedeemedRedemption(redemption *Redemption) {
 func buildRedeemResult(redemption *Redemption) *RedeemResult {
 	normalizeRedeemedRedemption(redemption)
 	return &RedeemResult{
-		Type:      redemption.Type,
-		Quota:     redemption.Quota,
-		PlanId:    redemption.PlanId,
-		PlanTitle: redemption.PlanTitle,
+		Type:           redemption.Type,
+		Quota:          redemption.Quota,
+		PlanId:         redemption.PlanId,
+		PlanTitle:      redemption.PlanTitle,
+		ResetCardCount: redemption.ResetCardCount,
+		GiftResetCount: redemption.GiftResetCount,
 		Redemption: RedeemRedemptionMeta{
-			Id:           redemption.Id,
-			Type:         redemption.Type,
-			PlanId:       redemption.PlanId,
-			PlanTitle:    redemption.PlanTitle,
-			Kind:         redemption.Kind,
-			Quota:        redemption.Quota,
-			Amount:       redemption.Amount,
-			Money:        redemption.Money,
-			CountAsTopUp: redemption.CountAsTopUp,
-			BatchId:      redemption.BatchId,
-			Source:       redemption.Source,
+			Id:             redemption.Id,
+			Type:           redemption.Type,
+			PlanId:         redemption.PlanId,
+			PlanTitle:      redemption.PlanTitle,
+			Kind:           redemption.Kind,
+			Quota:          redemption.Quota,
+			Amount:         redemption.Amount,
+			Money:          redemption.Money,
+			CountAsTopUp:   redemption.CountAsTopUp,
+			BatchId:        redemption.BatchId,
+			Source:         redemption.Source,
+			ResetCardCount: redemption.ResetCardCount,
 		},
 	}
 }
@@ -463,6 +545,28 @@ func redeemWithTx(tx *gorm.DB, key string, userId int, redemption *Redemption) (
 		}
 		redemption.Quota = 0
 		redemption.PlanTitle = plan.Title
+		if plan.IsValuePackage() {
+			redemption.GiftResetCount = ClampSubscriptionPlanGiftResetCount(plan.GiftResetCount)
+		}
+		return false, nil
+	}
+
+	if redemption.Type == RedemptionTypeResetCard {
+		if redemption.ResetCardCount <= 0 || redemption.ResetCardCount > MaxRedemptionResetCardCount {
+			return false, ErrRedemptionInvalid
+		}
+		if err := ensureExistingUserForUpdateTx(tx, userId); err != nil {
+			return false, err
+		}
+		if err := claimRedemptionCodeTx(tx, redemption, userId, now); err != nil {
+			return false, err
+		}
+		if _, err := grantValuePackageResetCountTx(tx, userId, redemption.ResetCardCount,
+			ValuePackageResetCountLedgerSourceRedemption, userId,
+			fmt.Sprintf("兑换码兑换重置卡，兑换码ID %d", redemption.Id)); err != nil {
+			return false, err
+		}
+		redemption.Quota = 0
 		return false, nil
 	}
 
@@ -517,7 +621,15 @@ func RecordRedeemLog(userId int, result *RedeemResult) {
 		return
 	}
 	if result.Type == RedemptionTypeSubscription {
+		if result.GiftResetCount > 0 {
+			RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码开通套餐 %s，赠送 %d 张重置卡，兑换码ID %d", result.PlanTitle, result.GiftResetCount, result.Redemption.Id))
+			return
+		}
 		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码开通套餐 %s，兑换码ID %d", result.PlanTitle, result.Redemption.Id))
+		return
+	}
+	if result.Type == RedemptionTypeResetCard {
+		RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码获得 %d 张重置卡，兑换码ID %d", result.ResetCardCount, result.Redemption.Id))
 		return
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(result.Quota), result.Redemption.Id))
@@ -537,7 +649,7 @@ func (redemption *Redemption) SelectUpdate() error {
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (redemption *Redemption) Update() error {
 	var err error
-	err = DB.Model(redemption).Select("name", "status", "quota", "type", "plan_id", "kind", "amount", "money", "count_as_topup", "batch_id", "source", "redeemed_time", "expired_time").Updates(redemption).Error
+	err = DB.Model(redemption).Select("name", "status", "quota", "type", "plan_id", "kind", "amount", "money", "count_as_topup", "batch_id", "source", "redeemed_time", "expired_time", "reset_card_count").Updates(redemption).Error
 	return err
 }
 

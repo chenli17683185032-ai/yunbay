@@ -62,6 +62,7 @@ redemption.expire_time_invalid: "Expiration time cannot be earlier than current 
 redemption.unsupported_kind: "Unsupported redemption code kind"
 redemption.paid_topup_invalid: "Paid top-up redemption code must include a positive amount or quota"
 redemption.promo_invalid: "Promotional redemption code must include a positive quota"
+redemption.reset_card_count_invalid: "Reset card count must be between 1 and 100"
 redemption.export_batch_required: "Redemption batch ID is required for export"
 redemption.export_empty: "No redemption codes found for this batch"
 

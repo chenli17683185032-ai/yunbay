@@ -276,9 +276,9 @@ test('glow is hidden when state plan does not match state subscription', () => {
 })
 
 test('package level labels map to Chinese names with generic fallback', () => {
-  assert.equal(getPackageLevelLabel('day'), '日卡')
-  assert.equal(getPackageLevelLabel('week'), '周卡')
-  assert.equal(getPackageLevelLabel('month'), '月卡')
-  assert.equal(getPackageLevelLabel(''), '套餐')
-  assert.equal(getPackageLevelLabel(undefined), '套餐')
+  assert.equal(getPackageLevelLabel('day'), 'Day package')
+  assert.equal(getPackageLevelLabel('week'), 'Week package')
+  assert.equal(getPackageLevelLabel('month'), 'Month package')
+  assert.equal(getPackageLevelLabel(''), 'Value Package')
+  assert.equal(getPackageLevelLabel(undefined), 'Value Package')
 })

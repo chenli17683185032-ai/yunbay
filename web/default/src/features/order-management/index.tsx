@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { RefreshIcon } from '@hugeicons/core-free-icons'
@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button'
 import { SectionPageLayout } from '@/components/layout'
 import {
   deleteBillingOrder,
+  getMailCheckJob,
   getOrderAnalytics,
   getOrderManagementOrders,
   startBatchMailCheck,
@@ -41,6 +42,9 @@ import { buildOrderManagementRangeParams } from './lib/range'
 import type { DateRangeKey, MailCheckStatus } from './types'
 
 const route = getRouteApi('/_authenticated/order-management/')
+
+const MAIL_CHECK_POLL_INTERVAL_MS = 2000
+const MAIL_CHECK_POLL_TIMEOUT_MS = 120_000
 
 const MAIL_CHECK_STATUSES = new Set<MailCheckStatus>([
   'not_required',
@@ -165,18 +169,94 @@ export function OrderManagement() {
     ])
   }, [queryClient])
 
+  const mailCheckPollRef = useRef<{
+    timer: ReturnType<typeof setInterval>
+    jobId: string
+  } | null>(null)
+  const [isPollingMailCheck, setIsPollingMailCheck] = useState(false)
+
+  const stopMailCheckPolling = useCallback(() => {
+    if (mailCheckPollRef.current) {
+      clearInterval(mailCheckPollRef.current.timer)
+      mailCheckPollRef.current = null
+    }
+    setIsPollingMailCheck(false)
+    setVerifyingId(null)
+  }, [])
+
+  useEffect(() => stopMailCheckPolling, [stopMailCheckPolling])
+
+  const startMailCheckPolling = useCallback(
+    (jobId: string) => {
+      // Guard against overlapping runs: replace any poll still in progress.
+      if (mailCheckPollRef.current) {
+        clearInterval(mailCheckPollRef.current.timer)
+        mailCheckPollRef.current = null
+      }
+      setIsPollingMailCheck(true)
+      const startedAt = Date.now()
+      let inFlight = false
+      const poll = async () => {
+        if (inFlight || mailCheckPollRef.current?.jobId !== jobId) return
+        if (Date.now() - startedAt >= MAIL_CHECK_POLL_TIMEOUT_MS) {
+          stopMailCheckPolling()
+          toast.error(t('Verification timed out'))
+          return
+        }
+        inFlight = true
+        try {
+          const result = await getMailCheckJob(jobId)
+          if (mailCheckPollRef.current?.jobId !== jobId) return
+          if (!result.success) {
+            stopMailCheckPolling()
+            toast.error(result.message || t('Verification failed'))
+            return
+          }
+          const job = result.data
+          if (!job || job.status === 'running') return
+          stopMailCheckPolling()
+          if (job.status === 'finished') {
+            toast.success(
+              t('Verification completed ({{count}} orders updated)', {
+                count: job.affected_count,
+              })
+            )
+            await invalidateOrderManagement()
+          } else {
+            toast.error(job.error_message || t('Verification failed'))
+          }
+        } catch {
+          // Transient network error: keep polling until the timeout.
+        } finally {
+          inFlight = false
+        }
+      }
+      const timer = setInterval(() => {
+        void poll()
+      }, MAIL_CHECK_POLL_INTERVAL_MS)
+      mailCheckPollRef.current = { timer, jobId }
+    },
+    [invalidateOrderManagement, stopMailCheckPolling, t]
+  )
+
   const singleMailCheckMutation = useMutation({
     mutationFn: startSingleMailCheck,
     onMutate: (orderId) => setVerifyingId(orderId),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       if (!result.success) {
+        setVerifyingId(null)
         toast.error(result.message || t('Request failed'))
         return
       }
-      toast.success(t('Verify now'))
-      await invalidateOrderManagement()
+      toast.info(t('Verification started'))
+      if (result.data?.job_id) {
+        startMailCheckPolling(result.data.job_id)
+      } else {
+        setVerifyingId(null)
+        void invalidateOrderManagement()
+      }
     },
-    onSettled: () => setVerifyingId(null),
+    onError: () => setVerifyingId(null),
   })
 
   const batchMailCheckMutation = useMutation({
@@ -185,13 +265,17 @@ export function OrderManagement() {
         ...rangeParams,
         scope: 'unfinished',
       }),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       if (!result.success) {
         toast.error(result.message || t('Request failed'))
         return
       }
-      toast.success(t('Verify unfinished orders now'))
-      await invalidateOrderManagement()
+      toast.info(t('Verification started'))
+      if (result.data?.job_id) {
+        startMailCheckPolling(result.data.job_id)
+      } else {
+        void invalidateOrderManagement()
+      }
     },
   })
 
@@ -286,7 +370,9 @@ export function OrderManagement() {
   }, [ordersQuery.data?.items, t])
 
   const isChecking =
-    batchMailCheckMutation.isPending || singleMailCheckMutation.isPending
+    batchMailCheckMutation.isPending ||
+    singleMailCheckMutation.isPending ||
+    isPollingMailCheck
 
   return (
     <SectionPageLayout>

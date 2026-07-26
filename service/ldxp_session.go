@@ -61,6 +61,7 @@ type LdxpSessionPublicView struct {
 	PollIntervalMs int     `json:"poll_interval_ms"`
 	ErrorCode      string  `json:"error_code,omitempty"`
 	ErrorMessage   string  `json:"error_message,omitempty"`
+	GiftResetCount int     `json:"gift_reset_count,omitempty"`
 }
 
 type LdxpWorkerQrPayload struct {
@@ -211,7 +212,7 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 		}
 
 		tradeNo := fmt.Sprintf("LDXP_VP-%d-%d-%s", userID, time.Now().UnixMilli(), common.GetRandomString(6))
-		order = &model.SubscriptionOrder{UserId: userID, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: tradeNo, PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, CreateTime: now, Status: common.TopUpStatusPending}
+		order = &model.SubscriptionOrder{UserId: userID, PlanId: plan.Id, Money: plan.LdxpProductAmount, TradeNo: tradeNo, PaymentMethod: model.PaymentMethodLDXP, PaymentProvider: model.PaymentProviderLDXP, GiftResetCount: model.ClampSubscriptionPlanGiftResetCount(plan.GiftResetCount), CreateTime: now, Status: common.TopUpStatusPending}
 		if err := tx.Create(order).Error; err != nil {
 			return err
 		}
@@ -225,7 +226,9 @@ func CreateLdxpValuePackageSession(userID int, planID int, confirmedCover bool, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return publicLdxpSessionView(session), order, nil
+	view := publicLdxpSessionView(session)
+	view.GiftResetCount = order.GiftResetCount
+	return view, order, nil
 }
 
 func isLdxpValuePackageSessionRequestMatch(session *model.LdxpTopupSession, order *model.SubscriptionOrder, plan *model.SubscriptionPlan, confirmedCover bool) bool {
@@ -256,7 +259,15 @@ func GetLdxpSessionPublicView(sessionID string, userID int) (*LdxpSessionPublicV
 	if err != nil {
 		return nil, err
 	}
-	return publicLdxpSessionView(session), nil
+	view := publicLdxpSessionView(session)
+	if session.Purpose == model.LdxpPurposeValuePackage && session.SubscriptionOrderId > 0 {
+		var order model.SubscriptionOrder
+		if err := model.DB.Select("gift_reset_count").Where("id = ? AND user_id = ?", session.SubscriptionOrderId, userID).First(&order).Error; err != nil {
+			return nil, err
+		}
+		view.GiftResetCount = order.GiftResetCount
+	}
+	return view, nil
 }
 
 func CancelLdxpTopupSession(sessionID string, userID int) error {

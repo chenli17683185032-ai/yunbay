@@ -53,6 +53,8 @@ func TestMain(m *testing.M) {
 		&UserSubscription{},
 		&UserValuePackagePreference{},
 		&ValuePackageUsageRecord{},
+		&ValuePackageQuotaReset{},
+		&ValuePackageResetCountLedger{},
 		&SubscriptionPreConsumeRecord{},
 		&PerfMetric{},
 	); err != nil {
@@ -83,6 +85,8 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM user_subscriptions")
 		DB.Exec("DELETE FROM user_value_package_preferences")
 		DB.Exec("DELETE FROM value_package_usage_records")
+		DB.Exec("DELETE FROM value_package_quota_resets")
+		DB.Exec("DELETE FROM value_package_reset_count_ledgers")
 		DB.Exec("DELETE FROM subscription_pre_consume_records")
 		DB.Exec("DELETE FROM perf_metrics")
 	})

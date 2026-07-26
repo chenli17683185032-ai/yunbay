@@ -52,6 +52,7 @@ export const subscriptionPlanSchema = z.object({
   concurrency_limit: z.number().optional(),
   limit_5h_amount: z.number().optional(),
   limit_7d_amount: z.number().optional(),
+  gift_reset_count: z.number().optional(),
   benefits: z.string().optional(),
   ldxp_product_url: z.string().optional(),
   ldxp_product_name: z.string().optional(),

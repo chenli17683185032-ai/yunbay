@@ -190,7 +190,7 @@ export function ValuePackageCard({
     requiresPayment && !hasPaymentConfig
       ? t('Not available yet')
       : getActionLabel(cardState.kind, t)
-  const packageLabel = getPackageLevelLabel(plan.package_type)
+  const packageLabel = t(getPackageLevelLabel(plan.package_type))
   const show7dPeriodLimit = shouldExposeValuePackage7dPeriodLimit(
     plan.package_type
   )
@@ -202,7 +202,9 @@ export function ValuePackageCard({
   const usagePeriods = getValuePackagePeriodLimits(usage, plan.package_type)
   const exhaustedMessage =
     usage?.exhausted_message ||
-    '当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用'
+    t(
+      'Current quota is used up. Consider pausing, using the wallet API billing, or waiting for the time window to pass.'
+    )
   const resetCount = Number(state?.preference?.reset_count || 0)
   const canShowResetQuota =
     cardState.kind === 'running' && state?.preference?.enabled === true
@@ -323,6 +325,15 @@ export function ValuePackageCard({
             <div className='mt-1 font-semibold'>{t('No pause')}</div>
           </div>
         </div>
+
+        {Number(plan.gift_reset_count || 0) > 0 ? (
+          <div className='border-primary/30 bg-primary/5 text-primary flex items-center gap-2 rounded-lg border border-dashed px-3 py-2 text-xs font-medium'>
+            <RotateCcw className='size-3.5 shrink-0' aria-hidden='true' />
+            {t('Each activation gifts {{count}} reset card(s)', {
+              count: Number(plan.gift_reset_count || 0),
+            })}
+          </div>
+        ) : null}
 
         <div className='grid grid-cols-1 gap-2 text-sm sm:grid-cols-2'>
           <div className='rounded-lg border p-3'>

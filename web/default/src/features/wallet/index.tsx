@@ -16,12 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 import { getSelf } from '@/lib/api'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { SectionPageLayout } from '@/components/layout'
+import { ResetCardGiftDialog } from '@/components/reset-card-gift-dialog'
 import { AffiliateRewardsCard } from './components/affiliate-rewards-card'
 import { AffiliateWithdrawalDialog } from './components/dialogs/affiliate-withdrawal-dialog'
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
@@ -114,7 +116,8 @@ export function Wallet(props: WalletProps) {
     requestWithdrawal,
     refetchSummary,
   } = useAffiliate()
-  const { redeeming, redeemCode } = useRedemption()
+  const { redeeming, redeemCode, giftCelebration, clearGiftCelebration } =
+    useRedemption()
   const { processing: creemProcessing, processCreemPayment } = useCreemPayment()
   const { processWaffoPayment } = useWaffoPayment()
   const { processing: pancakeProcessing, processWaffoPancakePayment } =
@@ -172,13 +175,17 @@ export function Wallet(props: WalletProps) {
     return () => window.clearTimeout(timeoutId)
   }, [props.initialSection, topupLoading])
 
-  // Initialize topup amount when topup info is loaded
+  // Initialize topup amount once when topup info is loaded, so that
+  // clearing the input later does not snap back to the minimum
+  const topupAmountInitializedRef = useRef(false)
   useEffect(() => {
-    if (!topupInfo || topupAmount !== 0) {
+    if (!topupInfo || topupAmountInitializedRef.current) {
       return
     }
 
     const timeoutId = window.setTimeout(() => {
+      topupAmountInitializedRef.current = true
+
       const minTopup = getMinTopupAmount(topupInfo)
       setTopupAmount(minTopup)
 
@@ -188,7 +195,7 @@ export function Wallet(props: WalletProps) {
     }, 0)
 
     return () => window.clearTimeout(timeoutId)
-  }, [topupInfo, topupAmount, calculatePaymentAmount])
+  }, [topupInfo, calculatePaymentAmount])
 
   // Get current payment type (selected or default)
   const getCurrentPaymentType = useCallback(() => {
@@ -218,6 +225,7 @@ export function Wallet(props: WalletProps) {
       // Validate minimum topup
       const minTopup = getMinTopupAmount(topupInfo)
       if (topupAmount < minTopup) {
+        toast.error(t('Minimum topup amount: {{amount}}', { amount: minTopup }))
         return
       }
 
@@ -423,6 +431,11 @@ export function Wallet(props: WalletProps) {
       <BillingHistoryDialog
         open={billingDialogOpen}
         onOpenChange={setBillingDialogOpen}
+      />
+
+      <ResetCardGiftDialog
+        celebration={giftCelebration}
+        onClose={clearGiftCelebration}
       />
 
       <CreemConfirmDialog

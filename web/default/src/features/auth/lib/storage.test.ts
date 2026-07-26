@@ -17,7 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { beforeEach, test } from 'node:test'
+import { after, before, beforeEach, test } from 'node:test'
+import {
+  getAffiliateCode,
+  removeAffiliateCode,
+  saveAffiliateCode,
+} from './storage'
 
 const localStorageMock = (() => {
   let store: Record<string, string> = {}
@@ -36,16 +41,27 @@ const localStorageMock = (() => {
   }
 })()
 
-Object.defineProperty(globalThis, 'window', {
-  configurable: true,
-  value: { localStorage: localStorageMock },
+// Install the window stub only for this file's tests; a module-level
+// stub leaks into later test files and breaks their module loading.
+const originalWindowDescriptor = Object.getOwnPropertyDescriptor(
+  globalThis,
+  'window'
+)
+
+before(() => {
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { localStorage: localStorageMock },
+  })
 })
 
-import {
-  getAffiliateCode,
-  removeAffiliateCode,
-  saveAffiliateCode,
-} from './storage'
+after(() => {
+  if (originalWindowDescriptor) {
+    Object.defineProperty(globalThis, 'window', originalWindowDescriptor)
+  } else {
+    delete (globalThis as { window?: unknown }).window
+  }
+})
 
 beforeEach(() => {
   window.localStorage.clear()

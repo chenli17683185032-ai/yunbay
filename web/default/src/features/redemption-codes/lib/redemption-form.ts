@@ -43,8 +43,17 @@ export function getRedemptionFormSchema(t: TFunction) {
         .string()
         .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
         .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
-      type: z.enum(['quota', 'subscription']).default('quota'),
+      type: z.enum(['quota', 'subscription', 'reset_card']).default('quota'),
       plan_id: z.number().min(0).default(0),
+      reset_card_count: z
+        .number()
+        .int(msg.RESET_CARD_COUNT_INVALID)
+        .min(0)
+        .max(
+          REDEMPTION_VALIDATION.RESET_CARD_COUNT_MAX,
+          msg.RESET_CARD_COUNT_INVALID
+        )
+        .default(1),
       quota_dollars: z.number().min(0, t('Quota must be a positive number')),
       expired_time: z.date().optional(),
       count: z
@@ -69,6 +78,20 @@ export function getRedemptionFormSchema(t: TFunction) {
             code: 'custom',
             message: t('Please select a value package plan'),
             path: ['plan_id'],
+          })
+        }
+        return
+      }
+
+      if (data.type === 'reset_card') {
+        if (
+          data.reset_card_count < 1 ||
+          data.reset_card_count > REDEMPTION_VALIDATION.RESET_CARD_COUNT_MAX
+        ) {
+          ctx.addIssue({
+            code: 'custom',
+            message: msg.RESET_CARD_COUNT_INVALID,
+            path: ['reset_card_count'],
           })
         }
         return
@@ -111,8 +134,9 @@ export function getRedemptionFormSchema(t: TFunction) {
 
 export type RedemptionFormValues = {
   name: string
-  type: 'quota' | 'subscription'
+  type: 'quota' | 'subscription' | 'reset_card'
   plan_id: number
+  reset_card_count: number
   quota_dollars: number
   expired_time?: Date
   count?: number
@@ -132,6 +156,7 @@ export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
   name: '',
   type: 'quota',
   plan_id: 0,
+  reset_card_count: 1,
   quota_dollars: 10,
   expired_time: undefined,
   count: 1,
@@ -154,9 +179,13 @@ export function transformFormDataToPayload(
   data: RedemptionFormValues
 ): RedemptionFormData {
   const isSubscription = data.type === 'subscription'
+  const isResetCard = data.type === 'reset_card'
   return {
     name: data.name,
-    quota: isSubscription ? 0 : parseQuotaFromDollars(data.quota_dollars),
+    quota:
+      isSubscription || isResetCard
+        ? 0
+        : parseQuotaFromDollars(data.quota_dollars),
     expired_time: data.expired_time
       ? Math.floor(data.expired_time.getTime() / 1000)
       : 0,
@@ -169,6 +198,7 @@ export function transformFormDataToPayload(
     source: data.source,
     type: data.type,
     plan_id: isSubscription ? data.plan_id : 0,
+    reset_card_count: isResetCard ? data.reset_card_count : 0,
   }
 }
 
@@ -178,14 +208,17 @@ export function transformFormDataToPayload(
 export function transformRedemptionToFormDefaults(
   redemption: Redemption
 ): RedemptionFormValues {
+  const type =
+    redemption.type === 'subscription' || redemption.type === 'reset_card'
+      ? redemption.type
+      : 'quota'
   return {
     name: redemption.name,
-    type: redemption.type === 'subscription' ? 'subscription' : 'quota',
+    type,
     plan_id: redemption.plan_id || 0,
-    quota_dollars:
-      redemption.type === 'subscription'
-        ? 0
-        : quotaUnitsToDollars(redemption.quota),
+    reset_card_count:
+      redemption.type === 'reset_card' ? redemption.reset_card_count || 1 : 1,
+    quota_dollars: type === 'quota' ? quotaUnitsToDollars(redemption.quota) : 0,
     expired_time:
       redemption.expired_time > 0
         ? new Date(redemption.expired_time * 1000)

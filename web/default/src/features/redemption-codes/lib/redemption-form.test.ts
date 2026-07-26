@@ -33,6 +33,7 @@ const validBase: RedemptionFormValues = {
   name: 'batch',
   type: 'quota',
   plan_id: 0,
+  reset_card_count: 1,
   quota_dollars: 10,
   expired_time: undefined,
   count: 1,
@@ -126,6 +127,7 @@ test('edit defaults preserve type metadata from API data', () => {
     batch_id: 'batch-1',
     source: 'ldxp',
     exported_time: 0,
+    reset_card_count: 0,
   } satisfies Redemption)
 
   assert.equal(defaults.kind, 'paid_topup')
@@ -156,4 +158,71 @@ test('subscription value package payload keeps selected plan and zero quota', ()
   assert.equal(payload.type, 'subscription')
   assert.equal(payload.plan_id, 42)
   assert.equal(payload.quota, 0)
+})
+
+test('reset_card schema requires a count between 1 and 100', () => {
+  const schema = getRedemptionFormSchema(t)
+  const ok = schema.safeParse({
+    ...validBase,
+    type: 'reset_card',
+    quota_dollars: 0,
+    reset_card_count: 3,
+  })
+  assert.equal(ok.success, true)
+
+  for (const count of [0, 101]) {
+    const bad = schema.safeParse({
+      ...validBase,
+      type: 'reset_card',
+      quota_dollars: 0,
+      reset_card_count: count,
+    })
+    assert.equal(bad.success, false, `count=${count} should fail`)
+  }
+})
+
+test('reset_card payload zeroes quota and plan and keeps card count', () => {
+  const payload = transformFormDataToPayload({
+    ...validBase,
+    type: 'reset_card',
+    plan_id: 7,
+    quota_dollars: 10,
+    reset_card_count: 5,
+  })
+  assert.equal(payload.type, 'reset_card')
+  assert.equal(payload.quota, 0)
+  assert.equal(payload.plan_id, 0)
+  assert.equal(payload.reset_card_count, 5)
+
+  const quotaPayload = transformFormDataToPayload({ ...validBase })
+  assert.equal(quotaPayload.reset_card_count, 0)
+})
+
+test('reset_card edit defaults keep type and count', () => {
+  const defaults = transformRedemptionToFormDefaults({
+    id: 2,
+    user_id: 1,
+    name: 'reset',
+    key: 'def',
+    status: 1,
+    quota: 0,
+    type: 'reset_card',
+    plan_id: 0,
+    created_time: 0,
+    redeemed_time: 0,
+    expired_time: 0,
+    used_user_id: 0,
+    kind: 'promo_credit',
+    amount: 0,
+    money: 0,
+    count_as_topup: false,
+    batch_id: 'batch-2',
+    source: 'promo',
+    exported_time: 0,
+    reset_card_count: 4,
+  } satisfies Redemption)
+
+  assert.equal(defaults.type, 'reset_card')
+  assert.equal(defaults.reset_card_count, 4)
+  assert.equal(defaults.quota_dollars, 0)
 })

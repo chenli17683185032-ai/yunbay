@@ -79,7 +79,24 @@ const (
 	ValuePackageResetCountLedgerSourceAdminAdd      = "admin_add"
 	ValuePackageResetCountLedgerSourceAdminSubtract = "admin_subtract"
 	ValuePackageResetCountLedgerSourceUserConsume   = "user_consume"
+	// 重置卡兑换码兑换发放
+	ValuePackageResetCountLedgerSourceRedemption = "redemption"
+	// 开通/续费套餐按套餐配置赠送
+	ValuePackageResetCountLedgerSourcePlanGift = "plan_gift"
 )
+
+// 每个套餐开通赠送重置卡张数上限
+const MaxSubscriptionPlanGiftResetCount = 100
+
+func ClampSubscriptionPlanGiftResetCount(count int) int {
+	if count <= 0 {
+		return 0
+	}
+	if count > MaxSubscriptionPlanGiftResetCount {
+		return MaxSubscriptionPlanGiftResetCount
+	}
+	return count
+}
 
 const ValuePackageQuotaExhaustedUserMessage = "当前余额已用完，建议暂停使用，使用 API 或等时间跑完再使用"
 
@@ -259,6 +276,9 @@ type SubscriptionPlan struct {
 	QuotaResetPeriod        string `json:"quota_reset_period" gorm:"type:varchar(16);default:'never'"`
 	QuotaResetCustomSeconds int64  `json:"quota_reset_custom_seconds" gorm:"type:bigint;default:0"`
 
+	// 开通/续费超值套餐时赠送的重置卡张数（0 = 不赠送，仅超值套餐生效）
+	GiftResetCount int `json:"gift_reset_count" gorm:"type:int;not null;default:0"`
+
 	CreatedAt int64 `json:"created_at" gorm:"bigint"`
 	UpdatedAt int64 `json:"updated_at" gorm:"bigint"`
 }
@@ -308,6 +328,7 @@ func ensureSubscriptionPlanValuePackageColumnsTx(tx *gorm.DB) error {
 	for _, col := range []sqliteColumnDef{
 		{Name: "limit_5h_amount", DDL: "`limit_5h_amount` bigint NOT NULL DEFAULT 0"},
 		{Name: "limit_7d_amount", DDL: "`limit_7d_amount` bigint NOT NULL DEFAULT 0"},
+		{Name: "gift_reset_count", DDL: "`gift_reset_count` int NOT NULL DEFAULT 0"},
 	} {
 		if _, ok := existing[col.Name]; ok {
 			continue
@@ -349,6 +370,7 @@ type SubscriptionOrder struct {
 	PaymentMethod      string `json:"payment_method" gorm:"type:varchar(50)"`
 	PaymentProvider    string `json:"payment_provider" gorm:"type:varchar(50);default:''"`
 	UserSubscriptionId int    `json:"user_subscription_id" gorm:"index;default:0"`
+	GiftResetCount     int    `json:"gift_reset_count" gorm:"type:int;not null;default:0"`
 	Status             string `json:"status"`
 	CreateTime         int64  `json:"create_time"`
 	CompleteTime       int64  `json:"complete_time"`
@@ -889,7 +911,14 @@ func CreateValuePackageSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Sub
 	if completed == nil || completed.Id <= 0 {
 		return nil, errors.New("completed subscription missing")
 	}
-	if err := ensureValuePackagePreferenceAfterPurchaseTx(tx, userId, completed.Id); err != nil {
+	if err := ensureValuePackagePreferenceAfterPurchaseTx(
+		tx,
+		userId,
+		completed.Id,
+		plan,
+		ClampSubscriptionPlanGiftResetCount(plan.GiftResetCount),
+		fmt.Sprintf("开通套餐赠送：%s，来源 %s", plan.Title, source),
+	); err != nil {
 		return nil, err
 	}
 	return completed, nil
@@ -2554,7 +2583,14 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		if completed == nil || completed.Id <= 0 {
 			return errors.New("completed subscription missing")
 		}
-		if err := ensureValuePackagePreferenceAfterPurchaseTx(tx, order.UserId, completed.Id); err != nil {
+		if err := ensureValuePackagePreferenceAfterPurchaseTx(
+			tx,
+			order.UserId,
+			completed.Id,
+			plan,
+			order.GiftResetCount,
+			fmt.Sprintf("开通套餐赠送：%s，订单 %s", plan.Title, order.TradeNo),
+		); err != nil {
 			return err
 		}
 		order.UserSubscriptionId = completed.Id
@@ -2592,15 +2628,64 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 	return completed, nil
 }
 
-func ensureValuePackagePreferenceAfterPurchaseTx(tx *gorm.DB, userId int, completedSubId int) error {
+func ensureValuePackagePreferenceAfterPurchaseTx(tx *gorm.DB, userId int, completedSubId int, plan *SubscriptionPlan, giftResetCount int, giftNote string) error {
 	if tx == nil {
 		return errors.New("tx is nil")
 	}
 	if userId <= 0 || completedSubId <= 0 {
 		return errors.New("invalid value package preference args")
 	}
-	_, err := upsertValuePackagePreferenceTx(tx, userId, true, completedSubId)
-	return err
+	if _, err := upsertValuePackagePreferenceTx(tx, userId, true, completedSubId); err != nil {
+		return err
+	}
+	// 每次成交（新开/续费/升级）按套餐配置赠送重置卡
+	if plan != nil && plan.IsValuePackage() {
+		giftCount := ClampSubscriptionPlanGiftResetCount(giftResetCount)
+		if giftCount == 0 {
+			return nil
+		}
+		if _, err := grantValuePackageResetCountTx(tx, userId, giftCount,
+			ValuePackageResetCountLedgerSourcePlanGift, userId,
+			giftNote); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// grantValuePackageResetCountTx 在同一事务内为用户增加重置卡并记录台账。
+func grantValuePackageResetCountTx(tx *gorm.DB, userId int, count int, source string, actorUserId int, note string) (*UserValuePackagePreference, error) {
+	if tx == nil {
+		return nil, errors.New("tx is nil")
+	}
+	if userId <= 0 {
+		return nil, errors.New("invalid user id")
+	}
+	if count <= 0 {
+		return nil, errors.New("invalid reset card count")
+	}
+	pref, err := ensureValuePackagePreferenceForUpdateTx(tx, userId)
+	if err != nil {
+		return nil, err
+	}
+	oldCount := pref.ResetCount
+	newCount := oldCount + count
+	if err := tx.Model(&UserValuePackagePreference{}).Where("user_id = ?", userId).Update("reset_count", newCount).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Create(&ValuePackageResetCountLedger{
+		UserId:          userId,
+		Delta:           count,
+		BeforeCount:     oldCount,
+		AfterCount:      newCount,
+		Source:          source,
+		CreatedByUserId: actorUserId,
+		Note:            note,
+	}).Error; err != nil {
+		return nil, err
+	}
+	pref.ResetCount = newCount
+	return pref, nil
 }
 
 func validateValuePackagePlanLifecycleLimits(plan *SubscriptionPlan) error {

@@ -982,6 +982,7 @@ func TestCreateLdxpValuePackageSessionUsesPlanProductConfig(t *testing.T) {
 		LdxpProductName:       "日卡商品",
 		LdxpProductAmount:     9.9,
 		LdxpSessionTTLSeconds: 900,
+		GiftResetCount:        3,
 	}
 	require.NoError(t, model.DB.Create(&plan).Error)
 
@@ -991,7 +992,9 @@ func TestCreateLdxpValuePackageSessionUsesPlanProductConfig(t *testing.T) {
 	require.NotNil(t, view)
 	require.NotNil(t, order)
 	assert.Equal(t, 9.9, view.Money)
+	assert.Equal(t, 3, view.GiftResetCount)
 	assert.Equal(t, common.TopUpStatusPending, order.Status)
+	assert.Equal(t, 3, order.GiftResetCount)
 	persisted, err := model.GetLdxpTopupSessionBySessionId(view.SessionID)
 	require.NoError(t, err)
 	assert.Equal(t, model.LdxpPurposeValuePackage, persisted.Purpose)

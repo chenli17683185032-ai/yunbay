@@ -57,6 +57,12 @@ export function getPlanFormSchema(t: TFunction) {
     concurrency_limit: z.coerce.number().int().min(1).optional(),
     limit_5h_amount: z.coerce.number().min(0).optional(),
     limit_7d_amount: z.coerce.number().min(0).optional(),
+    gift_reset_count: z.coerce
+      .number()
+      .int(t('Gift reset card count must be an integer'))
+      .min(0)
+      .max(100, t('Gift reset card count cannot exceed 100'))
+      .optional(),
     benefits: z.string().optional(),
     ldxp_product_url: z.string().optional(),
     ldxp_product_name: z.string().optional(),
@@ -66,6 +72,17 @@ export function getPlanFormSchema(t: TFunction) {
   })
 
   return schema.superRefine((values, ctx) => {
+    if (
+      values.plan_kind !== 'value_package' &&
+      values.duration_unit === 'custom' &&
+      (values.custom_seconds ?? 0) <= 0
+    ) {
+      ctx.addIssue({
+        code: 'custom',
+        message: t('Custom duration must be greater than 0 seconds'),
+        path: ['custom_seconds'],
+      })
+    }
     if (values.plan_kind !== 'value_package') return
 
     if (values.total_amount <= 0) {
@@ -115,6 +132,7 @@ export const PLAN_FORM_DEFAULTS: PlanFormValues = {
   concurrency_limit: 1,
   limit_5h_amount: 0,
   limit_7d_amount: 0,
+  gift_reset_count: 0,
   benefits: '',
   ldxp_product_url: '',
   ldxp_product_name: '',
@@ -149,6 +167,7 @@ export function planToFormValues(plan: SubscriptionPlan): PlanFormValues {
     concurrency_limit: Number(plan.concurrency_limit || 1),
     limit_5h_amount: quotaUnitsToDollars(Number(plan.limit_5h_amount || 0)),
     limit_7d_amount: quotaUnitsToDollars(Number(plan.limit_7d_amount || 0)),
+    gift_reset_count: Number(plan.gift_reset_count || 0),
     benefits: plan.benefits || '',
     ldxp_product_url: plan.ldxp_product_url || '',
     ldxp_product_name: plan.ldxp_product_name || '',
@@ -198,6 +217,10 @@ export function formValuesToPlanPayload(values: PlanFormValues): PlanPayload {
         shouldExposeValuePackage7dPeriodLimit(values.package_type)
           ? parseQuotaFromDollars(Number(values.limit_7d_amount || 0))
           : 0,
+      // 张数为普通计数，不做美元/额度换算；仅超值套餐可配置
+      gift_reset_count: isValuePackage
+        ? Math.max(0, Math.floor(Number(values.gift_reset_count || 0)))
+        : 0,
       benefits: values.benefits || '',
       ldxp_product_url: values.ldxp_product_url || '',
       ldxp_product_name: values.ldxp_product_name || '',

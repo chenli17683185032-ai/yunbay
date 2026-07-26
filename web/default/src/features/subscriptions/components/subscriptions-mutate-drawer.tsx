@@ -759,6 +759,41 @@ export function SubscriptionsMutateDrawer({
 
                 <FormField
                   control={form.control}
+                  name='gift_reset_count'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Gift reset cards on activation')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type='number'
+                          min={0}
+                          max={100}
+                          step={1}
+                          onChange={(e) =>
+                            field.onChange(
+                              Math.max(
+                                0,
+                                Math.floor(Number(e.target.value) || 0)
+                              )
+                            )
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Reset cards gifted to the user each time this package is purchased or redeemed (0 = none).'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
                   name='benefits'
                   render={({ field }) => (
                     <FormItem>

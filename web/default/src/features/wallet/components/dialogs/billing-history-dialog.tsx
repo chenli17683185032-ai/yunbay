@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Search,
   Copy,
@@ -88,7 +88,18 @@ export function BillingHistoryDialog({
     handleSearch,
     handleCompleteOrder,
     handleDeleteOrder,
+    refresh,
   } = useBillingHistory()
+
+  // Refetch when the dialog transitions to open so recent topups/redemptions
+  // are reflected (the dialog stays mounted while the wallet page is open).
+  const wasOpenRef = useRef(false)
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      refresh()
+    }
+    wasOpenRef.current = open
+  }, [open, refresh])
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -247,7 +258,7 @@ export function BillingHistoryDialog({
                             )}
                         </div>
                         <StatusBadge
-                          label={statusConfig.label}
+                          label={t(statusConfig.label)}
                           variant={statusConfig.variant}
                           showDot
                           copyable={false}
