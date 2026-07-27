@@ -2061,3 +2061,27 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - 生产脚本 SHA-256 为 `d0f48634cda3f49675cc6d6707567000ebb837703b48dcb7e118a79427387300`，安装器 SHA-256 为 `38af64047266d085691a5385903c4e90f01a9e93180aecc73213a014174e4d52`。脚本、安装器均为 `0750`，使用临时文件和同目录原子 `mv` 替换。
 - 真实 dry-run 显示两个当前 Team 子号约为 `75%` 和 `9%`、均无 401；无关 `bx-001` 为 100%/测活失败但未生成自动控制告警。QQ IMAP 新邮件严格发件人和主题过滤命中，Team Workflow 启动后回读同一结果，queue/run/refresh/action latch 均为空，没有执行真实换班或刷新。
 - 发布没有重启任何业务容器；Sub2API、new-api、Caddy、PostgreSQL、Redis 的容器 ID、启动时间、restart count 前后完全一致且保持 healthy。服务器受限回滚点为 `/opt/new-api/backups/sub2api-alerts-20260720T191838Z`，包含旧脚本、主环境、cron 和容器基线；回滚时恢复这些 `.before` 文件和 `crontab.before`，删除此前不存在的 SMTP 覆盖文件即可，不需要重启业务容器。
+
+## 2026-07-28 SVIP 身份与有效充值累计上线
+
+### 版本、数据与发布资产
+
+- 最终代码提交 `21093fbbff49248df04aedceec00f7b8408d7fa2` 已推送 GitHub `main` 并部署。生产精确同步 36 个源码、测试、文档和 default 前端文件；发布归档 SHA-256 为 `bbb58bf6907664ea3b9d4d9c8e419d1e456e65079d3ee6e5cd4ad7fbd26b4649`。
+- 新镜像为 `sha256:3b6fb4bf654e35e8a3f7960f016ec532eaec1e905ef0539707929d2ac87f6251`，固定标签 `yunbay-new-api:release-svip-21093fbb`。成功备份目录为 `/opt/new-api/backups/svip-20260727T181236Z-21093fbb`，旧镜像回滚标签为 `yunbay-new-api:rollback-svip-20260727T181251Z`。
+- 数据库新增 `users.valid_topup_cents`、`users.valid_topup_history_cents` 和初始化凭证表。GORM 实际表名是 `sv_ip_valid_topup_reconcile_receipts`，不是 `svip_valid_topup_reconcile_receipts`。部署后凭证为 1、有效累计为正用户 38、当前达到 20000 分阈值用户 0；负值/水位越界、低于可靠历史和历史水位不一致均为 0。
+- 有效充值只统计联动小铺直充/卡密、联动小铺超值套餐成交和管理员显式勾选的增加额度。Stripe、Creem、Waffo、签到、邀请返利、赠送码及管理员覆盖额度不计入；SVIP 只显示身份，不修改用户组、倍率或计费。
+
+### 启动测量与正式切换
+
+- 切换前用同一镜像启动了一个不映射宿主机端口、未被 Caddy 引用的短期候选。候选首次 HTTP 34 秒、Docker healthy 38 秒、五轮稳定 52 秒，严重日志 0，数据库七项断言为 `1/1/1/1/0/0/0`；证据在 `/opt/new-api/backups/svip-canary-20260727T180123Z-21093fbb`。候选和临时环境文件随后删除。
+- 启动日志确认约 30.16 秒耗在既有全量 GORM `AutoMigrate`。正式 Compose 主文件未修改；本轮只叠加成功备份中的 `health-start-interval.yml`，在 40 秒 start period 内每 2 秒探测，健康后仍使用原 30 秒 interval。运行容器的 `StartInterval=2s`。
+- Caddy 文件和运行时 upstream 全程保持唯一 `new-api:3000`，没有绿实例、临时 Caddyfile、reload 或 Admin API 改写。标准容器只用 Compose `--no-deps --force-recreate --no-build new-api` 重建；watchdog 在切换后 52 秒完成三轮稳定门、56 秒写入 success。
+- 本机公网探针在 `18:13:09Z–18:13:46Z` 记录 19 次 502，`18:13:48Z` 恢复 200；相邻 200 之间约 41 秒，低于 1 分钟目标。120 次探针总计 100 次 200、19 次切换期 502、1 次恢复后 SOCKS/Cloudflare 链路 `000`，该次前后均为 200且服务器无新增错误。
+
+### 上线验收与回滚边界
+
+- 生产标记为 `21093fbb`，标准容器 `running / healthy / restart=0`，入口 `/static/js/index.25ec580584.js` 为 3,102,465 字节，源站和公网 SHA-256 均为 `c5f33ffa0ec258cb42fa747f97af186baa52064c33eb6d3d27fb5f9a594c2ed2`。
+- 源站 `/api/status`、公网 `/`、`/quick-start`、`/api/status` 连续 5 轮全部 200；未认证 `/v1/models`、`/api/user/self`、`/api/user/svip-celebration/seen` 和管理员用户列表均为 401。应用严重启动日志为 0，恢复后 Caddy 连接、DNS 和 5xx 错误为 0。
+- Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 及其它依赖容器的 ID、启动时间和 restart count 前后完全一致。部署锁已释放，候选/绿实例为 0，Caddyfile SHA-256 前后相同。
+- 代码回滚必须从成功备份恢复 `source-before.tar.gz` 中的既有文件并删除 `new-files.txt` 中本轮新增文件，把上述 rollback 标签重标为 `yunbay-new-api:prod`，并在同一部署锁和有界 watchdog 下使用基础 Compose 加成功备份中的 `health-start-interval.yml` 只重建标准 `new-api`。不得修改或重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP。
+- 回滚旧应用时保留两个累计列、历史水位和初始化凭证；旧版本可忽略这些增量结构。不要恢复 `users-topups.before.dump`，除非另行停写、确认会丢失备份后的充值/用户写入并获得明确数据回滚授权。
