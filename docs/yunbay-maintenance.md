@@ -2,6 +2,36 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-27 重置卡兑换与套餐赠卡上线
+
+### 功能合同与发布范围
+
+- 功能提交 `9472fe182c22d67dbe28ecac233a7996f7009aed` 已 fast-forward 推送 GitHub `main`。发布共同步 71 个文件，其中 64 个既有文件、7 个新增文件；原始 `/Users/ethan/claude/yunbay` 工作树中的并行 SVIP 改动未进入发布候选，也未被回退。
+- 重置卡兑换使用同一数据库事务完成兑换码 CAS、用户校验、余额原子增加和台账写入；错误路径整体回滚。同一套餐的新开、续费或升级每次成交按订单快照赠卡一次，同一订单重复回调不重复赠送；LDXP 使用 `subscription_orders.gift_reset_count` 快照，不读取支付完成时可能已变化的套餐配置。
+- `/api/user/topup` 的兼容合同为：余额兑换继续返回数字；套餐和重置卡兑换返回对象。classic 主题只对有限数字执行本地额度累加，对对象响应只展示对应成功结果。依赖该接口的第三方脚本必须先按 JSON 类型分支，不能假定 `data` 永远是数字。
+- 落地页品牌测试采用已确认语义：`zh` 精确保持中文原文，其它语言要求非空译文。本轮未修改开始页、快速启动页 UI，未触及受保护的项目品牌与归属信息。
+- 发布前复跑 Go 主仓库测试、`bun run typecheck`、`bun test`（308 项）、六语言 `i18n:sync`、default/classic 生产构建和 Go 生产二进制构建；全新 SQLite 浏览器闭环完成直接兑换 2 张与套餐赠送 1 张，最终余额为 3。
+
+### 数据库迁移与生产结果
+
+- 应用启动自动执行三库增量迁移。新增列为 `redemptions.reset_card_count`、`subscription_plans.gift_reset_count`、`subscription_orders.gift_reset_count`；SQLite 使用显式 `ADD COLUMN` 兜底，MySQL/PostgreSQL 走 GORM 迁移。列均带默认值 `0`，旧应用可忽略这些增量列。
+- PostgreSQL 生产复核三列全部存在。两个 `gift_reset_count` 列为 `NOT NULL DEFAULT 0`；`reset_card_count` 按当前 GORM 标签为可空、默认 `0`，生产现有记录的三列 `NULL` 计数均为 0。本轮没有创建生产兑换码、修改套餐赠卡配置或执行真实支付，套餐与订单赠卡快照范围仍为 `0..0`。
+- 全新数据库首次启用兑换码能力前仍必须完成支付合规确认；本次迁移和发布没有绕过该闸门。回滚旧应用时不需要删除新增列，也不得为了回滚执行破坏性 DDL。
+
+### 固定 upstream 部署结果
+
+- 成功备份为 `/opt/new-api/backups/reset-card-20260727T013018Z-9472fe1`；71 文件清单 SHA-256 为 `93588cbb09503ee11c7d4b9589dd4439c216ef38137ffc7eca7e210a312d5671`。新镜像为 `sha256:ab7466db1c317eb8c95ba7e1d5fc79c1cd3bba0a989689718502e69577090d54`，release 标签为 `yunbay-new-api:release-reset-card-9472fe1`。
+- 旧镜像 `sha256:ae0a0bd862087d0698719c902ac1954895be8ed03eaa4bfc8315f94bce870d88` 保留为 `yunbay-new-api:rollback-reset-card-20260727T013018Z`。另两次切换因 watchdog 将 Compose 旧容器退出或临时容器对象误判为新版本失败而自动回滚；两次均完整恢复 64 个既有文件、删除 7 个新增文件、恢复旧镜像与 `ec4420eb` 标记并回到公网 200。对应审计备份 `reset-card-20260726T195254Z-9472fe1` 和 `reset-card-20260727T011648Z-9472fe1` 保留。
+- 非公开诊断实例已证明候选镜像可完成 PostgreSQL 迁移并在约 15 秒返回 `/api/status` 200；它没有承接生产流量，也没有修改 Caddy。最终 watchdog 只在新镜像首次被观察为 `running` 后才把退出或不健康判为致命状态。
+- 成功切换只重建标准 `yunbay-new-api`。旧实例约在 `01:30:35Z` 退出，新实例 `01:30:53Z` 首次 healthy/200，观测中断约 18 秒；`01:31:03Z` 连续五轮成功后完成。Caddy 文件、挂载和运行时 upstream 始终只有 `new-api:3000`，没有绿实例、Caddy reload 或依赖服务重启。
+
+### 上线验收与回滚
+
+- `.yunbay-deploy-sha` 保持功能提交 `9472fe182c22d67dbe28ecac233a7996f7009aed`，不得被后续纯文档提交覆盖；`.yunbay-source-manifest` 记录同一提交、71 文件清单、新镜像和 `2026-07-27T01:31:03Z` 部署时间。
+- 独立验收 6 轮源站状态、公网状态、首页和快速启动共 24 个请求全部为 200；未认证 `/api/user/self`、套餐计划、超值套餐计划和兑换码管理接口均保持 401。default 公网入口 `index.c995ee5d11.js` 为 `3,091,553` bytes，SHA-256 `24acf1b1251c2ed143f583da8df42d1cf0fc297fe4c7459623dfe8892c556491`，与本地构建一致；classic 入口 `index.d509de7aca.js` 已嵌入生产二进制。
+- new-api 严重启动/迁移日志计数为 0，成功后 Caddy 502 为 0，最近健康检查失败为 0。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器身份、启动时间和 restart count 与部署前一致；LDXP worker 既有 restart count 为 2，但本轮未变化。
+- 回滚时获取 `/var/lock/yunbay-new-api-deploy.lock`，从成功备份恢复 64 个既有文件并删除 7 个新增文件，把 `yunbay-new-api:rollback-reset-card-20260727T013018Z` 重标为 `yunbay-new-api:prod`，在独立 60 秒 watchdog 下只重建标准 `new-api`。Caddy upstream 必须保持 `new-api:3000`；禁止重启或修改 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP 或其它服务，禁止删除生产备份和 release/rollback 镜像标签。
+
 ## 2026-07-24 LDXP 100 刀已支付未到账只读诊断
 
 - 目标订单 `LD260724SG04DI`：云贝会话在 11:03:37 创建，11:04:02 进入 `qr_ready`；客户浏览器公网入口在 11:04:08 成功调用会话 `/cancel`，数据库更新时间为 11:04:07。worker 在 11:04:09 的 active-check 中观察到 inactive 并主动中止同一支付宝活收银台；渠道支付成功时间为 11:04:16，晚于观测链路终止约 7 至 9 秒。
