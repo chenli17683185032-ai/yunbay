@@ -6,7 +6,7 @@ SVIP 不是用户组（与 VIP 的 `group=vip` 不同），而是纯身份标识
 
 用户「有效充值」累计 ≥ **200 元**。持久化与判定的权威阈值是 `model/svip.go` 的 `SVIPThresholdCents = 20_000`；金额常量只用于表达业务含义，不能替代整数分判定。
 
-有效充值以「分」为单位累计在 `users.valid_topup_cents`，只包含三类来源：
+有效充值以「分」为单位累计在 `users.valid_topup_cents`；`users.valid_topup_history_cents` 记录其中已核算的可靠流水水位，仅用于启动对账，不对外暴露。有效充值只包含三类来源：
 
 | 来源 | 累计位置 | 金额口径 |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ SVIP 不是用户组（与 VIP 的 `group=vip` 不同），而是纯身份标识
 
 **不计入**：Stripe / 易支付 / Creem / Waffo（非人民币口径）、活动赠送码（`promo_credit`）、套餐兑换码开通、签到、邀请返利、管理员「覆盖」额度。
 
-历史数据回填：`model/svip.go` `backfillUserValidTopupCents` 在启动迁移时从 `top_ups` 回填（provider 为 `ldxp` / `redemption_code` 的 success 流水）；历史上管理员手动加的余额无流水、无法区分，不回填。回填按用户幂等：只写 `valid_topup_cents = 0` 的用户，已有累计的用户不会阻止其他用户完成回填。整个批次在一个事务中执行，单用户汇总溢出会终止并回滚全批次。
+历史数据回填：`model/svip.go` `backfillUserValidTopupCents` 在启动迁移时从 `top_ups` 汇总 provider 为 `ldxp` / `redemption_code` 的 success 流水。首次运行用 `SVIPValidTopupReconcileReceipt` 在同一事务内建立水位；后续启动只把历史总额相对 `valid_topup_history_cents` 的增量补入累计，因此能修复回滚到旧版本期间漏记的充值，同时保留管理员额外计入的金额。历史管理员手动加款没有流水且无法识别，仍不推断回填。单用户汇总或补差溢出会终止并回滚全批次。
 
 ## 接口
 
@@ -37,7 +37,7 @@ web/classic 未实现 SVIP 展示（与近期功能开发一致，主力前端�
 
 ## 测试
 
-- `model/svip_test.go`：换算、阈值、累计、回填（含来源过滤与幂等）。
+- `model/svip_test.go`：换算、阈值、累计、回填（含来源过滤、初始化凭证、回滚窗口补差、管理员额外累计保留与幂等）。
 - `controller/user_svip_test.go`：已读接口权限、管理员开关计入/不计入。
 - `web/default/src/features/value-packages/lib/benefit-effects.test.ts`：光效优先级、SVIP 判定、弹窗 seen 逻辑。
 - 全新 SQLite 浏览器验收：桌面与 390×844 移动端覆盖庆祝弹窗、充值提示、用户徽章、管理员开关；验证已读持久化、刷新不重复弹出、reduced-motion 动画关闭和浏览器控制台无错误。

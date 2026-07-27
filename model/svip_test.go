@@ -31,7 +31,7 @@ func setupSVIPTestDB(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &TopUp{}, &SVIPValidTopupReconcileReceipt{}))
 	DB = db
 	LOG_DB = db
 
@@ -137,7 +137,15 @@ func TestAddUserValidTopupCents(t *testing.T) {
 	var got User
 	require.NoError(t, DB.First(&got, "id = ?", user.Id).Error)
 	assert.Equal(t, int64(20000), got.ValidTopupCents)
+	assert.Equal(t, int64(20000), got.TopupWatermark)
 	assert.True(t, got.IsSVIP())
+
+	adminUser := createSVIPTestUser(t, "svip-admin-add")
+	require.NoError(t, IncreaseUserQuotaAndValidTopupCents(adminUser.Id, 100, 5000))
+	var adminGot User
+	require.NoError(t, DB.First(&adminGot, "id = ?", adminUser.Id).Error)
+	assert.Equal(t, int64(5000), adminGot.ValidTopupCents)
+	assert.Zero(t, adminGot.TopupWatermark)
 }
 
 func TestBackfillUserValidTopupCents(t *testing.T) {
@@ -146,7 +154,11 @@ func TestBackfillUserValidTopupCents(t *testing.T) {
 	cardUser := createSVIPTestUser(t, "svip-backfill-card")
 	stripeUser := createSVIPTestUser(t, "svip-backfill-stripe")
 	prefilledUser := createSVIPTestUser(t, "svip-backfill-prefilled")
+	aheadUser := createSVIPTestUser(t, "svip-backfill-ahead")
+	adminOnlyUser := createSVIPTestUser(t, "svip-backfill-admin-only")
 	require.NoError(t, DB.Model(&User{}).Where("id = ?", prefilledUser.Id).Update("valid_topup_cents", 1234).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", aheadUser.Id).Update("valid_topup_cents", 12000).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", adminOnlyUser.Id).Update("valid_topup_cents", 3000).Error)
 
 	// 联动小铺直充：Amount 为面值（元）
 	createSVIPTestTopUp(t, ldxpUser.Id, "ldxp:1", 100, 100, PaymentProviderLDXP, common.TopUpStatusSuccess)
@@ -158,8 +170,9 @@ func TestBackfillUserValidTopupCents(t *testing.T) {
 	createSVIPTestTopUp(t, cardUser.Id, "redemption:1", 50, 50, PaymentProviderRedemptionCode, common.TopUpStatusSuccess)
 	// 其他支付渠道不计（Amount 非人民币口径）
 	createSVIPTestTopUp(t, stripeUser.Id, "stripe:1", 300, 300, PaymentProviderStripe, common.TopUpStatusSuccess)
-	// 已有累计的用户不得被覆盖，但也不能阻止其他零值用户完成回填
+	// 低于可靠历史总额的已有累计需要向上补齐；高于历史总额的值不得降低
 	createSVIPTestTopUp(t, prefilledUser.Id, "ldxp:prefilled", 90, 90, PaymentProviderLDXP, common.TopUpStatusSuccess)
+	createSVIPTestTopUp(t, aheadUser.Id, "ldxp:ahead", 90, 90, PaymentProviderLDXP, common.TopUpStatusSuccess)
 
 	require.NoError(t, backfillUserValidTopupCents())
 
@@ -178,13 +191,37 @@ func TestBackfillUserValidTopupCents(t *testing.T) {
 	assert.False(t, got.IsSVIP())
 
 	assert.Equal(t, int64(0), fetchUser(stripeUser.Id).ValidTopupCents)
-	assert.Equal(t, int64(1234), fetchUser(prefilledUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(9000), fetchUser(prefilledUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(12000), fetchUser(aheadUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(3000), fetchUser(adminOnlyUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(22800), fetchUser(ldxpUser.Id).TopupWatermark)
+	assert.Equal(t, int64(5000), fetchUser(cardUser.Id).TopupWatermark)
+	assert.Equal(t, int64(9000), fetchUser(prefilledUser.Id).TopupWatermark)
+	assert.Equal(t, int64(9000), fetchUser(aheadUser.Id).TopupWatermark)
+	assert.Zero(t, fetchUser(adminOnlyUser.Id).TopupWatermark)
 
-	// 幂等：重复执行不重算已经完成回填的用户
+	var receipt SVIPValidTopupReconcileReceipt
+	require.NoError(t, DB.First(&receipt, "migration_version = ?", SVIPValidTopupReconcileVersion).Error)
+
+	// 模拟回滚到旧应用期间新增成功流水：再次启动按历史水位差补入，保留管理员额外累计
 	createSVIPTestTopUp(t, cardUser.Id, "redemption:2", 50, 50, PaymentProviderRedemptionCode, common.TopUpStatusSuccess)
+	createSVIPTestTopUp(t, aheadUser.Id, "ldxp:ahead-after-rollback", 50, 50, PaymentProviderLDXP, common.TopUpStatusSuccess)
+	createSVIPTestTopUp(t, adminOnlyUser.Id, "ldxp:admin-only-after-rollback", 40, 40, PaymentProviderLDXP, common.TopUpStatusSuccess)
 	require.NoError(t, backfillUserValidTopupCents())
-	assert.Equal(t, int64(5000), fetchUser(cardUser.Id).ValidTopupCents)
-	assert.Equal(t, int64(1234), fetchUser(prefilledUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(10000), fetchUser(cardUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(9000), fetchUser(prefilledUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(17000), fetchUser(aheadUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(7000), fetchUser(adminOnlyUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(10000), fetchUser(cardUser.Id).TopupWatermark)
+	assert.Equal(t, int64(14000), fetchUser(aheadUser.Id).TopupWatermark)
+	assert.Equal(t, int64(4000), fetchUser(adminOnlyUser.Id).TopupWatermark)
+
+	// 幂等：没有新增可靠流水时重复执行不再变化
+	require.NoError(t, backfillUserValidTopupCents())
+	assert.Equal(t, int64(10000), fetchUser(cardUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(9000), fetchUser(prefilledUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(17000), fetchUser(aheadUser.Id).ValidTopupCents)
+	assert.Equal(t, int64(7000), fetchUser(adminOnlyUser.Id).ValidTopupCents)
 }
 
 func TestBackfillUserValidTopupCentsOverflowRollsBack(t *testing.T) {
@@ -200,4 +237,9 @@ func TestBackfillUserValidTopupCentsOverflowRollsBack(t *testing.T) {
 	var got User
 	require.NoError(t, DB.First(&got, user.Id).Error)
 	assert.Zero(t, got.ValidTopupCents)
+	assert.Zero(t, got.TopupWatermark)
+
+	var receiptCount int64
+	require.NoError(t, DB.Model(&SVIPValidTopupReconcileReceipt{}).Count(&receiptCount).Error)
+	assert.Zero(t, receiptCount)
 }

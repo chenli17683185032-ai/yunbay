@@ -66,6 +66,7 @@ type User struct {
 	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
 	ValidTopupCents  int64          `json:"valid_topup_cents" gorm:"type:bigint;not null;default:0;column:valid_topup_cents"` // 有效充值累计（分），达标后视为 SVIP，见 model/svip.go
+	TopupWatermark   int64          `json:"-" gorm:"type:bigint;not null;default:0;column:valid_topup_history_cents"`         // 已核算的可靠充值流水总额（分），用于回滚后补差
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
