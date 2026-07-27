@@ -5245,6 +5245,15 @@
     "Each activation gifts {{count}} reset card(s)": "Chaque activation offre {{count}} carte(s) de réinitialisation",
     "Verification started": "Vérification démarrée",
     "Verification completed ({{count}} orders updated)": "Vérification terminée ({{count}} commandes mises à jour)",
-    "Verification timed out": "La vérification a expiré"
+    "Verification timed out": "La vérification a expiré",
+    "After you top up, the admin will verify it and credit the discount to your account.": "Après votre recharge, l’administrateur la vérifiera et créditera la remise sur votre compte.",
+    "Congratulations on reaching SVIP status": "Félicitations, vous avez atteint le statut SVIP",
+    "Count as valid top-up": "Compter comme recharge valide",
+    "Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).": "Compte dans le montant cumulé des recharges valides SVIP (SVIP débloqué à 200 CNY).",
+    "Start the SVIP experience": "Commencer l’expérience SVIP",
+    "SVIP perk: enjoy an extra 25% off on top-ups": "Avantage SVIP : profitez de 25 % de réduction supplémentaire sur les recharges",
+    "SVIP reached — top up now for an extra 25% off": "Statut SVIP atteint — rechargez maintenant avec 25 % de réduction supplémentaire",
+    "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "Vos recharges valides cumulées ont atteint 200 CNY. L’éclat noir et or exclusif SVIP est désormais actif sur votre compte.",
+    "Yunbei SVIP Black Gold Card": "Carte noire et or Yunbei SVIP"
   }
 }

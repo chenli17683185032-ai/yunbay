@@ -65,6 +65,7 @@ type User struct {
 	DeletedAt        gorm.DeletedAt `gorm:"index"`
 	LinuxDOId        string         `json:"linux_do_id" gorm:"column:linux_do_id;index"`
 	Setting          string         `json:"setting" gorm:"type:text;column:setting"`
+	ValidTopupCents  int64          `json:"valid_topup_cents" gorm:"type:bigint;not null;default:0;column:valid_topup_cents"` // 有效充值累计（分），达标后视为 SVIP，见 model/svip.go
 	Remark           string         `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
 	StripeCustomer   string         `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
 	CreatedAt        int64          `json:"created_at" gorm:"autoCreateTime;column:created_at"`
@@ -113,6 +114,21 @@ func (user *User) SetSetting(setting dto.UserSetting) {
 		return
 	}
 	user.Setting = string(settingBytes)
+}
+
+// UpdateSetting persists only the setting column so a stale user snapshot
+// cannot overwrite concurrent quota or SVIP accumulation changes.
+func (user *User) UpdateSetting() error {
+	if user == nil || user.Id <= 0 {
+		return gorm.ErrRecordNotFound
+	}
+	if err := DB.Model(&User{}).Where("id = ?", user.Id).Update("setting", user.Setting).Error; err != nil {
+		return err
+	}
+	if err := invalidateUserCache(user.Id); err != nil {
+		common.SysLog("failed to invalidate user cache after setting update: " + err.Error())
+	}
+	return nil
 }
 
 // 根据用户角色生成默认的边栏配置

@@ -370,6 +370,9 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 	first, err := CompleteValuePackageOrder(order.TradeNo, "payload-1", PaymentProviderLDXP, PaymentMethodLDXP, true)
 	require.NoError(t, err)
 	require.NotNil(t, first)
+	var userAfterFirst User
+	require.NoError(t, DB.Select("valid_topup_cents").First(&userAfterFirst, user.Id).Error)
+	require.Equal(t, int64(990), userAfterFirst.ValidTopupCents)
 	require.Equal(t, existing.Id, first.Id)
 	require.Equal(t, originalEnd+7*valuePackageDaySeconds, first.EndTime)
 	require.Equal(t, originalTotal, first.AmountTotal)
@@ -382,6 +385,9 @@ func TestCompleteValuePackageOrderExtensionCallbackReplayDoesNotExtendTwice(t *t
 	require.Equal(t, first.EndTime, replay.EndTime)
 	require.Equal(t, first.AmountTotal, replay.AmountTotal)
 	require.Equal(t, first.AmountUsed, replay.AmountUsed)
+	var userAfterReplay User
+	require.NoError(t, DB.Select("valid_topup_cents").First(&userAfterReplay, user.Id).Error)
+	require.Equal(t, int64(990), userAfterReplay.ValidTopupCents)
 	var reloaded UserSubscription
 	require.NoError(t, DB.First(&reloaded, existing.Id).Error)
 	require.Equal(t, first.EndTime, reloaded.EndTime)
@@ -2013,6 +2019,9 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	first, err := CompleteValuePackageOrder(order.TradeNo, "payload-1", PaymentProviderLDXP, PaymentMethodLDXP, true)
 	require.NoError(t, err)
 	require.NotNil(t, first)
+	var userAfterFirst User
+	require.NoError(t, DB.Select("valid_topup_cents").First(&userAfterFirst, user.Id).Error)
+	require.Equal(t, int64(2990), userAfterFirst.ValidTopupCents)
 	activated, err := ActivateValuePackage(user.Id, first.Id)
 	require.NoError(t, err)
 	require.True(t, activated.Preference.Enabled)
@@ -2036,6 +2045,9 @@ func TestCompleteValuePackageOrderIdempotentReturnsRecordedSubscription(t *testi
 	require.Equal(t, firstEnd, retry.EndTime)
 	require.Equal(t, firstTotal, retry.AmountTotal)
 	require.Equal(t, firstUsed, retry.AmountUsed)
+	var userAfterRetry User
+	require.NoError(t, DB.Select("valid_topup_cents").First(&userAfterRetry, user.Id).Error)
+	require.Equal(t, int64(2990), userAfterRetry.ValidTopupCents)
 	var reloadedSub UserSubscription
 	require.NoError(t, DB.First(&reloadedSub, first.Id).Error)
 	require.Equal(t, firstEnd, reloadedSub.EndTime)

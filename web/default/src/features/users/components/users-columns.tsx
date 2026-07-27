@@ -17,9 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { type ColumnDef } from '@tanstack/react-table'
+import { CrownIcon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 import { formatQuota, formatTimestamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -31,6 +34,7 @@ import { GroupBadge } from '@/components/group-badge'
 import { LongText } from '@/components/long-text'
 import { StatusBadge } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
+import { isSvipByValidTopupCents } from '@/features/value-packages/lib/benefit-effects'
 import {
   USER_STATUS,
   USER_STATUSES,
@@ -227,7 +231,18 @@ export function useUsersColumns(): ColumnDef<User>[] {
       header: t('Group'),
       cell: ({ row }) => {
         const group = row.getValue('group') as string
-        return <GroupBadge group={group} />
+        const isSvip = isSvipByValidTopupCents(row.original.valid_topup_cents)
+        return (
+          <div className='flex flex-wrap items-center gap-1'>
+            <GroupBadge group={group} />
+            {isSvip && (
+              <Badge variant='outline' className='yunbay-svip-badge'>
+                <HugeiconsIcon icon={CrownIcon} aria-hidden='true' />
+                SVIP
+              </Badge>
+            )}
+          </div>
+        )
       },
       filterFn: (row, id, value) => {
         const group = String(row.getValue(id) || t('User Group')).toLowerCase()

@@ -5245,6 +5245,15 @@
     "Each activation gifts {{count}} reset card(s)": "每次开通赠送 {{count}} 张重置卡",
     "Verification started": "验证已开始",
     "Verification completed ({{count}} orders updated)": "验证完成（已更新 {{count}} 个订单）",
-    "Verification timed out": "验证超时"
+    "Verification timed out": "验证超时",
+    "After you top up, the admin will verify it and credit the discount to your account.": "充值后，管理员会核验并将折扣额度返还到您的账户。",
+    "Congratulations on reaching SVIP status": "恭喜您达成 SVIP 身份",
+    "Count as valid top-up": "计入有效充值",
+    "Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).": "计入 SVIP 累计有效充值金额（累计满 200 元解锁 SVIP）。",
+    "Start the SVIP experience": "开启 SVIP 尊享体验",
+    "SVIP perk: enjoy an extra 25% off on top-ups": "SVIP 权益：充值额外享 25% 优惠",
+    "SVIP reached — top up now for an extra 25% off": "已达 SVIP，立即充值额外享 25% 优惠",
+    "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "您的累计有效充值已达 200 元，专属 SVIP 黑金光效现已为您的账户点亮。",
+    "Yunbei SVIP Black Gold Card": "云贝 SVIP 黑金卡"
   }
 }

@@ -567,6 +567,9 @@ func directTopUpLdxpSessionTx(tx *gorm.DB, session *model.LdxpTopupSession) (boo
 	if err := tx.Model(&model.User{}).Where("id = ?", session.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
 		return false, err
 	}
+	if err := model.AddUserValidTopupCentsTx(tx, session.UserId, model.AmountToValidTopupCents(session.Amount)); err != nil {
+		return false, err
+	}
 	if err := model.MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 		return false, err
 	}

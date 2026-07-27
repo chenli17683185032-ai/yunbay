@@ -44,6 +44,7 @@ export const userSchema = z.object({
   used_quota: z.number(),
   request_count: z.number(),
   group: z.string(),
+  valid_topup_cents: z.number().optional(),
   aff_code: z.string().optional(),
   aff_count: z.number().optional(),
   aff_quota: z.number().optional(),
@@ -128,6 +129,8 @@ export interface ManageUserQuotaPayload {
   action: 'add_quota'
   mode: QuotaAdjustMode
   value: number
+  /** 仅 mode=add 生效：本次增加的余额是否计入有效充值（SVIP 累计） */
+  count_as_valid_topup?: boolean
 }
 
 // ============================================================================

@@ -23,8 +23,15 @@ import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldLabel,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Dialog } from '@/components/dialog'
 import { adjustUserQuota } from '../api'
 import type { QuotaAdjustMode } from '../types'
@@ -41,6 +48,7 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<QuotaAdjustMode>('add')
   const [amount, setAmount] = useState('')
+  const [countAsValidTopup, setCountAsValidTopup] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const { meta: currencyMeta } = getCurrencyDisplay()
@@ -80,11 +88,13 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
         action: 'add_quota',
         mode,
         value: mode === 'override' ? value : Math.abs(value),
+        count_as_valid_topup: mode === 'add' ? countAsValidTopup : undefined,
       })
       if (result.success) {
         toast.success(t('Quota adjusted successfully'))
         setAmount('')
         setMode('add')
+        setCountAsValidTopup(false)
         props.onOpenChange(false)
         props.onSuccess()
       } else {
@@ -100,6 +110,7 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
   const handleCancel = () => {
     setAmount('')
     setMode('add')
+    setCountAsValidTopup(false)
     props.onOpenChange(false)
   }
 
@@ -173,6 +184,26 @@ export function UserQuotaDialog(props: UserQuotaDialogProps) {
             }}
           />
         </div>
+
+        {mode === 'add' && (
+          <Field orientation='horizontal' className='rounded-lg border p-3'>
+            <FieldContent>
+              <FieldLabel htmlFor='count-as-valid-topup'>
+                {t('Count as valid top-up')}
+              </FieldLabel>
+              <FieldDescription className='text-xs'>
+                {t(
+                  'Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).'
+                )}
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id='count-as-valid-topup'
+              checked={countAsValidTopup}
+              onCheckedChange={setCountAsValidTopup}
+            />
+          </Field>
+        )}
       </div>
     </Dialog>
   )

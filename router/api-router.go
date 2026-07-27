@@ -113,6 +113,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/aff_transfer", controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 				selfRoute.POST("/vip-upgrade-modal/seen", controller.MarkVIPUpgradeModalSeen)
+				selfRoute.POST("/svip-celebration/seen", controller.MarkSVIPCelebrationSeen)
 
 				// 2FA routes
 				selfRoute.GET("/2fa/status", controller.Get2FAStatus)

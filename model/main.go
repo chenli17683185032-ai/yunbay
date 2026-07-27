@@ -346,6 +346,9 @@ func migrateDB() error {
 			return err
 		}
 	}
+	if err := backfillUserValidTopupCents(); err != nil {
+		return err
+	}
 	return nil
 }
 

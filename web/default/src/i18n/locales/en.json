@@ -5245,6 +5245,15 @@
     "Each activation gifts {{count}} reset card(s)": "Each activation gifts {{count}} reset card(s)",
     "Verification started": "Verification started",
     "Verification completed ({{count}} orders updated)": "Verification completed ({{count}} orders updated)",
-    "Verification timed out": "Verification timed out"
+    "Verification timed out": "Verification timed out",
+    "After you top up, the admin will verify it and credit the discount to your account.": "After you top up, the admin will verify it and credit the discount to your account.",
+    "Congratulations on reaching SVIP status": "Congratulations on reaching SVIP status",
+    "Count as valid top-up": "Count as valid top-up",
+    "Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).": "Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).",
+    "Start the SVIP experience": "Start the SVIP experience",
+    "SVIP perk: enjoy an extra 25% off on top-ups": "SVIP perk: enjoy an extra 25% off on top-ups",
+    "SVIP reached — top up now for an extra 25% off": "SVIP reached — top up now for an extra 25% off",
+    "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.",
+    "Yunbei SVIP Black Gold Card": "Yunbei SVIP Black Gold Card"
   }
 }

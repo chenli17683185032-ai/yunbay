@@ -17,20 +17,50 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-export type BenefitGlowMode = 'none' | 'package' | 'vip'
-export type UserSettingInput = Record<string, unknown> | string | null | undefined
+export type BenefitGlowMode = 'none' | 'package' | 'vip' | 'svip'
+export type UserSettingInput =
+  | Record<string, unknown>
+  | string
+  | null
+  | undefined
+
+/** SVIP 有效充值阈值（分），与后端 model/svip.go 保持一致 */
+export const SVIP_THRESHOLD_CENTS = 20000
 
 export function isVipUserGroup(group?: string | null): boolean {
   return (group || '').trim().toLowerCase() === 'vip'
 }
 
+export function isSvipByValidTopupCents(cents?: number | null): boolean {
+  return typeof cents === 'number' && cents >= SVIP_THRESHOLD_CENTS
+}
+
+export function isSvipUser(
+  user?: {
+    is_svip?: boolean
+    valid_topup_cents?: number
+  } | null
+): boolean {
+  if (!user) {
+    return false
+  }
+  return (
+    user.is_svip === true || isSvipByValidTopupCents(user.valid_topup_cents)
+  )
+}
+
 export function getBenefitGlowMode({
   packageGlow,
   isVipUser,
+  isSvipUser = false,
 }: {
   packageGlow: boolean
   isVipUser: boolean
+  isSvipUser?: boolean
 }): BenefitGlowMode {
+  if (isSvipUser) {
+    return 'svip'
+  }
   if (packageGlow) {
     return 'package'
   }
@@ -78,5 +108,28 @@ export function withVipUpgradeModalSeen(
   return {
     ...parseUserSettingRecord(setting),
     vip_upgrade_modal_seen: true,
+  }
+}
+
+export function hasSvipCelebrationSeen(setting: UserSettingInput): boolean {
+  return parseUserSettingRecord(setting).svip_celebration_seen === true
+}
+
+export function shouldShowSvipCelebration({
+  isSvip,
+  setting,
+}: {
+  isSvip: boolean
+  setting: UserSettingInput
+}): boolean {
+  return isSvip && !hasSvipCelebrationSeen(setting)
+}
+
+export function withSvipCelebrationSeen(
+  setting: UserSettingInput
+): Record<string, unknown> {
+  return {
+    ...parseUserSettingRecord(setting),
+    svip_celebration_seen: true,
   }
 }

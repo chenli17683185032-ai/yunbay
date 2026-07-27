@@ -2601,6 +2601,9 @@ func CompleteValuePackageOrder(tradeNo string, providerPayload string, expectedP
 		if err != nil {
 			return err
 		}
+		if err := AddUserValidTopupCentsTx(tx, order.UserId, MoneyToValidTopupCents(order.Money)); err != nil {
+			return err
+		}
 		if err := MaybeCreateAffiliateCommissionForTopUpTx(tx, topUp); err != nil {
 			return err
 		}

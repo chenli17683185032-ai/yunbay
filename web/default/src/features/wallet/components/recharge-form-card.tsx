@@ -49,6 +49,7 @@ import type {
   WaffoPayMethod,
 } from '../types'
 import { CreemProductsSection } from './creem-products-section'
+import { SvipTopupPerkAlert } from './svip-topup-perk-alert'
 
 interface RechargeFormCardProps {
   topupInfo: TopupInfo | null
@@ -206,6 +207,8 @@ export function RechargeFormCard({
       }
       contentClassName='space-y-4 sm:space-y-6'
     >
+      <SvipTopupPerkAlert />
+
       {/* Online Topup Section */}
       {hasAnyTopup ? (
         <div className='space-y-4 sm:space-y-6'>
@@ -462,9 +465,7 @@ export function RechargeFormCard({
                 variant='outline'
                 className='h-9 px-4'
               >
-                {redeeming && (
-                  <Loader2 className='mr-2 h-4 w-4 animate-spin' />
-                )}
+                {redeeming && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
                 {t('Redeem')}
               </Button>
             </div>

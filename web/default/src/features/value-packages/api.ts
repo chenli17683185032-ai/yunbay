@@ -105,3 +105,10 @@ export async function markVipUpgradeModalSeen(): Promise<
   const res = await api.post('/api/user/vip-upgrade-modal/seen')
   return res.data
 }
+
+export async function markSvipCelebrationSeen(): Promise<
+  ApiResponse<{ svip_celebration_seen: boolean }>
+> {
+  const res = await api.post('/api/user/svip-celebration/seen')
+  return res.data
+}

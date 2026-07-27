@@ -138,6 +138,114 @@ For commercial licensing, please contact support@quantumnous.com
   --yunbay-benefit-glow-soft-color: oklch(0.72 0.17 58 / 0.22);
 }
 
+/* SVIP 黑金：香槟金主光 + 深金暗晕，比 VIP 金光更沉、更亮的对比层次 */
+.yunbay-viewport-benefit-glow--svip {
+  --yunbay-benefit-glow-color: oklch(0.86 0.13 90 / 0.7);
+  --yunbay-benefit-glow-soft-color: oklch(0.45 0.09 68 / 0.38);
+  animation-duration: 3.6s;
+}
+
+.yunbay-viewport-benefit-glow--svip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 120px 30px oklch(0.2 0.03 70 / 0.18);
+}
+
+.yunbay-svip-dialog-card,
+.yunbay-svip-alert,
+.yunbay-svip-badge {
+  --yunbay-svip-gold: oklch(0.86 0.13 90);
+  --yunbay-svip-gold-soft: oklch(0.92 0.08 92);
+  --yunbay-svip-ink: oklch(0.17 0.015 70);
+  --yunbay-svip-copy: oklch(0.9 0.06 90 / 0.72);
+  letter-spacing: 0;
+}
+
+.yunbay-svip-dialog-card {
+  border-color: oklch(0.86 0.13 90 / 0.35);
+  color: var(--yunbay-svip-gold-soft);
+  background: linear-gradient(
+    135deg,
+    oklch(0.14 0.008 70),
+    oklch(0.19 0.01 80),
+    oklch(0.17 0.015 65)
+  );
+}
+
+.yunbay-svip-top-glow {
+  background: linear-gradient(
+    to bottom,
+    oklch(0.86 0.13 90 / 0.15),
+    transparent
+  );
+}
+
+.yunbay-svip-emblem,
+.yunbay-svip-action {
+  color: var(--yunbay-svip-ink);
+  background: linear-gradient(
+    to bottom right,
+    oklch(0.92 0.08 92),
+    oklch(0.84 0.16 92),
+    oklch(0.68 0.15 76)
+  );
+}
+
+.yunbay-svip-action:hover {
+  background: linear-gradient(
+    to right,
+    oklch(0.9 0.1 92),
+    oklch(0.8 0.17 90),
+    oklch(0.7 0.15 76)
+  );
+}
+
+.yunbay-svip-kicker,
+.yunbay-svip-accent {
+  color: var(--yunbay-svip-gold);
+}
+
+.yunbay-svip-title {
+  color: var(--yunbay-svip-gold-soft);
+}
+
+.yunbay-svip-copy,
+.yunbay-svip-perk-alert [data-slot='alert-description'],
+.yunbay-svip-alert [data-slot='alert-description'] {
+  color: var(--yunbay-svip-copy);
+}
+
+.yunbay-svip-perk-alert {
+  border-color: oklch(0.86 0.13 90 / 0.25);
+  color: var(--yunbay-svip-gold-soft);
+  background: oklch(0.86 0.13 90 / 0.1);
+}
+
+.yunbay-svip-alert {
+  overflow: hidden;
+  border-color: oklch(0.86 0.13 90 / 0.4);
+  color: var(--yunbay-svip-gold-soft);
+  background: linear-gradient(
+    to right,
+    oklch(0.14 0.008 70),
+    oklch(0.19 0.01 80),
+    oklch(0.14 0.008 70)
+  );
+}
+
+.yunbay-svip-badge {
+  border-color: oklch(0.86 0.13 90 / 0.5);
+  color: var(--yunbay-svip-gold);
+  background: linear-gradient(
+    to right,
+    oklch(0.14 0.008 70),
+    oklch(0.2 0.01 80)
+  );
+  font-weight: 700;
+}
+
 .yunbay-sidebar-value-package-pulse {
   position: relative;
   overflow: hidden;
@@ -250,6 +358,24 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 
+/* SVIP 黑金卡面：深色底上的金色斜向流光 */
+.yunbay-svip-card-shine {
+  background:
+    radial-gradient(
+      circle at 18% 0%,
+      oklch(0.85 0.14 88 / 0.3),
+      transparent 36%
+    ),
+    linear-gradient(
+      118deg,
+      transparent 8%,
+      oklch(0.88 0.12 92 / 0.22) 38%,
+      oklch(0.72 0.14 78 / 0.1) 48%,
+      transparent 62%
+    );
+  animation: yunbay-vip-card-shine 4.5s ease-in-out infinite;
+}
+
 /* Override auto-skeleton-react inline styles with Vercel shimmer */
 .auto-skeleton-fade [class^='skeleton-'] {
   background: linear-gradient(
@@ -271,7 +397,8 @@ For commercial licensing, please contact support@quantumnous.com
   .yunbay-sidebar-value-package-pulse,
   .yunbay-sidebar-value-package-pulse::after,
   .yunbay-viewport-benefit-glow,
-  .yunbay-vip-card-shine {
+  .yunbay-vip-card-shine,
+  .yunbay-svip-card-shine {
     animation: none !important;
   }
 

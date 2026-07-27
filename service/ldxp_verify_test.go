@@ -165,6 +165,13 @@ func ldxpVerifyUserQuota(t *testing.T, userID int) int {
 	return user.Quota
 }
 
+func ldxpVerifyUserValidTopupCents(t *testing.T, userID int) int64 {
+	t.Helper()
+	var user model.User
+	require.NoError(t, model.DB.Select("valid_topup_cents").Where("id = ?", userID).First(&user).Error)
+	return user.ValidTopupCents
+}
+
 func ldxpVerifyTopUps(t *testing.T, userID int) []model.TopUp {
 	t.Helper()
 	var topUps []model.TopUp
@@ -377,6 +384,7 @@ func TestVerifyLdxpSessionDirectTopupWithoutMailOrCardWhenMailMatchDisabled(t *t
 	assert.True(t, result.Redeemed)
 	assert.Equal(t, model.LdxpStatusSuccess, result.Status)
 	assert.Equal(t, 100+int(10*common.QuotaPerUnit), ldxpVerifyUserQuota(t, 6421))
+	assert.Equal(t, int64(1000), ldxpVerifyUserValidTopupCents(t, 6421))
 
 	persisted, err := model.GetLdxpTopupSessionBySessionId("ldxp_verify_direct_topup")
 	require.NoError(t, err)
@@ -405,6 +413,7 @@ func TestVerifyLdxpSessionDirectTopupWithoutMailOrCardWhenMailMatchDisabled(t *t
 	require.NotNil(t, second)
 	assert.True(t, second.Redeemed)
 	assert.Equal(t, 100+int(10*common.QuotaPerUnit), ldxpVerifyUserQuota(t, 6421))
+	assert.Equal(t, int64(1000), ldxpVerifyUserValidTopupCents(t, 6421))
 	assert.Len(t, ldxpVerifyTopUps(t, 6421), 1)
 }
 

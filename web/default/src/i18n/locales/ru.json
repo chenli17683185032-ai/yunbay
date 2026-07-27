@@ -5245,6 +5245,15 @@
     "Each activation gifts {{count}} reset card(s)": "При каждой активации выдаётся карт сброса: {{count}}",
     "Verification started": "Проверка начата",
     "Verification completed ({{count}} orders updated)": "Проверка завершена (обновлено заказов: {{count}})",
-    "Verification timed out": "Время проверки истекло"
+    "Verification timed out": "Время проверки истекло",
+    "After you top up, the admin will verify it and credit the discount to your account.": "После пополнения администратор проверит платёж и зачислит сумму скидки на ваш счёт.",
+    "Congratulations on reaching SVIP status": "Поздравляем с достижением статуса SVIP",
+    "Count as valid top-up": "Учесть как действительное пополнение",
+    "Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).": "Засчитывается в совокупную сумму действительных пополнений SVIP (SVIP открывается при 200 CNY).",
+    "Start the SVIP experience": "Начать пользоваться SVIP",
+    "SVIP perk: enjoy an extra 25% off on top-ups": "Преимущество SVIP: дополнительная скидка 25 % на пополнения",
+    "SVIP reached — top up now for an extra 25% off": "Статус SVIP достигнут — пополните счёт сейчас с дополнительной скидкой 25 %",
+    "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "Совокупная сумма ваших действительных пополнений достигла 200 CNY. Эксклюзивное чёрно-золотое свечение SVIP теперь активно для вашей учётной записи.",
+    "Yunbei SVIP Black Gold Card": "Чёрно-золотая карта Yunbei SVIP"
   }
 }

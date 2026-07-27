@@ -26,17 +26,22 @@ import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/dialog'
 import {
   getValuePackageSelf,
+  markSvipCelebrationSeen,
   markVipUpgradeModalSeen,
 } from '../api'
 import {
   getBenefitGlowMode,
+  isSvipUser,
   isVipUserGroup,
+  shouldShowSvipCelebration,
   shouldShowVipCelebration,
+  withSvipCelebrationSeen,
   withVipUpgradeModalSeen,
   type BenefitGlowMode,
 } from '../lib/benefit-effects'
 import { shouldShowPackageGlow } from '../lib/rules'
 import { valuePackageSelfQueryKey } from '../query-keys'
+import { SvipCelebrationDialog } from './svip-celebration-dialog'
 
 function currentUnixSeconds(): number {
   return Math.floor(Date.now() / 1000)
@@ -71,7 +76,8 @@ function ViewportBenefitGlow({ mode }: { mode: BenefitGlowMode }) {
       className={cn(
         'yunbay-viewport-benefit-glow',
         mode === 'package' && 'yunbay-viewport-benefit-glow--package',
-        mode === 'vip' && 'yunbay-viewport-benefit-glow--vip'
+        mode === 'vip' && 'yunbay-viewport-benefit-glow--vip',
+        mode === 'svip' && 'yunbay-viewport-benefit-glow--svip'
       )}
     />
   )
@@ -84,7 +90,11 @@ export function AuthenticatedBenefitEffects() {
   const [vipDialogDismissedUserId, setVipDialogDismissedUserId] = useState<
     number | null
   >(null)
+  const [svipDialogDismissedUserId, setSvipDialogDismissedUserId] = useState<
+    number | null
+  >(null)
   const markSeenInFlightUserIdRef = useRef<number | null>(null)
+  const markSvipSeenInFlightUserIdRef = useRef<number | null>(null)
 
   const { data: valuePackageState } = useQuery({
     queryKey: valuePackageSelfQueryKey,
@@ -98,10 +108,22 @@ export function AuthenticatedBenefitEffects() {
   })
 
   const isVipUser = isVipUserGroup(user?.group)
+  const isSvip = isSvipUser(user)
   const now = useNowSeconds(Boolean(valuePackageState))
   const packageGlow = shouldShowPackageGlow(valuePackageState || null, now)
-  const mode = getBenefitGlowMode({ packageGlow, isVipUser })
+  const mode = getBenefitGlowMode({
+    packageGlow,
+    isVipUser,
+    isSvipUser: isSvip,
+  })
+  const showSvipDialog =
+    svipDialogDismissedUserId !== user?.id &&
+    shouldShowSvipCelebration({
+      isSvip,
+      setting: user?.setting,
+    })
   const showVipDialog =
+    !showSvipDialog &&
     vipDialogDismissedUserId !== user?.id &&
     shouldShowVipCelebration({
       group: user?.group,
@@ -127,9 +149,29 @@ export function AuthenticatedBenefitEffects() {
     })
   }, [setUser, user])
 
+  const markSvipSeen = useCallback(() => {
+    if (!user || markSvipSeenInFlightUserIdRef.current === user.id) {
+      return
+    }
+
+    markSvipSeenInFlightUserIdRef.current = user.id
+    setSvipDialogDismissedUserId(user.id)
+    setUser({
+      ...user,
+      setting: withSvipCelebrationSeen(user.setting),
+    })
+
+    void markSvipCelebrationSeen().catch(() => {
+      if (markSvipSeenInFlightUserIdRef.current === user.id) {
+        markSvipSeenInFlightUserIdRef.current = null
+      }
+    })
+  }, [setUser, user])
+
   return (
     <>
       <ViewportBenefitGlow mode={mode} />
+      <SvipCelebrationDialog open={showSvipDialog} onClose={markSvipSeen} />
       <Dialog
         open={showVipDialog}
         onOpenChange={(open) => {

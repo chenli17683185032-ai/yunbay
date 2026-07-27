@@ -5245,6 +5245,15 @@
     "Each activation gifts {{count}} reset card(s)": "開通ごとにリセットカードを{{count}}枚付与",
     "Verification started": "検証を開始しました",
     "Verification completed ({{count}} orders updated)": "検証が完了しました（{{count}} 件の注文を更新）",
-    "Verification timed out": "検証がタイムアウトしました"
+    "Verification timed out": "検証がタイムアウトしました",
+    "After you top up, the admin will verify it and credit the discount to your account.": "チャージ後、管理者が確認し、割引分をアカウントに付与します。",
+    "Congratulations on reaching SVIP status": "SVIPステータス達成おめでとうございます",
+    "Count as valid top-up": "有効チャージとして計上",
+    "Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).": "SVIPの累計有効チャージ額に計上します（200 CNYでSVIPをアンロック）。",
+    "Start the SVIP experience": "SVIP体験を開始",
+    "SVIP perk: enjoy an extra 25% off on top-ups": "SVIP特典：チャージがさらに25%オフ",
+    "SVIP reached — top up now for an extra 25% off": "SVIP達成 — 今すぐチャージするとさらに25%オフ",
+    "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "累計有効チャージ額が200 CNYに達しました。SVIP限定のブラックゴールドグローがアカウントで有効になりました。",
+    "Yunbei SVIP Black Gold Card": "Yunbei SVIP ブラックゴールドカード"
   }
 }

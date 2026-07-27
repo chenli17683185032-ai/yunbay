@@ -52,6 +52,13 @@ func userQuotaForRedemptionTest(t *testing.T, userID int) int {
 	return user.Quota
 }
 
+func userValidTopupCentsForRedemptionTest(t *testing.T, userID int) int64 {
+	t.Helper()
+	var user User
+	require.NoError(t, DB.Select("valid_topup_cents").Where("id = ?", userID).First(&user).Error)
+	return user.ValidTopupCents
+}
+
 func topUpsForRedemptionTest(t *testing.T, userID int) []TopUp {
 	t.Helper()
 	var topUps []TopUp
@@ -139,6 +146,7 @@ func TestRedeemPaidTopupCreatesSuccessfulTopUp(t *testing.T) {
 	assert.Equal(t, "batch-paid-1", result.Redemption.BatchId)
 	assert.Equal(t, RedemptionSourceLDXP, result.Redemption.Source)
 	assert.Equal(t, 750, userQuotaForRedemptionTest(t, userID))
+	assert.Equal(t, int64(2000), userValidTopupCentsForRedemptionTest(t, userID))
 
 	var redeemed Redemption
 	require.NoError(t, DB.Where("key = ?", originalKey).First(&redeemed).Error)
@@ -179,6 +187,7 @@ func TestRedeemPromoCreditDoesNotCreateTopUp(t *testing.T) {
 	assert.Equal(t, 300, result.Quota)
 	assert.Equal(t, RedemptionKindPromoCredit, result.Redemption.Kind)
 	assert.Equal(t, 310, userQuotaForRedemptionTest(t, userID))
+	assert.Zero(t, userValidTopupCentsForRedemptionTest(t, userID))
 	assert.Empty(t, topUpsForRedemptionTest(t, userID))
 }
 
@@ -202,6 +211,7 @@ func TestRedeemLegacyDoesNotCreateTopUp(t *testing.T) {
 	assert.Equal(t, RedemptionKindLegacy, result.Redemption.Kind)
 	assert.Equal(t, RedemptionSourceManual, result.Redemption.Source)
 	assert.Equal(t, 420, userQuotaForRedemptionTest(t, userID))
+	assert.Zero(t, userValidTopupCentsForRedemptionTest(t, userID))
 	assert.Empty(t, topUpsForRedemptionTest(t, userID))
 }
 
@@ -388,6 +398,7 @@ func TestRedeemPaidTopupCannotBeRedeemedTwice(t *testing.T) {
 	require.Nil(t, second)
 	require.ErrorIs(t, err, ErrRedemptionUsed)
 	assert.Equal(t, 750, userQuotaForRedemptionTest(t, userID))
+	assert.Equal(t, int64(2000), userValidTopupCentsForRedemptionTest(t, userID))
 	require.Len(t, topUpsForRedemptionTest(t, userID), 1)
 }
 

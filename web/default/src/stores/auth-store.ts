@@ -48,6 +48,8 @@ export interface AuthUser {
   stripe_customer?: string
   sidebar_modules?: string
   permissions?: UserPermissions
+  valid_topup_cents?: number
+  is_svip?: boolean
 }
 
 interface AuthState {

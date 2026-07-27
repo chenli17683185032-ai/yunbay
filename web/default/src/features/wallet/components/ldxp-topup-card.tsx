@@ -28,6 +28,7 @@ import {
   getLdxpPricing,
 } from '../lib/ldxp-topup'
 import type { TopupInfo } from '../types'
+import { SvipTopupPerkAlert } from './svip-topup-perk-alert'
 
 interface LdxpTopupCardProps {
   topupInfo: TopupInfo | null
@@ -109,6 +110,8 @@ export function LdxpTopupCard({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
+
+      <SvipTopupPerkAlert />
 
       <div className='grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-6'>
         {amounts.map((amount) => {

@@ -528,6 +528,8 @@ func GetSelf(c *gin.Context) {
 		"stripe_customer":   user.StripeCustomer,
 		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
 		"permissions":       permissions,                // 新增权限字段
+		"valid_topup_cents": user.ValidTopupCents,
+		"is_svip":           user.IsSVIP(),
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -978,6 +980,8 @@ type ManageRequest struct {
 	Action string `json:"action"`
 	Value  int    `json:"value"`
 	Mode   string `json:"mode"`
+	// CountAsValidTopup 仅 mode=add 生效：本次增加的余额是否计入有效充值（SVIP 累计）
+	CountAsValidTopup bool `json:"count_as_valid_topup"`
 }
 
 // ManageUser Only admin user can do this
@@ -1056,12 +1060,18 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
+			var validTopupCents int64
+			if req.CountAsValidTopup {
+				validTopupCents = model.MoneyToValidTopupCents(float64(req.Value) / common.QuotaPerUnit)
+			}
+			if err := model.IncreaseUserQuotaAndValidTopupCents(user.Id, req.Value, validTopupCents); err != nil {
 				common.ApiError(c, err)
 				return
 			}
 			recordManageAuditFor(c, user.Id, "user.quota_add", map[string]interface{}{
-				"quota": logger.LogQuota(req.Value),
+				"quota":                logger.LogQuota(req.Value),
+				"count_as_valid_topup": req.CountAsValidTopup,
+				"valid_topup_cents":    validTopupCents,
 			})
 		case "subtract":
 			if req.Value <= 0 {
@@ -1462,10 +1472,33 @@ func MarkVIPUpgradeModalSeen(c *gin.Context) {
 	setting := user.GetSetting()
 	setting.VipUpgradeModalSeen = true
 	user.SetSetting(setting)
-	if err := user.Update(false); err != nil {
+	if err := user.UpdateSetting(); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	common.ApiSuccess(c, gin.H{"vip_upgrade_modal_seen": true})
+}
+
+func MarkSVIPCelebrationSeen(c *gin.Context) {
+	userId := c.GetInt("id")
+	user, err := model.GetUserById(userId, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !user.IsSVIP() {
+		common.ApiErrorI18n(c, i18n.MsgForbidden)
+		return
+	}
+
+	setting := user.GetSetting()
+	setting.SvipCelebrationSeen = true
+	user.SetSetting(setting)
+	if err := user.UpdateSetting(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{"svip_celebration_seen": true})
 }

@@ -5245,6 +5245,15 @@
     "Each activation gifts {{count}} reset card(s)": "Mỗi lần kích hoạt tặng {{count}} thẻ đặt lại",
     "Verification started": "Đã bắt đầu xác minh",
     "Verification completed ({{count}} orders updated)": "Xác minh hoàn tất (đã cập nhật {{count}} đơn hàng)",
-    "Verification timed out": "Xác minh đã hết thời gian chờ"
+    "Verification timed out": "Xác minh đã hết thời gian chờ",
+    "After you top up, the admin will verify it and credit the discount to your account.": "Sau khi bạn nạp tiền, quản trị viên sẽ xác minh và cộng khoản chiết khấu vào tài khoản của bạn.",
+    "Congratulations on reaching SVIP status": "Chúc mừng bạn đã đạt hạng SVIP",
+    "Count as valid top-up": "Tính là lần nạp hợp lệ",
+    "Counts toward the SVIP cumulative valid top-up amount (SVIP unlocks at 200 CNY).": "Được tính vào tổng số tiền nạp hợp lệ tích lũy của SVIP (mở khóa SVIP khi đạt 200 CNY).",
+    "Start the SVIP experience": "Bắt đầu trải nghiệm SVIP",
+    "SVIP perk: enjoy an extra 25% off on top-ups": "Đặc quyền SVIP: giảm thêm 25% khi nạp tiền",
+    "SVIP reached — top up now for an extra 25% off": "Đã đạt SVIP — nạp tiền ngay để được giảm thêm 25%",
+    "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "Tổng số tiền nạp hợp lệ tích lũy của bạn đã đạt 200 CNY. Hiệu ứng ánh sáng đen-vàng độc quyền SVIP hiện đã được kích hoạt cho tài khoản của bạn.",
+    "Yunbei SVIP Black Gold Card": "Thẻ Đen Vàng Yunbei SVIP"
   }
 }
