@@ -30,7 +30,12 @@ export const loginFormSchema = z.object({
     .min(8, 'Password must be at least 8 characters long'),
 })
 
-const QQ_EMAIL_REGEX = /^[^@\s]+@qq\.com$/i
+const QQ_EMAIL_LOCAL_PART_REGEX = /^[^@\s]+$/
+
+export function buildQQEmailAddress(localPart: string): string {
+  const normalizedLocalPart = localPart.trim()
+  return normalizedLocalPart ? `${normalizedLocalPart}@qq.com` : ''
+}
 
 export const registerFormSchema = z
   .object({
@@ -38,11 +43,16 @@ export const registerFormSchema = z
     email: z
       .string()
       .trim()
-      .min(1, 'Please enter your QQ email')
-      .email('Please enter a valid QQ email address')
-      .refine((email) => QQ_EMAIL_REGEX.test(email), {
-        message: 'Only QQ email addresses are supported',
-      }),
+      .min(1, 'Please enter your QQ email name')
+      .regex(
+        QQ_EMAIL_LOCAL_PART_REGEX,
+        'Please enter only the part before @qq.com'
+      )
+      .refine(
+        (localPart) =>
+          z.string().email().safeParse(buildQQEmailAddress(localPart)).success,
+        'Please enter a valid QQ email name'
+      ),
     password: z
       .string()
       .min(1, 'Please enter your password')
@@ -56,11 +66,40 @@ export const registerFormSchema = z
     path: ['confirmPassword'],
   })
 
-export const forgotPasswordFormSchema = z.object({
-  email: z.string().email({
-    message: 'Please enter a valid email address',
-  }),
-})
+export const forgotPasswordFormSchema = z
+  .object({
+    email: z.string().trim().email({
+      message: 'Please enter a valid email address',
+    }),
+    code: z
+      .string()
+      .trim()
+      .length(6, 'Please enter the 6-character verification code'),
+    password: z
+      .string()
+      .min(1, 'Please enter your password')
+      .min(8, 'Password must be at least 8 characters long')
+      .max(20, 'Password must be at most 20 characters long'),
+    confirmPassword: z.string().min(1, 'Please confirm your password'),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords don't match.",
+    path: ['confirmPassword'],
+  })
+
+export const resetPasswordConfirmFormSchema = z
+  .object({
+    password: z
+      .string()
+      .min(1, 'Please enter your password')
+      .min(8, 'Password must be at least 8 characters long')
+      .max(20, 'Password must be at most 20 characters long'),
+    confirmPassword: z.string().min(1, 'Please confirm your password'),
+  })
+  .refine((data) => data.password === data.confirmPassword, {
+    message: "Passwords don't match.",
+    path: ['confirmPassword'],
+  })
 
 export const otpFormSchema = z.object({
   otp: z.string().min(1, 'Please enter a code.'),

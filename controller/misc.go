@@ -1,9 +1,9 @@
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -303,7 +303,7 @@ func SendEmailVerification(c *gin.Context) {
 }
 
 func SendPasswordResetEmail(c *gin.Context) {
-	email := c.Query("email")
+	email := strings.TrimSpace(c.Query("email"))
 	if err := common.Validate.Var(email, "required,email"); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -312,14 +312,21 @@ func SendPasswordResetEmail(c *gin.Context) {
 		return
 	}
 	if model.IsEmailAlreadyTaken(email) {
-		code := common.GenerateVerificationCode(0)
+		code := common.GenerateVerificationCode(6)
 		common.RegisterVerificationCodeWithKey(email, code, common.PasswordResetPurpose)
-		link := fmt.Sprintf("%s/user/reset?email=%s&token=%s", system_setting.ServerAddress, email, code)
+		link := fmt.Sprintf(
+			"%s/user/reset?email=%s&token=%s",
+			system_setting.ServerAddress,
+			url.QueryEscape(email),
+			url.QueryEscape(code),
+		)
 		subject := fmt.Sprintf("%s密码重置", common.SystemName)
 		content := fmt.Sprintf("<p>您好，你正在进行%s密码重置。</p>"+
-			"<p>点击 <a href='%s'>此处</a> 进行密码重置。</p>"+
+			"<p>您的验证码为: <strong>%s</strong></p>"+
+			"<p>您也可以点击 <a href='%s'>此处</a> 进行密码重置。</p>"+
 			"<p>如果链接无法点击，请尝试点击下面的链接或将其复制到浏览器中打开：<br> %s </p>"+
-			"<p>重置链接 %d 分钟内有效，如果不是本人操作，请忽略。</p>", common.SystemName, link, link, common.VerificationValidMinutes)
+			"<p>验证码和重置链接 %d 分钟内有效，如果不是本人操作，请忽略。</p>",
+			common.SystemName, code, link, link, common.VerificationValidMinutes)
 		err := common.SendEmail(subject, email, content)
 		if err != nil {
 			logger.LogError(c.Request.Context(), fmt.Sprintf("failed to send password reset email to %s: %s", email, err.Error()))
@@ -332,13 +339,20 @@ func SendPasswordResetEmail(c *gin.Context) {
 }
 
 type PasswordResetRequest struct {
-	Email string `json:"email"`
-	Token string `json:"token"`
+	Email    string  `json:"email"`
+	Token    string  `json:"token"`
+	Password *string `json:"password,omitempty"`
 }
 
 func ResetPassword(c *gin.Context) {
 	var req PasswordResetRequest
-	err := json.NewDecoder(c.Request.Body).Decode(&req)
+	err := common.DecodeJson(c.Request.Body, &req)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	req.Email = strings.TrimSpace(req.Email)
+	req.Token = strings.TrimSpace(req.Token)
 	if req.Email == "" || req.Token == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
@@ -353,17 +367,30 @@ func ResetPassword(c *gin.Context) {
 		})
 		return
 	}
-	password := common.GenerateVerificationCode(12)
+	customPassword := req.Password != nil
+	password := ""
+	if customPassword {
+		password = *req.Password
+		if err := common.Validate.Var(password, "min=8,max=20"); err != nil {
+			common.ApiError(c, fmt.Errorf("密码长度必须为 8-20 个字符"))
+			return
+		}
+	} else {
+		password = common.GenerateVerificationCode(12)
+	}
 	err = model.ResetUserPasswordByEmail(req.Email, password)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	common.DeleteKey(req.Email, common.PasswordResetPurpose)
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"success": true,
 		"message": "",
-		"data":    password,
-	})
+	}
+	if !customPassword {
+		response["data"] = password
+	}
+	c.JSON(http.StatusOK, response)
 	return
 }

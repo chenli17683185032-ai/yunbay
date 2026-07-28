@@ -5254,6 +5254,18 @@
     "SVIP perk: enjoy an extra 25% off on top-ups": "SVIP特典：チャージがさらに25%オフ",
     "SVIP reached — top up now for an extra 25% off": "SVIP達成 — 今すぐチャージするとさらに25%オフ",
     "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "累計有効チャージ額が200 CNYに達しました。SVIP限定のブラックゴールドグローがアカウントで有効になりました。",
-    "Yunbei SVIP Black Gold Card": "Yunbei SVIP ブラックゴールドカード"
+    "Yunbei SVIP Black Gold Card": "Yunbei SVIP ブラックゴールドカード",
+    "Enter QQ number or email name": "QQ番号またはメール名を入力してください",
+    "Enter your registered email, verify the code, and set a new password.": "登録済みのメールアドレスを入力し、認証コードを確認して新しいパスワードを設定してください。",
+    "Failed to reset password": "パスワードのリセットに失敗しました",
+    "Password updated successfully": "パスワードを更新しました",
+    "Passwords don't match.": "パスワードが一致しません。",
+    "Please enter a valid QQ email name": "有効なQQメールのユーザー名を入力してください",
+    "Please enter only the part before @qq.com": "@qq.com より前の部分のみ入力してください",
+    "Please enter the 6-character verification code": "6文字の認証コードを入力してください",
+    "Please enter your QQ email name": "QQメールのユーザー名を入力してください",
+    "QQ email": "QQメール",
+    "Recover password": "パスワードを再設定",
+    "Set a new password for your account.": "アカウントの新しいパスワードを設定してください。"
   }
 }

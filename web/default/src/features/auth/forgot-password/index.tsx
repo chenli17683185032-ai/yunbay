@@ -32,7 +32,7 @@ export function ForgotPassword() {
           </h2>
           <p className='text-muted-foreground text-left text-sm sm:text-base'>
             {t(
-              'Enter your registered email and we will send you a link to reset your password.'
+              'Enter your registered email, verify the code, and set a new password.'
             )}
           </p>
           <p className='text-muted-foreground text-left text-sm sm:text-base'>
@@ -47,7 +47,7 @@ export function ForgotPassword() {
           </p>
         </div>
 
-        <ForgotPasswordForm className='space-y-0' />
+        <ForgotPasswordForm />
       </div>
     </AuthLayout>
   )

@@ -5254,6 +5254,18 @@
     "SVIP perk: enjoy an extra 25% off on top-ups": "Avantage SVIP : profitez de 25 % de réduction supplémentaire sur les recharges",
     "SVIP reached — top up now for an extra 25% off": "Statut SVIP atteint — rechargez maintenant avec 25 % de réduction supplémentaire",
     "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "Vos recharges valides cumulées ont atteint 200 CNY. L’éclat noir et or exclusif SVIP est désormais actif sur votre compte.",
-    "Yunbei SVIP Black Gold Card": "Carte noire et or Yunbei SVIP"
+    "Yunbei SVIP Black Gold Card": "Carte noire et or Yunbei SVIP",
+    "Enter QQ number or email name": "Saisissez votre numéro QQ ou votre nom de boîte mail",
+    "Enter your registered email, verify the code, and set a new password.": "Saisissez votre adresse e-mail enregistrée, validez le code et définissez un nouveau mot de passe.",
+    "Failed to reset password": "Échec de la réinitialisation du mot de passe",
+    "Password updated successfully": "Mot de passe mis à jour",
+    "Passwords don't match.": "Les mots de passe ne correspondent pas.",
+    "Please enter a valid QQ email name": "Saisissez un nom d’adresse e-mail QQ valide",
+    "Please enter only the part before @qq.com": "Saisissez uniquement la partie avant @qq.com",
+    "Please enter the 6-character verification code": "Saisissez le code de vérification à 6 caractères",
+    "Please enter your QQ email name": "Saisissez le nom de votre adresse e-mail QQ",
+    "QQ email": "Adresse e-mail QQ",
+    "Recover password": "Récupérer le mot de passe",
+    "Set a new password for your account.": "Définissez un nouveau mot de passe pour votre compte."
   }
 }

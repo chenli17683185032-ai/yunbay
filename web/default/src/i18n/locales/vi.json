@@ -5254,6 +5254,18 @@
     "SVIP perk: enjoy an extra 25% off on top-ups": "Đặc quyền SVIP: giảm thêm 25% khi nạp tiền",
     "SVIP reached — top up now for an extra 25% off": "Đã đạt SVIP — nạp tiền ngay để được giảm thêm 25%",
     "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "Tổng số tiền nạp hợp lệ tích lũy của bạn đã đạt 200 CNY. Hiệu ứng ánh sáng đen-vàng độc quyền SVIP hiện đã được kích hoạt cho tài khoản của bạn.",
-    "Yunbei SVIP Black Gold Card": "Thẻ Đen Vàng Yunbei SVIP"
+    "Yunbei SVIP Black Gold Card": "Thẻ Đen Vàng Yunbei SVIP",
+    "Enter QQ number or email name": "Nhập số QQ hoặc tên hộp thư",
+    "Enter your registered email, verify the code, and set a new password.": "Nhập email đã đăng ký, xác minh mã và đặt mật khẩu mới.",
+    "Failed to reset password": "Không thể đặt lại mật khẩu",
+    "Password updated successfully": "Đã cập nhật mật khẩu",
+    "Passwords don't match.": "Mật khẩu không khớp.",
+    "Please enter a valid QQ email name": "Vui lòng nhập tên email QQ hợp lệ",
+    "Please enter only the part before @qq.com": "Chỉ nhập phần đứng trước @qq.com",
+    "Please enter the 6-character verification code": "Vui lòng nhập mã xác minh gồm 6 ký tự",
+    "Please enter your QQ email name": "Vui lòng nhập tên email QQ",
+    "QQ email": "Email QQ",
+    "Recover password": "Khôi phục mật khẩu",
+    "Set a new password for your account.": "Đặt mật khẩu mới cho tài khoản của bạn."
   }
 }

@@ -35,6 +35,12 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+  InputGroupText,
+} from '@/components/ui/input-group'
 import { Label } from '@/components/ui/label'
 import { Dialog } from '@/components/dialog'
 import { PasswordInput } from '@/components/password-input'
@@ -42,7 +48,10 @@ import { Turnstile } from '@/components/turnstile'
 import { login, register, wechatLoginByCode } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
-import { registerFormSchema } from '@/features/auth/constants'
+import {
+  buildQQEmailAddress,
+  registerFormSchema,
+} from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
@@ -164,12 +173,14 @@ export function SignUpForm({
       removeAffiliateCode()
     }
 
+    const email = buildQQEmailAddress(data.email)
+
     setIsLoading(true)
     try {
       const res = await register({
         username: data.username,
         password: data.password,
-        email: data.email,
+        email,
         verification_code: verificationCode || undefined,
         aff_code: affCode || undefined,
         turnstile: turnstileToken,
@@ -211,7 +222,7 @@ export function SignUpForm({
   async function handleSendVerificationCode() {
     const isEmailValid = await form.trigger('email')
     if (!isEmailValid) return
-    await sendCode(emailValue || '')
+    await sendCode(buildQQEmailAddress(emailValue || ''))
   }
 
   const handleOpenWeChatDialog = () => {
@@ -315,13 +326,21 @@ export function SignUpForm({
           name='email'
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t('Email (QQ mailbox only)')}</FormLabel>
-              <FormControl>
-                <Input placeholder={t('name@qq.com')} type='email' {...field} />
-              </FormControl>
-              <p className='text-muted-foreground text-xs'>
-                {t('Only QQ email addresses are supported')}
-              </p>
+              <FormLabel>{t('QQ email')}</FormLabel>
+              <InputGroup>
+                <FormControl data-slot='input-group-control'>
+                  <InputGroupInput
+                    placeholder={t('Enter QQ number or email name')}
+                    autoCapitalize='none'
+                    autoComplete='off'
+                    spellCheck={false}
+                    {...field}
+                  />
+                </FormControl>
+                <InputGroupAddon align='inline-end'>
+                  <InputGroupText>@qq.com</InputGroupText>
+                </InputGroupAddon>
+              </InputGroup>
               <FormMessage />
             </FormItem>
           )}

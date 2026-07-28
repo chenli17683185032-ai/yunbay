@@ -43,7 +43,8 @@ export interface RegisterPayload {
 
 export interface PasswordResetPayload {
   email: string
-  turnstile?: string
+  token: string
+  password: string
 }
 
 export interface EmailVerificationPayload {

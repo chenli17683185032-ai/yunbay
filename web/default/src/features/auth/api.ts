@@ -23,6 +23,7 @@ import type {
   Login2FAResponse,
   TwoFAPayload,
   RegisterPayload,
+  PasswordResetPayload,
   ApiResponse,
 } from './types'
 
@@ -71,6 +72,16 @@ export async function sendPasswordResetEmail(
   const res = await api.get('/api/reset_password', {
     params: { email, turnstile },
   })
+  return res.data
+}
+
+// Reset password with the email verification code
+export async function resetPassword(
+  payload: PasswordResetPayload
+): Promise<ApiResponse> {
+  const res = await api.post('/api/user/reset', payload, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
   return res.data
 }
 

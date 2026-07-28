@@ -18,31 +18,60 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { registerFormSchema } from './constants'
+import {
+  buildQQEmailAddress,
+  forgotPasswordFormSchema,
+  registerFormSchema,
+} from './constants'
 
 const validRegistration = {
   username: 'qquser',
-  email: 'qquser@qq.com',
+  email: 'qquser',
   password: 'password123',
   confirmPassword: 'password123',
 }
 
-test('register form requires a QQ email address', () => {
+test('register form accepts only the QQ email local part', () => {
   assert.equal(registerFormSchema.safeParse(validRegistration).success, true)
 
-  for (const email of [
-    '',
-    'qquser@gmail.com',
-    'qquser@foxmail.com',
-    'qquser@sub.qq.com',
-    'not-an-email',
-  ]) {
+  for (const email of ['', 'qq user', 'qquser@qq.com', 'qquser@gmail.com']) {
     const result = registerFormSchema.safeParse({
       ...validRegistration,
       email,
     })
     assert.equal(result.success, false, `${email} should be rejected`)
   }
+})
+
+test('QQ email builder appends the fixed domain', () => {
+  assert.equal(buildQQEmailAddress('qquser'), 'qquser@qq.com')
+  assert.equal(buildQQEmailAddress('  qquser  '), 'qquser@qq.com')
+  assert.equal(buildQQEmailAddress(''), '')
+})
+
+test('forgot password form requires a code and matching custom password', () => {
+  const validReset = {
+    email: 'registered@qq.com',
+    code: 'ABC123',
+    password: 'new-password',
+    confirmPassword: 'new-password',
+  }
+
+  assert.equal(forgotPasswordFormSchema.safeParse(validReset).success, true)
+  assert.equal(
+    forgotPasswordFormSchema.safeParse({
+      ...validReset,
+      code: 'ABC12',
+    }).success,
+    false
+  )
+  assert.equal(
+    forgotPasswordFormSchema.safeParse({
+      ...validReset,
+      confirmPassword: 'different-password',
+    }).success,
+    false
+  )
 })
 
 test('register form keeps the invitation code field', () => {

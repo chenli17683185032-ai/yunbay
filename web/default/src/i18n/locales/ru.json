@@ -5254,6 +5254,18 @@
     "SVIP perk: enjoy an extra 25% off on top-ups": "Преимущество SVIP: дополнительная скидка 25 % на пополнения",
     "SVIP reached — top up now for an extra 25% off": "Статус SVIP достигнут — пополните счёт сейчас с дополнительной скидкой 25 %",
     "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "Совокупная сумма ваших действительных пополнений достигла 200 CNY. Эксклюзивное чёрно-золотое свечение SVIP теперь активно для вашей учётной записи.",
-    "Yunbei SVIP Black Gold Card": "Чёрно-золотая карта Yunbei SVIP"
+    "Yunbei SVIP Black Gold Card": "Чёрно-золотая карта Yunbei SVIP",
+    "Enter QQ number or email name": "Введите номер QQ или имя почтового ящика",
+    "Enter your registered email, verify the code, and set a new password.": "Введите зарегистрированный адрес электронной почты, подтвердите код и задайте новый пароль.",
+    "Failed to reset password": "Не удалось сбросить пароль",
+    "Password updated successfully": "Пароль успешно обновлён",
+    "Passwords don't match.": "Пароли не совпадают.",
+    "Please enter a valid QQ email name": "Введите допустимое имя почтового ящика QQ",
+    "Please enter only the part before @qq.com": "Введите только часть адреса до @qq.com",
+    "Please enter the 6-character verification code": "Введите 6-символьный код подтверждения",
+    "Please enter your QQ email name": "Введите имя почтового ящика QQ",
+    "QQ email": "Почта QQ",
+    "Recover password": "Восстановить пароль",
+    "Set a new password for your account.": "Задайте новый пароль для своей учётной записи."
   }
 }

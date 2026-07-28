@@ -28,12 +28,15 @@ const formSource = readFileSync(
   'utf8'
 )
 
-test('sign-up form keeps the QQ email field visible outside the verification-only block', () => {
+test('sign-up form uses a fixed QQ domain and submits the complete email address', () => {
   assert.match(formSource, /name='email'/)
-  assert.match(formSource, /Email \(QQ mailbox only\)/)
-  assert.match(formSource, /name@qq\.com/)
-  assert.match(formSource, /Only QQ email addresses are supported/)
-  assert.doesNotMatch(formSource, /Email \(required for verification\)/)
+  assert.match(formSource, /InputGroupInput/)
+  assert.match(formSource, /FormControl data-slot='input-group-control'/)
+  assert.match(formSource, /<InputGroupText>@qq\.com<\/InputGroupText>/)
+  assert.match(formSource, /buildQQEmailAddress\(data\.email\)/)
+  assert.match(formSource, /buildQQEmailAddress\(emailValue/)
+  assert.doesNotMatch(formSource, /Email \(QQ mailbox only\)/)
+  assert.doesNotMatch(formSource, /Only QQ email addresses are supported/)
   assert.doesNotMatch(formSource, /name@example\.com/)
 
   const emailFieldIndex = formSource.indexOf("name='email'")

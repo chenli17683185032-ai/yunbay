@@ -5254,6 +5254,18 @@
     "SVIP perk: enjoy an extra 25% off on top-ups": "SVIP 权益：充值额外享 25% 优惠",
     "SVIP reached — top up now for an extra 25% off": "已达 SVIP，立即充值额外享 25% 优惠",
     "Your cumulative valid top-ups have reached 200 CNY. The exclusive SVIP black-gold glow is now active for your account.": "您的累计有效充值已达 200 元，专属 SVIP 黑金光效现已为您的账户点亮。",
-    "Yunbei SVIP Black Gold Card": "云贝 SVIP 黑金卡"
+    "Yunbei SVIP Black Gold Card": "云贝 SVIP 黑金卡",
+    "Enter QQ number or email name": "请输入 QQ 号或邮箱名",
+    "Enter your registered email, verify the code, and set a new password.": "请输入已注册邮箱，验证收到的验证码并设置新密码。",
+    "Failed to reset password": "密码重置失败",
+    "Password updated successfully": "密码修改成功",
+    "Passwords don't match.": "两次输入的密码不一致。",
+    "Please enter a valid QQ email name": "请输入有效的 QQ 邮箱前缀",
+    "Please enter only the part before @qq.com": "只需输入 @qq.com 前面的部分",
+    "Please enter the 6-character verification code": "请输入 6 位验证码",
+    "Please enter your QQ email name": "请输入 QQ 邮箱前缀",
+    "QQ email": "QQ 邮箱",
+    "Recover password": "密码找回",
+    "Set a new password for your account.": "为你的账号设置新密码。"
   }
 }
