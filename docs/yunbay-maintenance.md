@@ -2,6 +2,29 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-28 Sub2API 0.1.166 上游更新
+
+### 固定版本与迁移演练
+
+- GitHub 与 Docker Hub 复核时最新稳定版为 `v0.1.166`。生产从 `0.1.155`（修订 `41cec0db059ffb82d0efdcfcf07a24ab51fbfe97`，镜像 `sha256:45113b2b836626f0baed0f266f36bd739b4243e30bb1448abd9e1ee664bdc56d`）升级到 `0.1.166`（修订 `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8`，Linux amd64 镜像 `sha256:27fe46f83e27d6a63857b4d6c59297eff619fdfb50d94450b1b2d02f546d4148`）。仓库发布覆盖已固定同一平台摘要，不再跟随可变 `latest`。
+- 生产备份为 `/opt/new-api/backups/sub2api-v0.1.166-20260728T124704Z`，权限 `0700`；其中 PostgreSQL custom dump 约 62 MB、Sub2API data 归档约 12 MB，均完成目录/结构校验。最终 56 个审计文件清单 SHA-256 为 `3172b75ef54b65c64d8ae41554ac4fbac6e8e1c73eea19a006b37ecc9debb26e`。旧镜像保留为 `yunbay-sub2api:rollback-0.1.155-20260728T124704Z`，新镜像保留为 `yunbay-sub2api:release-0.1.166`。
+- 切换前把生产转储恢复到 Docker internal 网络中的临时 PostgreSQL 15 与 Redis 7，候选容器无外网且使用 data 副本。`0.1.166` 完成 236 条迁移并健康启动，公共表从 77 增至 83、列从 1084 增至 1211，严重迁移/启动日志为 0；临时容器、网络、卷和数据目录随后全部清理。
+- 新版有一项上游定义的一次性兼容迁移：在 `server.trusted_proxies` 从未配置时，把既有 `api_key_acl_trust_forwarded_ip` 从 `false` 调整为 `true`，并新增 `forwarded_client_ip_headers=[]`、`forwarded_client_ip_mode_v2_migrated=true`。服务仍明确禁用可信代理并只采用直连对端 IP，实际 IP 信任边界不变。除此之外，全部既有 settings 键值无变化；另新增默认 `ALIPAY_MOBILE_PRECREATE_DEEP_LINK=false`。
+
+### 生产切换与验收
+
+- 第一版 watchdog 在真正重建前因未显式传入既有 `/opt/new-api/secrets/prod.env` 而停止，随后自动恢复 Compose；旧容器 `deefb7f4a519bda818e88273e23d0ebd90012b223413fa6cac7ff85e93ed5195` 的 ID、镜像、健康和 `restart=0` 均未变化，没有执行生产数据库迁移。
+- 修正后的独立 watchdog 持有 `/var/lock/yunbay-sub2api-deploy.lock`，只把 `/opt/new-api/app/docker-compose.prod.yml` 的 Sub2API `image:` 一行切到固定摘要，并使用 `docker compose --env-file /opt/new-api/secrets/prod.env ... up -d --no-deps --force-recreate sub2api`。只重建 `yunbay-sub2api`；新容器为 `f866041e1433a9901b0fe67a87c77c382a7c49f7b4a4fcf418cf31d4489a4e34`。
+- 切换后约 `6.937s` 的采样仍为 502，`9.714s` 首次内外健康 200，`12.266s` Docker health 进入 healthy，`20.562s` 达成连续五轮稳定。观测中断小于 10 秒，未超过 1 分钟容忍上限；成功后 Caddy 502 为 0。
+- 最终镜像、版本和修订均与目标一致，容器为 `running / healthy / restart=0 / OOM=false`。`config.yaml` SHA-256 仍为 `330a36b229619567b1219e8d942f308f349b2998233047c6f3f7a62f6491fdc1`，环境与挂载指纹逐字不变，Compose 前后差异只有镜像一行；236 条迁移、新邮箱索引和 83/1211 表列基线全部存在。
+- 公网首页与 `/health` 为 200，未认证 `/v1/models` 与 `/api/v1/admin/settings` 均为 401。额外 20 轮、共约 1 分钟的源站/公网/首页探针全部通过，严重日志 0、数据库未授予锁 0、部署锁已释放。所有非 Sub2API 容器 ID 未变化，切换窗口内没有其它容器 start/die/restart/destroy 事件。
+
+### 回滚合同
+
+- 回滚时获取 `/var/lock/yunbay-sub2api-deploy.lock`，从成功备份恢复 `docker-compose.prod.before.yml`，再在 `/opt/new-api/app` 执行 `docker compose --env-file /opt/new-api/secrets/prod.env -f docker-compose.prod.yml up -d --no-deps --force-recreate sub2api`，并连续验证容器内与公网 `/health`。
+- 正常应用回滚只恢复旧镜像，不恢复 PostgreSQL dump、不回滚迁移、不覆盖 `/opt/new-api/sub2api/data/config.yaml`、不恢复 Redis，也不导入或重置任何 settings。新增迁移为向前兼容的增量对象，旧 `0.1.155` 会忽略后续迁移记录。数据库转储仅保留作明确数据库损坏时的最后手段，不能进入自动回滚路径。
+- 禁止在 Sub2API 回滚中重启或修改 Caddy、new-api、PostgreSQL、Redis、CLI Proxy、LDXP、Grok、iCloud 或其它服务；成功备份和 release/rollback 镜像标签继续保留。
+
 ## 2026-07-27 重置卡兑换与套餐赠卡上线
 
 ### 功能合同与发布范围

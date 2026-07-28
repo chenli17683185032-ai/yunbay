@@ -1,4 +1,4 @@
 services:
   sub2api:
-    image: weishaw/sub2api@sha256:45113b2b836626f0baed0f266f36bd739b4243e30bb1448abd9e1ee664bdc56d
+    image: weishaw/sub2api@sha256:27fe46f83e27d6a63857b4d6c59297eff619fdfb50d94450b1b2d02f546d4148
     build: !reset null
