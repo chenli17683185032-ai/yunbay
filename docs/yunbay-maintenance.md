@@ -2,6 +2,28 @@
 
 本文记录云贝 `new-api` 当前的本地维护、验证、同步生产和排障约定。
 
+## 2026-07-29 Sub2API Bedrock Claude 模型 ID 修复
+
+### 修复范围与构建
+
+- 生产继续基于官方 Sub2API `v0.1.166`、提交 `dc893dd0b8eab41df5be595ae9fcd1aa74a062b8`。完整审计 AWS Bedrock 模型目录后，确认需要修正五条默认映射：Fable 5 补 `us.` 前缀，Opus 4.7、Opus 4.8、Opus 5、Sonnet 5 移除无效的 `-v1`。Opus 4.6 的 `-v1` 和日期型 `-v1:0` 均为有效 ID，保持不变。
+- 请求解析同时兼容旧的错误直传 ID：Opus 4.7、4.8、5 和 Sonnet 5 的 `-v1` 形式会在区域调整前归一化。没有机械删除所有 Bedrock 后缀，也没有修改账号 540 的自定义映射或其它设置。
+- 可复现工件为 `deploy/sub2api-v0.1.166-bedrock-model-id.patch.b64`、`deploy/build-sub2api-bedrock-model-id.sh`、`deploy/docker-compose.sub2api-bedrock-model-id.yml`，SHA-256 依次为 `1afbe949ff5be4182072d250fceee6a50ea3d0f7fbb10c7ab93d2575cda36db4`、`bf3342a9b623d729f7a0127b6d7b93e4c5c2e189f7322d3965c16b2b52e58a22`、`3783d317e0f2afac79ee5da6c3a25dd8bb0b014180380a2beb9aa00d80ec13b1`。构建脚本先解码再应用七文件补丁；工件不包含临时生成的 pnpm 文件，也不使用已退役的 `infra/sub2api` 覆盖源码。
+- Go `internal/domain`、`internal/service` 测试通过；前端 Bedrock 预设测试 `16/16` 通过；官方 Dockerfile 的完整前端类型检查/生产构建与 Go amd64 构建通过。生产候选 `yunbay/sub2api:0.1.166-bedrock-model-id-20260729` 的镜像 ID 为 `sha256:b0ccb3a6057fe37a2716a1c5fe7c449e9dcc5ae9b16f53407f4c0a4d07ff4d69`。
+
+### 生产切换与闭环测试
+
+- 受保护备份为 `/home/deploy/backups/sub2api-bedrock-model-id-20260729.JohfDb`，权限 `0700/0600`，包含切换前 Compose、`config.yaml`、账号 540、全部 settings、容器环境/挂载和同机容器基线。切换前账号行指纹为 `f185fa4765d1961c344247ae3ab75f37`。
+- 独立 watchdog 持有 `/var/lock/yunbay-sub2api-deploy.lock`，只把 Compose 的 Sub2API 镜像一行换为候选，并执行 `up -d --no-deps --force-recreate --no-build sub2api`。仅 `yunbay-sub2api` 被重建，`20.375s` 后连续通过容器内与公网健康检查；最终容器 `eb02eb4c08baa84dfbd1a11e271d10e1905c7ec6fffdfcdfe1e5e0dc51341104` 为 `healthy / restart=0 / OOM=false`，未触发回滚。
+- 使用管理员 API 测试账号 `540`（`admin@yunbay.xyz`）、别名 `claude-opus-5`、消息 `hi`。生产实际发出的模型为 `us.anthropic.claude-opus-5`，AWS 返回 `403 anthropic.claude-opus-5 is not available for this account`，不再返回 `400 invalid model identifier`。这证明映射修复已生效；403 属于 AWS 账号权限层，需要等待开放或联系 Support。
+- Fable 5 的 `provider_data_share` 没有自动启用。该选项只应在账号获得模型权限后按需单独开启，本次没有修改任何账号凭据、区域、调度、优先级、并发、代理、额度或模型映射。
+- 测试后账号指纹仍为 `f185fa4765d1961c344247ae3ab75f37`，settings SHA-256 仍为 `cf6b93f91710baebcf4222ab902f140457570ead6a769c8b4f19bcd4d25e8081`，`config.yaml` 仍为 `330a36b229619567b1219e8d942f308f349b2998233047c6f3f7a62f6491fdc1`，挂载指纹仍为 `efc66b77b967a9dc5817ab1970464be3f15634f065faad80c50000ceb07e093b`。排序后的 21 项环境变量哈希前后均为 `973f018734804bbb811b67c0ce6ed5c358ea1de6d842adcf51b41e2b1a22e7b5`；其它容器 ID 无变化，内外探针 `5/5`，严重日志 `0`，部署锁已释放。
+
+### 回滚合同
+
+- 旧官方镜像保留为 `yunbay-sub2api:rollback-bedrock-model-id-20260729`，新镜像保留为 `yunbay-sub2api:release-bedrock-model-id-20260729`。回滚时持有同一部署锁，把 `/home/deploy/backups/sub2api-bedrock-model-id-20260729.JohfDb/docker-compose.prod.yml` 恢复到 `/opt/new-api/app/docker-compose.prod.yml`，再使用 `/opt/new-api/secrets/prod.env` 只重建 `sub2api` 并验证内外 `/health`。
+- 正常回滚禁止恢复 PostgreSQL、Redis、`config.yaml`、账号行或 settings，禁止重启 Caddy、new-api、PostgreSQL、Redis、CLI Proxy、LDXP、Grok、iCloud 或其它服务。
+
 ## 2026-07-28 Sub2API 0.1.166 上游更新
 
 ### 固定版本与迁移演练
