@@ -57,7 +57,7 @@
     "react-markdown": "catalog:",
     "react-resizable-panels": "^4.11.2",
     "react-top-loading-bar": "^3.0.2",
-    "recharts": "3.8.1",
+    "recharts": "3.10.1",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "catalog:",
     "shiki": "^4.1.0",
@@ -95,7 +95,7 @@
     "prettier": "catalog:",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "shadcn": "^4.8.0",
-    "typescript": "~6.0.3",
+    "typescript": "~4.9.5",
     "typescript-eslint": "^8.59.4"
   },
   "overrides": {
