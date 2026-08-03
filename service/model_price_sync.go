@@ -37,6 +37,20 @@ var directModelsDevProviders = map[string]bool{
 	"xai":        true,
 }
 
+// These aliases mirror the xAI model mapping used by the imported Grok
+// upstream. Keys use canonicalModelID format; values are source catalog IDs.
+var modelPriceAliasTargets = map[string]string{
+	"grok":                    "grok-4.5",
+	"grok-latest":             "grok-4.5",
+	"grok-4-5-latest":         "grok-4.5",
+	"grok-build":              "grok-build-0.1",
+	"grok-build-latest":       "grok-4.5",
+	"grok-composer":           "grok-composer-2.5-fast",
+	"composer-2-5":            "grok-composer-2.5-fast",
+	"grok-4-20-reasoning":     "grok-4.20-0309-reasoning",
+	"grok-4-20-non-reasoning": "grok-4.20-0309-non-reasoning",
+}
+
 // CanonicalModelPrice stores real USD / 1M token prices. OpenRouter's token
 // prices are normalized to this unit before any comparison or expression build.
 type CanonicalModelPrice struct {
@@ -240,16 +254,11 @@ func MatchRequestedModelPrices(requested []string, catalog []model.Pricing, open
 		}
 
 		canonicalLocal := canonicalModelID(modelName)
-		var candidateID string
-		var candidatePrice CanonicalModelPrice
-		candidateCount := 0
-		for _, openRouterID := range openRouterIDs {
-			if canonicalModelID(openRouterID) != canonicalLocal {
-				continue
+		candidateID, candidatePrice, candidateCount := findCanonicalPriceCandidates(canonicalLocal, openRouterIDs, openRouterPrices)
+		if candidateCount == 0 {
+			if aliasTarget, ok := modelPriceAliasTargets[canonicalLocal]; ok {
+				candidateID, candidatePrice, candidateCount = findPriceAliasTarget(aliasTarget, openRouterIDs, openRouterPrices)
 			}
-			candidateID = openRouterID
-			candidatePrice = openRouterPrices[openRouterID]
-			candidateCount++
 		}
 		if candidateCount == 1 {
 			matches[modelName] = ModelPriceMatch{ModelName: modelName, OpenRouterID: candidateID, Price: candidatePrice, Status: "matched"}
@@ -275,6 +284,28 @@ func canonicalModelID(id string) string {
 	return strings.Trim(id, "-")
 }
 
+func findCanonicalPriceCandidates(canonical string, ids []string, prices map[string]CanonicalModelPrice) (string, CanonicalModelPrice, int) {
+	var matchedID string
+	var matchedPrice CanonicalModelPrice
+	count := 0
+	for _, id := range ids {
+		if canonicalModelID(id) != canonical {
+			continue
+		}
+		matchedID = id
+		matchedPrice = prices[id]
+		count++
+	}
+	return matchedID, matchedPrice, count
+}
+
+func findPriceAliasTarget(target string, ids []string, prices map[string]CanonicalModelPrice) (string, CanonicalModelPrice, int) {
+	if price, ok := prices[target]; ok {
+		return target, price, 1
+	}
+	return findCanonicalPriceCandidates(canonicalModelID(target), ids, prices)
+}
+
 func FindCanonicalPriceForModel(modelName string, prices map[string]CanonicalModelPrice) CanonicalModelPrice {
 	if price, ok := prices[modelName]; ok {
 		return price
@@ -285,17 +316,17 @@ func FindCanonicalPriceForModel(modelName string, prices map[string]CanonicalMod
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	var matched CanonicalModelPrice
-	count := 0
-	for _, id := range ids {
-		if canonicalModelID(id) != canonical {
-			continue
-		}
-		matched = prices[id]
-		count++
-	}
+	_, matched, count := findCanonicalPriceCandidates(canonical, ids, prices)
 	if count == 1 {
 		return matched
+	}
+	if count == 0 {
+		if aliasTarget, ok := modelPriceAliasTargets[canonical]; ok {
+			_, matched, count = findPriceAliasTarget(aliasTarget, ids, prices)
+			if count == 1 {
+				return matched
+			}
+		}
 	}
 	return CanonicalModelPrice{}
 }

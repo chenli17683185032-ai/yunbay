@@ -119,6 +119,114 @@ func TestModelPriceSync_MatchOpenRouterModelIDConservatively(t *testing.T) {
 	}
 }
 
+func TestModelPriceSync_GrokAliasesMatchCanonicalOpenRouterModels(t *testing.T) {
+	catalog := []model.Pricing{
+		{ModelName: "grok"},
+		{ModelName: "grok-latest"},
+		{ModelName: "grok-4.5-latest"},
+		{ModelName: "grok-build"},
+		{ModelName: "grok-build-latest"},
+	}
+	openRouter := map[string]CanonicalModelPrice{
+		"x-ai/grok-4.5":         {Input: ptrFloat(2)},
+		"~x-ai/grok-latest":     {Input: ptrFloat(3)},
+		"x-ai/grok-build-0.1":   {Input: ptrFloat(1)},
+		"x-ai/grok-4.5-preview": {Input: ptrFloat(9)},
+	}
+
+	matched := MatchRequestedModelPrices([]string{
+		"grok",
+		"grok-latest",
+		"grok-4.5-latest",
+		"grok-build",
+		"grok-build-latest",
+	}, catalog, openRouter)
+
+	wantIDs := map[string]string{
+		"grok":              "x-ai/grok-4.5",
+		"grok-latest":       "~x-ai/grok-latest",
+		"grok-4.5-latest":   "x-ai/grok-4.5",
+		"grok-build":        "x-ai/grok-build-0.1",
+		"grok-build-latest": "x-ai/grok-4.5",
+	}
+	for modelName, wantID := range wantIDs {
+		match := matched[modelName]
+		if match.Status != "matched" || match.OpenRouterID != wantID {
+			t.Fatalf("%s match = %+v, want OpenRouter ID %q", modelName, match, wantID)
+		}
+	}
+}
+
+func TestModelPriceSync_GrokAliasesFindOfficialPrices(t *testing.T) {
+	official := map[string]CanonicalModelPrice{
+		"grok-4.5":                         {Input: ptrFloat(4)},
+		"xai/grok-4.5":                     {Input: ptrFloat(4)},
+		"grok-build-0.1":                   {Input: ptrFloat(2)},
+		"xai/grok-build-0.1":               {Input: ptrFloat(2)},
+		"grok-4.20-0309-reasoning":         {Input: ptrFloat(2.5)},
+		"xai/grok-4.20-0309-reasoning":     {Input: ptrFloat(2.5)},
+		"grok-4.20-0309-non-reasoning":     {Input: ptrFloat(2.5)},
+		"xai/grok-4.20-0309-non-reasoning": {Input: ptrFloat(2.5)},
+		"grok-composer-2.5-fast":           {},
+		"xai/grok-composer-2.5-fast":       {},
+	}
+
+	tests := []struct {
+		modelName string
+		wantInput float64
+	}{
+		{modelName: "grok", wantInput: 4},
+		{modelName: "grok-latest", wantInput: 4},
+		{modelName: "grok-4.5-latest", wantInput: 4},
+		{modelName: "grok-build", wantInput: 2},
+		{modelName: "grok-build-latest", wantInput: 4},
+		{modelName: "grok-4.20-reasoning", wantInput: 2.5},
+		{modelName: "grok-4.20-non-reasoning", wantInput: 2.5},
+	}
+	for _, test := range tests {
+		t.Run(test.modelName, func(t *testing.T) {
+			price := FindCanonicalPriceForModel(test.modelName, official)
+			assertPrice(t, price.Input, test.wantInput)
+		})
+	}
+
+	if price := FindCanonicalPriceForModel("grok-composer", official); price.hasAnyBillablePrice() {
+		t.Fatalf("unpriced Grok Composer alias returned a billable price: %+v", price)
+	}
+}
+
+func TestModelPriceSync_GrokLatestAliasMergesOfficialPrice(t *testing.T) {
+	result := buildModelPriceSyncPreview(
+		[]string{"grok-latest"},
+		[]model.Pricing{{ModelName: "grok-latest"}},
+		map[string]CanonicalModelPrice{
+			"~x-ai/grok-latest": {
+				Input:     ptrFloat(2),
+				Output:    ptrFloat(6),
+				CacheRead: ptrFloat(0.3),
+			},
+		},
+		map[string]CanonicalModelPrice{
+			"xai/grok-4.5": {
+				Input:     ptrFloat(4),
+				Output:    ptrFloat(12),
+				CacheRead: ptrFloat(0.6),
+			},
+		},
+	)
+
+	if result.Syncable != 1 || len(result.Items) != 1 {
+		t.Fatalf("unexpected preview result: %+v", result)
+	}
+	item := result.Items[0]
+	if item.OpenRouterID != "~x-ai/grok-latest" {
+		t.Fatalf("OpenRouterID = %q, want exact rolling alias", item.OpenRouterID)
+	}
+	assertPrice(t, item.Final.Input, 4)
+	assertPrice(t, item.Final.Output, 12)
+	assertPrice(t, item.Final.CacheRead, 0.6)
+}
+
 func TestModelPriceSync_MergeUsesHigherPricePerDimensionAndBuildsExpr(t *testing.T) {
 	official := CanonicalModelPrice{
 		Input:      ptrFloat(3),
