@@ -38,6 +38,9 @@ func IsOpenAIResponseOnlyModel(modelName string) bool {
 
 func IsImageGenerationModel(modelName string) bool {
 	modelName = strings.ToLower(modelName)
+	if IsGrokImageGenerationModel(modelName) {
+		return true
+	}
 	for _, m := range ImageGenerationModels {
 		if strings.Contains(modelName, m) {
 			return true
@@ -47,6 +50,10 @@ func IsImageGenerationModel(modelName string) bool {
 		}
 	}
 	return false
+}
+
+func IsVideoGenerationModel(modelName string) bool {
+	return IsGrokVideoGenerationModel(modelName)
 }
 
 func IsOpenAITextModel(modelName string) bool {

@@ -46,3 +46,35 @@ func TestGetEndpointTypesByChannelTypePrefersImageEndpointForGPTImage2(t *testin
 		t.Fatalf("second endpoint = %q, want %q", endpoints[1], constant.EndpointTypeOpenAI)
 	}
 }
+
+func TestGrokMediaModelsUseMediaEndpoints(t *testing.T) {
+	for _, model := range []string{"grok-imagine", "grok-imagine-edit", "grok-imagine-image", "grok-imagine-image-quality"} {
+		if !IsImageGenerationModel(model) {
+			t.Fatalf("IsImageGenerationModel(%q) = false", model)
+		}
+		endpoints := GetEndpointTypesByChannelType(constant.ChannelTypeXai, model)
+		if len(endpoints) == 0 || endpoints[0] != constant.EndpointTypeImageGeneration {
+			t.Fatalf("image endpoints for %q = %v", model, endpoints)
+		}
+	}
+
+	for _, model := range []string{"grok-imagine-video", "grok-imagine-video-1.5"} {
+		if !IsVideoGenerationModel(model) {
+			t.Fatalf("IsVideoGenerationModel(%q) = false", model)
+		}
+		endpoints := GetEndpointTypesByChannelType(constant.ChannelTypeXai, model)
+		if len(endpoints) != 1 || endpoints[0] != constant.EndpointTypeOpenAIVideo {
+			t.Fatalf("video endpoints for %q = %v, want openai-video only", model, endpoints)
+		}
+	}
+}
+
+func TestOpenAIVideoDefaultEndpoint(t *testing.T) {
+	endpoint, ok := GetDefaultEndpointInfo(constant.EndpointTypeOpenAIVideo)
+	if !ok {
+		t.Fatal("openai-video default endpoint is missing")
+	}
+	if endpoint.Path != "/v1/videos/generations" || endpoint.Method != "POST" {
+		t.Fatalf("openai-video endpoint = %#v", endpoint)
+	}
+}

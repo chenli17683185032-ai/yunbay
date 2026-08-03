@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"mime/multipart"
 	"net/url"
 	"strconv"
 	"strings"
@@ -147,6 +148,9 @@ func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIRespon
 }
 
 func validateNonImageEndpointModel(modelName string) error {
+	if common.IsVideoGenerationModel(modelName) {
+		return fmt.Errorf("model %s is only available via POST /v1/videos/generations", modelName)
+	}
 	if !common.IsImageGenerationModel(modelName) {
 		return nil
 	}
@@ -171,6 +175,9 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 			imageRequest.N = common.GetPointer(uint(common.String2Int(formData.Get("n"))))
 			imageRequest.Quality = formData.Get("quality")
 			imageRequest.Size = formData.Get("size")
+			imageRequest.Resolution = formData.Get("resolution")
+			imageRequest.AspectRatio = formData.Get("aspect_ratio")
+			imageRequest.InputImageCount = countMultipartImageInputs(form)
 			if streamValue := strings.TrimSpace(formData.Get("stream")); streamValue != "" {
 				stream, err := strconv.ParseBool(streamValue)
 				if err != nil {
@@ -248,6 +255,19 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 	}
 
 	return imageRequest, nil
+}
+
+func countMultipartImageInputs(form *multipart.Form) int {
+	if form == nil {
+		return 0
+	}
+	count := 0
+	for fieldName, files := range form.File {
+		if fieldName == "image" || fieldName == "image[]" || strings.HasPrefix(fieldName, "image[") || fieldName == "mask" {
+			count += len(files)
+		}
+	}
+	return count
 }
 
 func isGPTImageModel(modelName string) bool {

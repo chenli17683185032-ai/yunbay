@@ -522,3 +522,92 @@ func TestModelPriceSync_OptionUpdatesClearStaleLegacyRatiosAndKeepCacheWrite1h(t
 		t.Fatalf("billing expr %q does not include cache write 1h price", expr)
 	}
 }
+
+func TestModelPriceSync_ComposerAliasesUseCuratedPrice(t *testing.T) {
+	catalog := []model.Pricing{
+		{ModelName: "grok-composer-2.5-fast"},
+		{ModelName: "grok-composer"},
+		{ModelName: "composer-2.5"},
+	}
+
+	preview := buildModelPriceSyncPreview(
+		[]string{"grok-composer-2.5-fast", "grok-composer", "composer-2.5"},
+		catalog,
+		map[string]CanonicalModelPrice{},
+		map[string]CanonicalModelPrice{},
+	)
+
+	if preview.Syncable != 3 || preview.SkippedCount != 0 {
+		t.Fatalf("preview counts = syncable %d skipped %d, want 3/0: %#v", preview.Syncable, preview.SkippedCount, preview.Items)
+	}
+	for _, item := range preview.Items {
+		if item.Status != "ready" || !item.WouldApply {
+			t.Fatalf("composer item %#v is not ready", item)
+		}
+		assertPrice(t, item.Final.Input, 2)
+		assertPrice(t, item.Final.Output, 4)
+		assertPrice(t, item.Final.CacheRead, 0.4)
+		if item.BillingExpr != `tier("base", p * 2 + c * 4 + cr * 0.4)` {
+			t.Fatalf("BillingExpr = %q", item.BillingExpr)
+		}
+	}
+}
+
+func TestModelPriceSync_ProtectsManualAndMediaPricing(t *testing.T) {
+	models := []string{
+		"grok-build",
+		"grok-imagine",
+		"grok-imagine-edit",
+		"grok-imagine-image",
+		"grok-imagine-image-quality",
+		"grok-imagine-video",
+		"grok-imagine-video-1.5",
+	}
+	catalog := make([]model.Pricing, 0, len(models))
+	for _, modelName := range models {
+		catalog = append(catalog, model.Pricing{ModelName: modelName})
+	}
+	openRouterPrices := map[string]CanonicalModelPrice{
+		"x-ai/grok-build-0.1":         {Input: ptrFloat(2), Output: ptrFloat(4)},
+		"x-ai/grok-imagine-video-1.5": {Input: ptrFloat(5), Output: ptrFloat(30)},
+	}
+
+	preview := buildModelPriceSyncPreview(models, catalog, openRouterPrices, openRouterPrices)
+	if preview.Syncable != 0 || preview.SkippedCount != len(models) {
+		t.Fatalf("preview counts = syncable %d skipped %d, want 0/%d", preview.Syncable, preview.SkippedCount, len(models))
+	}
+	for _, item := range preview.Items {
+		wantReason := "media_unit_pricing"
+		if item.ModelName == "grok-build" {
+			wantReason = "manual_price_protected"
+		}
+		if item.Status != "skipped" || item.Reason != wantReason || item.WouldApply {
+			t.Fatalf("protected item = %#v, want reason %q", item, wantReason)
+		}
+	}
+}
+
+func TestModelPriceSync_OptionUpdatesCannotBypassProtectedModels(t *testing.T) {
+	preview := ModelPriceSyncResult{Items: []ModelPriceSyncItem{
+		{
+			ModelName:   "grok-build",
+			Final:       CanonicalModelPrice{Input: ptrFloat(2), Output: ptrFloat(4)},
+			BillingExpr: `tier("base", p * 2 + c * 4)`,
+			WouldApply:  true,
+		},
+		{
+			ModelName:   "grok-imagine-video-1.5",
+			Final:       CanonicalModelPrice{Input: ptrFloat(5), Output: ptrFloat(30)},
+			BillingExpr: `tier("base", p * 5 + c * 30)`,
+			WouldApply:  true,
+		},
+	}}
+
+	updates, err := BuildModelPriceSyncOptionUpdates(preview)
+	if err != nil {
+		t.Fatalf("BuildModelPriceSyncOptionUpdates returned error: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("protected models produced updates: %#v", updates)
+	}
+}

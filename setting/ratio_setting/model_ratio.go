@@ -266,14 +266,17 @@ var defaultModelRatio = map[string]float64{
 	"llama-3-sonar-large-32k-chat":   1 / 1000 * USD,
 	"llama-3-sonar-large-32k-online": 1 / 1000 * USD,
 	// grok
-	"grok-3-beta":           1.5,
-	"grok-3-mini-beta":      0.15,
-	"grok-2":                1,
-	"grok-2-vision":         1,
-	"grok-beta":             2.5,
-	"grok-vision-beta":      2.5,
-	"grok-3-fast-beta":      2.5,
-	"grok-3-mini-fast-beta": 0.3,
+	"grok-composer-2.5-fast": 1,
+	"grok-composer":          1,
+	"composer-2.5":           1,
+	"grok-3-beta":            1.5,
+	"grok-3-mini-beta":       0.15,
+	"grok-2":                 1,
+	"grok-2-vision":          1,
+	"grok-beta":              2.5,
+	"grok-vision-beta":       2.5,
+	"grok-3-fast-beta":       2.5,
+	"grok-3-mini-fast-beta":  0.3,
 	// submodel
 	"NousResearch/Hermes-4-405B-FP8":          0.8,
 	"Qwen/Qwen3-235B-A22B-Thinking-2507":      0.6,
@@ -319,6 +322,12 @@ var defaultModelPrice = map[string]float64{
 	"veo-3.0-fast-generate-001":      0.15,
 	"veo-3.1-generate-preview":       0.4,
 	"veo-3.1-fast-generate-preview":  0.15,
+	"grok-imagine":                   common.GrokImageQualityBasePrice,
+	"grok-imagine-edit":              common.GrokImageStandardBasePrice,
+	"grok-imagine-image":             common.GrokImageStandardBasePrice,
+	"grok-imagine-image-quality":     common.GrokImageQualityBasePrice,
+	"grok-imagine-video":             common.GrokVideoStandardBasePrice,
+	"grok-imagine-video-1.5":         common.GrokVideo15BasePrice,
 }
 
 var defaultAudioRatio = map[string]float64{
@@ -344,11 +353,14 @@ var modelRatioMap = types.NewRWMap[string, float64]()
 var completionRatioMap = types.NewRWMap[string, float64]()
 
 var defaultCompletionRatio = map[string]float64{
-	"gpt-4-gizmo-*":  2,
-	"gpt-4o-gizmo-*": 3,
-	"gpt-4-all":      2,
-	"gpt-image-1":    8,
-	"gpt-image-2":    6, // $30 / 1M image output tokens
+	"gpt-4-gizmo-*":          2,
+	"gpt-4o-gizmo-*":         3,
+	"gpt-4-all":              2,
+	"gpt-image-1":            8,
+	"gpt-image-2":            6, // $30 / 1M image output tokens
+	"grok-composer-2.5-fast": 2,
+	"grok-composer":          2,
+	"composer-2.5":           2,
 }
 
 // InitRatioSettings initializes all model related settings maps

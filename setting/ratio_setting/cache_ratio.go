@@ -5,6 +5,9 @@ import (
 )
 
 var defaultCacheRatio = map[string]float64{
+	"grok-composer-2.5-fast":              0.2,
+	"grok-composer":                       0.2,
+	"composer-2.5":                        0.2,
 	"gemini-3-flash-preview":              0.1,
 	"gemini-3-pro-preview":                0.1,
 	"gemini-3.1-pro-preview":              0.1,

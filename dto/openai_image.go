@@ -16,6 +16,8 @@ type ImageRequest struct {
 	Prompt            string          `json:"prompt" binding:"required"`
 	N                 *uint           `json:"n,omitempty"`
 	Size              string          `json:"size,omitempty"`
+	Resolution        string          `json:"resolution,omitempty"`
+	AspectRatio       string          `json:"aspect_ratio,omitempty"`
 	Quality           string          `json:"quality,omitempty"`
 	ResponseFormat    string          `json:"response_format,omitempty"`
 	Style             json.RawMessage `json:"style,omitempty"`
@@ -28,6 +30,7 @@ type ImageRequest struct {
 	PartialImages     json.RawMessage `json:"partial_images,omitempty"`
 	Stream            *bool           `json:"stream,omitempty"`
 	Images            json.RawMessage `json:"images,omitempty"`
+	ReferenceImages   json.RawMessage `json:"reference_images,omitempty"`
 	Mask              json.RawMessage `json:"mask,omitempty"`
 	InputFidelity     json.RawMessage `json:"input_fidelity,omitempty"`
 	Watermark         *bool           `json:"watermark,omitempty"`
@@ -37,6 +40,8 @@ type ImageRequest struct {
 	Image            json.RawMessage `json:"image,omitempty"`
 	// 用匿名参数接收额外参数
 	Extra map[string]json.RawMessage `json:"-"`
+
+	InputImageCount int `json:"-"`
 }
 
 func (i *ImageRequest) UnmarshalJSON(data []byte) error {
@@ -150,6 +155,19 @@ func (i *ImageRequest) GetTokenCountMeta() *types.TokenCountMeta {
 			}
 		}
 	}
+	if common.IsGrokImageGenerationModel(i.Model) {
+		size := i.Size
+		if size == "" {
+			size = i.Resolution
+		}
+		outputCount := 1
+		if i.N != nil && *i.N > 0 {
+			outputCount = int(*i.N)
+		}
+		if price, err := common.CalculateGrokImagePrice(i.Model, size, outputCount, i.GetInputImageCount()); err == nil {
+			sizeRatio = price.Multiplier
+		}
+	}
 
 	// n is NOT included here; it is handled via OtherRatio("n") in
 	// image_handler.go (default) or channel adaptors (actual count).
@@ -160,6 +178,15 @@ func (i *ImageRequest) GetTokenCountMeta() *types.TokenCountMeta {
 		MaxTokens:       1584,
 		ImagePriceRatio: sizeRatio * qualityRatio,
 	}
+}
+
+func (i *ImageRequest) GetInputImageCount() int {
+	if i == nil {
+		return 0
+	}
+	count := i.InputImageCount
+	count += common.CountJSONMediaReferences(i.Image, i.Images, i.ReferenceImages, i.Mask)
+	return count
 }
 
 func (i *ImageRequest) IsStream(c *gin.Context) bool {

@@ -51,6 +51,24 @@ var modelPriceAliasTargets = map[string]string{
 	"grok-4-20-non-reasoning": "grok-4.20-0309-non-reasoning",
 }
 
+var curatedModelPrices = map[string]CanonicalModelPrice{
+	"grok-composer-2.5-fast": {
+		Input:     ptrFloat(2),
+		Output:    ptrFloat(4),
+		CacheRead: ptrFloat(0.4),
+	},
+}
+
+var modelPriceSyncProtectedModels = map[string]string{
+	"grok-build":                 "manual_price_protected",
+	"grok-imagine":               "media_unit_pricing",
+	"grok-imagine-edit":          "media_unit_pricing",
+	"grok-imagine-image":         "media_unit_pricing",
+	"grok-imagine-image-quality": "media_unit_pricing",
+	"grok-imagine-video":         "media_unit_pricing",
+	"grok-imagine-video-1-5":     "media_unit_pricing",
+}
+
 // CanonicalModelPrice stores real USD / 1M token prices. OpenRouter's token
 // prices are normalized to this unit before any comparison or expression build.
 type CanonicalModelPrice struct {
@@ -658,9 +676,21 @@ func buildModelPriceSyncPreview(requested []string, catalog []model.Pricing, ope
 			items = append(items, ModelPriceSyncItem{ModelName: modelName, Status: "skipped", Reason: "not_in_model_square"})
 			continue
 		}
+		if reason, protected := modelPriceSyncProtectionReason(modelName); protected {
+			items = append(items, ModelPriceSyncItem{
+				ModelName: modelName,
+				Current:   CurrentCanonicalPriceFromPricing(pricing),
+				Status:    "skipped",
+				Reason:    reason,
+			})
+			continue
+		}
 
 		match, hasMatch := matches[modelName]
-		official := FindCanonicalPriceForModel(modelName, officialPrices)
+		official := MergeHigherPrices(
+			FindCanonicalPriceForModel(modelName, officialPrices),
+			FindCanonicalPriceForModel(modelName, curatedModelPrices),
+		)
 		if !hasMatch || match.Status != "matched" {
 			if official.hasAnyBillablePrice() {
 				appendModelPriceSyncReadyItem(&items, modelName, "", pricing, official, CanonicalModelPrice{}, official)
@@ -802,6 +832,11 @@ func applyModelPriceSyncOverrides(preview *ModelPriceSyncResult, overrides map[s
 	preview.Syncable, preview.SkippedCount = 0, 0
 	for i := range preview.Items {
 		item := &preview.Items[i]
+		if _, protected := modelPriceSyncProtectionReason(item.ModelName); protected {
+			item.WouldApply = false
+			preview.SkippedCount++
+			continue
+		}
 		if price, ok := overrides[item.ModelName]; ok {
 			expr, err := BuildBillingExprFromPrice(price)
 			if err != nil {
@@ -854,6 +889,9 @@ func BuildModelPriceSyncOptionUpdates(preview ModelPriceSyncResult) (map[string]
 			continue
 		}
 		modelName := item.ModelName
+		if _, protected := modelPriceSyncProtectionReason(modelName); protected {
+			continue
+		}
 		delete(modelPriceMap, modelName)
 		delete(modelRatioMap, modelName)
 		delete(completionRatioMap, modelName)
@@ -922,6 +960,11 @@ func BuildModelPriceSyncOptionUpdates(preview ModelPriceSyncResult) (map[string]
 		return nil, err
 	}
 	return updates, nil
+}
+
+func modelPriceSyncProtectionReason(modelName string) (string, bool) {
+	reason, ok := modelPriceSyncProtectedModels[canonicalModelID(modelName)]
+	return reason, ok
 }
 
 func setRatioFromPrice(target map[string]float64, modelName string, price *float64, input float64) {

@@ -69,3 +69,29 @@ func TestGetAndValidOpenAIImageRequestMultipartStream(t *testing.T) {
 		require.Contains(t, err.Error(), "invalid stream value")
 	})
 }
+
+func TestGetAndValidOpenAIImageRequestCountsGrokEditInputs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	require.NoError(t, writer.WriteField("model", "grok-imagine-edit"))
+	require.NoError(t, writer.WriteField("prompt", "edit"))
+	require.NoError(t, writer.WriteField("n", "2"))
+	require.NoError(t, writer.WriteField("size", "2K"))
+	for _, name := range []string{"first.png", "second.png"} {
+		part, err := writer.CreateFormFile("image[]", name)
+		require.NoError(t, err)
+		_, err = part.Write([]byte("fake image"))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", &body)
+	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+
+	req, err := GetAndValidOpenAIImageRequest(c, relayconstant.RelayModeImagesEdits)
+	require.NoError(t, err)
+	require.Equal(t, 2, req.GetInputImageCount())
+	require.InDelta(t, 2.2, req.GetTokenCountMeta().ImagePriceRatio, 1e-9)
+}

@@ -36,6 +36,24 @@ func TestImageModelRejectedOnResponses(t *testing.T) {
 	require.Contains(t, err.Error(), "/v1/images/edits")
 }
 
+func TestGrokVideoModelRejectedOnTextEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	chat, _ := gin.CreateTestContext(httptest.NewRecorder())
+	chat.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"grok-imagine-video-1.5","messages":[{"role":"user","content":"draw"}]}`))
+	chat.Request.Header.Set("Content-Type", "application/json")
+	_, err := GetAndValidateTextRequest(chat, relayconstant.RelayModeChatCompletions)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "/v1/videos/generations")
+
+	responses, _ := gin.CreateTestContext(httptest.NewRecorder())
+	responses.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"grok-imagine-video","input":"draw"}`))
+	responses.Request.Header.Set("Content-Type", "application/json")
+	_, err = GetAndValidateResponsesRequest(responses)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "/v1/videos/generations")
+}
+
 func TestImageModelAcceptedOnImageGeneration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
