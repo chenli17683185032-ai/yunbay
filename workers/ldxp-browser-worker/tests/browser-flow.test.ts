@@ -1,5 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { readFile } from 'node:fs/promises'
 import {
   extractOrderNo,
@@ -19,6 +21,8 @@ import {
   waitForCashierOrQr,
   withAbort,
 } from '../src/browser-flow.js'
+
+const execFileAsync = promisify(execFile)
 
 async function readFixture(name: string): Promise<string> {
   const candidates = [
@@ -232,46 +236,38 @@ test('cashier wait does not resolve just because the payApi transition URL is re
 })
 
 
-test('withAbort observes a source promise that rejects after an already-aborted signal', async () => {
-  const controller = new AbortController()
-  controller.abort()
-  let rejectSource: ((error: Error) => void) | undefined
-  const source = new Promise<never>((_resolve, reject) => {
-    rejectSource = reject
-  })
-  const unhandled: unknown[] = []
-  const onUnhandled = (error: unknown) => unhandled.push(error)
-  process.on('unhandledRejection', onUnhandled)
+test('withAbort consumes late Playwright rejections under strict unhandled rejection handling', async () => {
+  const browserFlowModuleUrl = new URL('../src/browser-flow.js', import.meta.url).href
+  const childScript = `
+    import assert from 'node:assert/strict'
+    import { withAbort } from ${JSON.stringify(browserFlowModuleUrl)}
 
-  try {
-    await assert.rejects(withAbort(source, controller.signal), { name: 'AbortError' })
-    rejectSource?.(new Error('Target page, context or browser has been closed'))
-    await new Promise((resolve) => setImmediate(resolve))
-    assert.deepEqual(unhandled, [])
-  } finally {
-    process.removeListener('unhandledRejection', onUnhandled)
-  }
-})
+    const controller = new AbortController()
+    let rejectSource
+    const source = new Promise((_resolve, reject) => {
+      rejectSource = reject
+    })
 
-test('withAbort observes a Playwright rejection that arrives after abort', async () => {
-  const controller = new AbortController()
-  let rejectSource: ((error: Error) => void) | undefined
-  const source = new Promise<never>((_resolve, reject) => {
-    rejectSource = reject
-  })
-  const unhandled: unknown[] = []
-  const onUnhandled = (error: unknown) => unhandled.push(error)
-  process.on('unhandledRejection', onUnhandled)
-
-  try {
+    if (process.argv[1] === 'already-aborted') {
+      controller.abort()
+    }
     const guarded = withAbort(source, controller.signal)
-    controller.abort()
+    if (process.argv[1] === 'abort-first') {
+      controller.abort()
+    }
+
     await assert.rejects(guarded, { name: 'AbortError' })
-    rejectSource?.(new Error('Target page, context or browser has been closed'))
-    await new Promise((resolve) => setImmediate(resolve))
-    assert.deepEqual(unhandled, [])
-  } finally {
-    process.removeListener('unhandledRejection', onUnhandled)
+    setImmediate(() => rejectSource(new Error('Target page, context or browser has been closed')))
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  `
+
+  for (const scenario of ['already-aborted', 'abort-first']) {
+    const { stderr } = await execFileAsync(
+      process.execPath,
+      ['--unhandled-rejections=strict', '--input-type=module', '--eval', childScript, scenario],
+      { timeout: 5000 },
+    )
+    assert.equal(stderr, '')
   }
 })
 
