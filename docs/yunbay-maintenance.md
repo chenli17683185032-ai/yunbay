@@ -2130,3 +2130,12 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 及其它依赖容器的 ID、启动时间和 restart count 前后完全一致。部署锁已释放，候选/绿实例为 0，Caddyfile SHA-256 前后相同。
 - 代码回滚必须从成功备份恢复 `source-before.tar.gz` 中的既有文件并删除 `new-files.txt` 中本轮新增文件，把上述 rollback 标签重标为 `yunbay-new-api:prod`，并在同一部署锁和有界 watchdog 下使用基础 Compose 加成功备份中的 `health-start-interval.yml` 只重建标准 `new-api`。不得修改或重启 Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 或 LDXP。
 - 回滚旧应用时保留两个累计列、历史水位和初始化凭证；旧版本可忽略这些增量结构。不要恢复 `users-topups.before.dump`，除非另行停写、确认会丢失备份后的充值/用户写入并获得明确数据回滚授权。
+
+## 2026-08-07 LDXP 二维码迟到收银台与刷新稳定性修复上线
+
+- 发布提交：`1d7d94389671d6ff5af9c9e9daded3c0d9ac7167`。此前修复取消后 Playwright 晚到 rejection 导致 Worker 退出；本次进一步修复旧状态机只短时监听新页面、遗漏迟到支付宝收银台后在错误页面等待 90 秒的问题。
+- 新逻辑保持“立即购买”只点击一次，在二维码超时时间内持续扫描同一 Browser Context 的全部页面；支持迟到新页、同页跳转、独立过渡页“立即跳转”和已关闭页面容错，只有出现真实订单号与付款/金额标记才认定收银台就绪。
+- 新 Worker 镜像：`sha256:c62961c92180ecad53f02f997fe2299d01e19dcd9d536b3d3dafd5291eddb51e`。仅重建 `yunbay-ldxp-browser-worker`，切换耗时 11 秒；New API、Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy 和 LDXP proxy 均未重启。
+- 正式 10 元商品受控探测成功：约 25.2 秒到达 `excashier.alipay.com` 并提取二维码，路径为 `manual_jump:role_button`，收银台金额 `10.30`；探测未付款，也未记录二维码、订单号或联系方式。
+- 取消专项探测在 strict 未处理拒绝模式下返回 `AbortError`；主 Worker 保持 `running / restart=0 / OOM=false`，没有 `Target page, context or browser has been closed`、未处理拒绝或 WAF 新错误。连续 10 轮稳定性检查通过，New API 始终 healthy。
+- 部署前源码备份：`/opt/new-api/backups/ldxp-qr-cashier-fix-20260807T014709-1d7d9438`。旧 Worker 回滚标签：`yunbay-ldxp-browser-worker:rollback-qr-cashier-20260807T014709`，旧镜像 `sha256:3fb25c17ad59d2938ce35139b889cf5c1cb1837bc8751eb891378929e622073c`。回滚时只需重标 `yunbay-ldxp-browser-worker:prod` 并使用基础 Compose `--no-deps --force-recreate ldxp-browser-worker`，禁止重启或回滚其他服务与数据卷。
