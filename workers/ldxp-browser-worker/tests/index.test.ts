@@ -286,6 +286,7 @@ test('runClaimLoopOnce keeps claiming after qr-only sessions release their slots
       return claimedSession(next)
     },
     claimPaidWatchSession: async () => null,
+    isSessionActive: async () => true,
     runBrowserFlow: async (input, callbacks) => {
       const qr: BrowserQrResult = {
         worker_order_no: `order-${input.sessionId}`,
