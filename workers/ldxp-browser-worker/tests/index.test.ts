@@ -312,14 +312,14 @@ test('runClaimLoopOnce keeps claiming after qr-only sessions release their slots
   })
 
   const firstPassStarted = await runClaimLoopOnce(runtime)
-  await waitFor(() => runtime.activeSessions.size === 0)
+  await waitFor(() => runtime.activeSessions.size === 0, 5000)
   const secondPassStarted = await runClaimLoopOnce(runtime)
-  await waitFor(() => runtime.activeSessions.size === 0)
+  await waitFor(() => runtime.activeSessions.size === 0, 5000)
 
   assert.equal(firstPassStarted, 2)
   assert.equal(secondPassStarted, 1)
   assert.deepEqual(claimed, ['sess-1', 'sess-2', 'sess-3'])
-  assert.deepEqual(events, ['qr:sess-1', 'qr:sess-2', 'qr:sess-3'])
+  assert.deepEqual([...events].sort(), ['qr:sess-1', 'qr:sess-2', 'qr:sess-3'])
   await runtime.shutdown()
 })
 

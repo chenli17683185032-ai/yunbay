@@ -486,18 +486,45 @@ async function tryWaitForCashierPage(page: Page | undefined, timeout: number, si
   return undefined
 }
 
-function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+export function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) {
     return promise
   }
-  if (signal.aborted) {
-    return Promise.reject(abortError())
-  }
 
+  // Always observe the source promise, even when already aborted. Playwright
+  // can reject it later after the page closes; an unobserved rejection exits
+  // the Node.js 24 worker process.
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(abortError())
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    const onAbort = () => {
+      cleanup()
+      reject(abortError())
+    }
+
+    promise.then(
+      (value) => {
+        cleanup()
+        if (signal.aborted) {
+          reject(abortError())
+          return
+        }
+        resolve(value)
+      },
+      (error) => {
+        cleanup()
+        if (signal.aborted) {
+          reject(abortError())
+          return
+        }
+        reject(error)
+      },
+    )
+
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
     signal.addEventListener('abort', onAbort, { once: true })
-    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
   })
 }
 

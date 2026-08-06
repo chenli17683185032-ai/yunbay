@@ -538,24 +538,24 @@ function createLogger(config: WorkerConfig): LoggerLike {
 
 function trackPaidWatch(runtime: WorkerRuntime, promise: Promise<void>): void {
   runtime.activePaidWatches.add(promise)
-  promise
-    .catch((error) => {
+  void promise.then(
+    () => runtime.activePaidWatches.delete(promise),
+    (error) => {
       runtime.logger.error({ err: sanitizeError(error) }, 'unhandled paid-watch error')
-    })
-    .finally(() => {
       runtime.activePaidWatches.delete(promise)
-    })
+    },
+  )
 }
 
 function trackSession(runtime: WorkerRuntime, promise: Promise<void>): void {
   runtime.activeSessions.add(promise)
-  promise
-    .catch((error) => {
+  void promise.then(
+    () => runtime.activeSessions.delete(promise),
+    (error) => {
       runtime.logger.error({ err: sanitizeError(error) }, 'unhandled session error')
-    })
-    .finally(() => {
       runtime.activeSessions.delete(promise)
-    })
+    },
+  )
 }
 
 function sanitizeError(error: unknown): string {

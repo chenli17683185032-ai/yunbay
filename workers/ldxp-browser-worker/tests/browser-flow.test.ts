@@ -17,6 +17,7 @@ import {
   fillContactInput,
   clickPurchaseAndResolveCashierPage,
   waitForCashierOrQr,
+  withAbort,
 } from '../src/browser-flow.js'
 
 async function readFixture(name: string): Promise<string> {
@@ -230,6 +231,57 @@ test('cashier wait does not resolve just because the payApi transition URL is re
   assert.equal(waitForFunctionCalled, true)
 })
 
+
+test('withAbort observes a source promise that rejects after an already-aborted signal', async () => {
+  const controller = new AbortController()
+  controller.abort()
+  let rejectSource: ((error: Error) => void) | undefined
+  const source = new Promise<never>((_resolve, reject) => {
+    rejectSource = reject
+  })
+  const unhandled: unknown[] = []
+  const onUnhandled = (error: unknown) => unhandled.push(error)
+  process.on('unhandledRejection', onUnhandled)
+
+  try {
+    await assert.rejects(withAbort(source, controller.signal), { name: 'AbortError' })
+    rejectSource?.(new Error('Target page, context or browser has been closed'))
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(unhandled, [])
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandled)
+  }
+})
+
+test('withAbort observes a Playwright rejection that arrives after abort', async () => {
+  const controller = new AbortController()
+  let rejectSource: ((error: Error) => void) | undefined
+  const source = new Promise<never>((_resolve, reject) => {
+    rejectSource = reject
+  })
+  const unhandled: unknown[] = []
+  const onUnhandled = (error: unknown) => unhandled.push(error)
+  process.on('unhandledRejection', onUnhandled)
+
+  try {
+    const guarded = withAbort(source, controller.signal)
+    controller.abort()
+    await assert.rejects(guarded, { name: 'AbortError' })
+    rejectSource?.(new Error('Target page, context or browser has been closed'))
+    await new Promise((resolve) => setImmediate(resolve))
+    assert.deepEqual(unhandled, [])
+  } finally {
+    process.removeListener('unhandledRejection', onUnhandled)
+  }
+})
+
+test('withAbort preserves a real source failure before cancellation', async () => {
+  const controller = new AbortController()
+  await assert.rejects(
+    withAbort(Promise.reject(new Error('browser disconnected')), controller.signal),
+    /browser disconnected/,
+  )
+})
 
 test('raceDefined returns as soon as a promise resolves with a defined value', async () => {
   const slowTimer = setTimeout(() => undefined, 30000)
