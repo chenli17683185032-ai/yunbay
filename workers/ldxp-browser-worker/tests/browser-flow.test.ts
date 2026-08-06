@@ -308,36 +308,18 @@ test('detects ldxp manual jump prompt before cashier readiness', () => {
   )
 })
 
-test('clickPurchaseAndResolveCashierPage clicks manual jump as soon as it appears', async () => {
-  let purchaseClickedAt = 0
-  let jumpClickedAt = 0
+test('clickPurchaseAndResolveCashierPage clicks manual jump without repeating purchase', async () => {
+  let purchaseClicks = 0
+  let jumpClicks = 0
   let jumped = false
-  const startedAt = Date.now()
-  const slowNoCashierDelayMs = 120
 
-  const purchaseButton = {
-    first() {
-      return this
-    },
-    async waitFor() {
-      return undefined
-    },
-    async click() {
-      purchaseClickedAt = Date.now()
-    },
-  }
-  const jumpButton = {
-    first() {
-      return this
-    },
-    async waitFor() {
-      return undefined
-    },
-    async click() {
-      jumpClickedAt = Date.now()
-      jumped = true
-    },
-  }
+  const purchaseButton = visibleButton(() => {
+    purchaseClicks += 1
+  })
+  const jumpButton = visibleButton(() => {
+    jumpClicks += 1
+    jumped = true
+  })
   const fakePage = {
     getByText(text: string) {
       if (text.includes('立即购买')) {
@@ -349,138 +331,51 @@ test('clickPurchaseAndResolveCashierPage clicks manual jump as soon as it appear
       throw new Error(`unexpected text locator ${text}`)
     },
     context() {
-      return {
-        waitForEvent() {
-          return new Promise((_resolve, reject) => {
-            setTimeout(() => reject(new Error('no popup yet')), slowNoCashierDelayMs)
-          })
-        },
-      }
-    },
-    async waitForURL() {
-      if (jumped) {
-        return undefined
-      }
-      return new Promise((_resolve, reject) => {
-        setTimeout(() => reject(new Error('cashier url not ready yet')), slowNoCashierDelayMs)
-      })
-    },
-    async waitForFunction(fn: () => unknown) {
-      const source = fn.toString()
-      if (source.includes('立即跳转')) {
-        return undefined
-      }
-      if (jumped) {
-        return undefined
-      }
-      return new Promise((_resolve, reject) => {
-        setTimeout(() => reject(new Error('cashier text not ready yet')), slowNoCashierDelayMs)
-      })
+      return { pages: () => [fakePage] }
     },
     locator(selector: string) {
       assert.equal(selector, 'body')
       return {
         async innerText() {
-          if (jumped) {
-            return '订单号：LD260629FAST01 金额 0.10 元 使用支付宝扫码付款'
-          }
-          return '提示 如页面未自动跳转支付页，请点击下方按钮跳转！ 立即跳转'
+          return jumped
+            ? '订单号：LD260629FAST01 金额 0.10 元 使用支付宝扫码付款'
+            : '提示 如页面未自动跳转支付页，请点击下方按钮跳转！ 立即跳转'
         },
       }
     },
   }
 
-  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 90000)
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 5000)
 
   assert.equal(result, fakePage)
-  assert.ok(purchaseClickedAt >= startedAt)
-  assert.ok(jumpClickedAt > 0)
-  assert.ok(
-    jumpClickedAt - purchaseClickedAt < 80,
-    `manual jump was clicked after ${jumpClickedAt - purchaseClickedAt}ms instead of immediately`,
-  )
+  assert.equal(purchaseClicks, 1)
+  assert.equal(jumpClicks, 1)
 })
 
 test('clickPurchaseAndResolveCashierPage prefers the real manual jump button over dialog text', async () => {
   let clickedDialogText = false
   let clickedButton = false
-  const noCashierDelayMs = 10
 
-  const purchaseButton = {
-    first() {
-      return this
-    },
-    async waitFor() {
-      return undefined
-    },
-    async click() {
-      return undefined
-    },
-  }
-  const dialogText = {
-    first() {
-      return this
-    },
-    async waitFor() {
-      return undefined
-    },
-    async click() {
-      clickedDialogText = true
-    },
-  }
-  const realJumpButton = {
-    first() {
-      return this
-    },
-    async waitFor() {
-      return undefined
-    },
-    async click() {
-      clickedButton = true
-    },
-  }
   const fakePage = {
     getByRole(role: string) {
       assert.equal(role, 'button')
-      return realJumpButton
+      return visibleButton(() => {
+        clickedButton = true
+      })
     },
     getByText(text: string) {
       if (text.includes('立即购买')) {
-        return purchaseButton
+        return visibleButton(() => undefined)
       }
       if (text.includes('立即跳转')) {
-        return dialogText
+        return visibleButton(() => {
+          clickedDialogText = true
+        })
       }
       throw new Error(`unexpected text locator ${text}`)
     },
     context() {
-      return {
-        waitForEvent() {
-          return new Promise((_resolve, reject) => {
-            setTimeout(() => reject(new Error('no popup')), noCashierDelayMs)
-          })
-        },
-      }
-    },
-    async waitForURL() {
-      if (clickedButton) {
-        return undefined
-      }
-      return new Promise((_resolve, reject) => {
-        setTimeout(() => reject(new Error('cashier url not ready')), noCashierDelayMs)
-      })
-    },
-    async waitForFunction(fn: () => unknown) {
-      const source = fn.toString()
-      if (source.includes('立即跳转')) {
-        return undefined
-      }
-      if (clickedButton) {
-        return undefined
-      }
-      return new Promise((_resolve, reject) => {
-        setTimeout(() => reject(new Error('cashier text not ready')), noCashierDelayMs)
-      })
+      return { pages: () => [fakePage] }
     },
     locator(selector: string) {
       assert.equal(selector, 'body')
@@ -494,103 +389,150 @@ test('clickPurchaseAndResolveCashierPage prefers the real manual jump button ove
     },
   }
 
-  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 20)
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 5000)
 
   assert.equal(result, fakePage)
   assert.equal(clickedButton, true)
   assert.equal(clickedDialogText, false)
 })
 
-test('clickPurchaseAndResolveCashierPage keeps watching manual jump after the initial cashier probe', async () => {
-  let manualJumpProbeCount = 0
+test('clickPurchaseAndResolveCashierPage clicks manual jump that appears on a transition page', async () => {
+  let jumpClicks = 0
   let jumped = false
-  const noCashierDelayMs = 10
-
-  const purchaseButton = {
-    first() {
-      return this
-    },
-    async waitFor() {
-      return undefined
-    },
-    async click() {
-      return undefined
-    },
-  }
-  const jumpButton = {
-    first() {
-      return this
-    },
-    async waitFor() {
-      return undefined
-    },
-    async click() {
-      jumped = true
-    },
-  }
-  const fakePage = {
-    getByText(text: string) {
-      if (text.includes('立即购买')) {
-        return purchaseButton
-      }
-      if (text.includes('立即跳转')) {
-        return jumpButton
-      }
-      throw new Error(`unexpected text locator ${text}`)
-    },
-    context() {
-      return {
-        waitForEvent() {
-          return new Promise((_resolve, reject) => {
-            setTimeout(() => reject(new Error('no popup')), noCashierDelayMs)
-          })
-        },
-      }
-    },
-    async waitForURL() {
-      if (jumped) {
-        return undefined
-      }
-      return new Promise((_resolve, reject) => {
-        setTimeout(() => reject(new Error('cashier url not ready')), noCashierDelayMs)
+  const transitionPage = {
+    getByRole() {
+      return visibleButton(() => {
+        jumpClicks += 1
+        jumped = true
       })
     },
-    async waitForFunction(fn: () => unknown) {
-      const source = fn.toString()
-      if (source.includes('立即跳转')) {
-        manualJumpProbeCount += 1
-        if (manualJumpProbeCount >= 2) {
-          return undefined
-        }
-        return new Promise((_resolve, reject) => {
-          setTimeout(() => reject(new Error('manual jump appears after first probe')), noCashierDelayMs)
-        })
-      }
-      if (jumped) {
-        return undefined
-      }
-      return new Promise((_resolve, reject) => {
-        setTimeout(() => reject(new Error('cashier text not ready')), noCashierDelayMs)
-      })
+    getByText() {
+      return visibleButton(() => undefined)
     },
     locator(selector: string) {
       assert.equal(selector, 'body')
       return {
         async innerText() {
           return jumped
-            ? '订单号：LD260629FAST02 金额 0.10 元 使用支付宝扫码付款'
+            ? '订单号：LD260629JUMP02 金额 10.30 元 使用支付宝扫码付款'
             : '提示 如页面未自动跳转支付页，请点击下方按钮跳转！ 立即跳转'
         },
       }
     },
   }
+  const fakePage = {
+    getByText(text: string) {
+      if (text.includes('立即购买')) {
+        return visibleButton(() => undefined)
+      }
+      return visibleButton(() => undefined)
+    },
+    context() {
+      return { pages: () => [fakePage, transitionPage] }
+    },
+    locator(selector: string) {
+      assert.equal(selector, 'body')
+      return { async innerText() { return '链动小铺商品页' } }
+    },
+  }
 
-  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 20)
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 5000)
 
-  assert.equal(result, fakePage)
-  assert.equal(jumped, true)
-  assert.ok(manualJumpProbeCount >= 2)
+  assert.equal(result, transitionPage)
+  assert.equal(jumpClicks, 1)
 })
+
+test('clickPurchaseAndResolveCashierPage ignores a closing page and finds a later cashier page', async () => {
+  const closingPage = {
+    locator() {
+      return { async innerText() { throw new Error('Target page has been closed') } }
+    },
+  }
+  const cashierPage = {
+    locator() {
+      return { async innerText() { return '订单号：LD260629OPEN03 金额 10.30 元 使用支付宝扫码付款' } }
+    },
+  }
+  const fakePage = {
+    getByText() {
+      return visibleButton(() => undefined)
+    },
+    context() {
+      return { pages: () => [fakePage, cashierPage, closingPage] }
+    },
+    locator() {
+      return { async innerText() { return '链动小铺支付过渡页' } }
+    },
+  }
+
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 5000)
+
+  assert.equal(result, cashierPage)
+})
+
+test('clickPurchaseAndResolveCashierPage catches a cashier page that appears after the old popup window', async () => {
+  let purchaseClicks = 0
+  let pagesProbeCount = 0
+  const cashierPage = {
+    locator(selector: string) {
+      assert.equal(selector, 'body')
+      return {
+        async innerText() {
+          return '订单号：LD260629LATE01 金额 10.30 元 使用支付宝扫码付款'
+        },
+      }
+    },
+  }
+  const fakePage = {
+    getByText(text: string) {
+      if (text.includes('立即购买')) {
+        return visibleButton(() => {
+          purchaseClicks += 1
+        })
+      }
+      if (text.includes('立即跳转')) {
+        return visibleButton(() => undefined)
+      }
+      throw new Error(`unexpected text locator ${text}`)
+    },
+    context() {
+      return {
+        pages() {
+          pagesProbeCount += 1
+          return pagesProbeCount >= 3 ? [fakePage, cashierPage] : [fakePage]
+        },
+      }
+    },
+    locator(selector: string) {
+      assert.equal(selector, 'body')
+      return {
+        async innerText() {
+          return '链动小铺支付过渡页，正在跳转'
+        },
+      }
+    },
+  }
+
+  const result = await clickPurchaseAndResolveCashierPage(fakePage as never, 5000, 5000)
+
+  assert.equal(result, cashierPage)
+  assert.equal(purchaseClicks, 1)
+  assert.ok(pagesProbeCount >= 3)
+})
+
+function visibleButton(onClick: () => void) {
+  return {
+    first() {
+      return this
+    },
+    async waitFor() {
+      return undefined
+    },
+    async click() {
+      onClick()
+    },
+  }
+}
 
 test('fillContactInput waits for delayed LDXP contact input before failing loading page', async () => {
   let inputProbeCount = 0

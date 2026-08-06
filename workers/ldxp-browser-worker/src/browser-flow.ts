@@ -265,7 +265,10 @@ export async function runBrowserFlow(
       clickPurchaseAndResolveCashierPage(page, config.productLoadTimeoutMs, config.qrTimeoutMs, signal),
     )
 
-    await timing.record('wait_cashier_ready', withAbort(waitForCashierOrQr(cashierPage, config.qrTimeoutMs), signal))
+    // The resolver returns only after a context page contains real cashier text.
+    // Keep this zero-cost stage for operational timing compatibility; the full
+    // cashier wait is now measured by click_purchase_to_cashier.
+    await timing.record('wait_cashier_ready', Promise.resolve())
     const cashierText = await timing.record('read_cashier_text', withAbort(cashierPage.locator('body').innerText({ timeout: config.qrTimeoutMs }), signal))
     const workerOrderNo = extractOrderNo(cashierText)
     const workerAmount = extractAmount(cashierText)
@@ -348,50 +351,74 @@ export async function clickPurchaseAndResolveCashierPage(
   cashierTimeoutMs: number,
   signal?: AbortSignal,
 ): Promise<Page> {
-  const firstPopupPromise = waitForNextPage(page, 5000, signal)
   await withAbort(clickFirstVisible(page.getByText('立即购买', { exact: false }), clickTimeoutMs), signal)
 
-  const ready = await raceDefined([
-    tryWaitForCashierPage(page, 5000, signal),
-    firstPopupPromise.then((popup) => tryWaitForCashierPage(popup, 5000, signal)),
-    clickManualJumpAndResolveCashierPage(page, clickTimeoutMs, 5000, signal),
-  ])
-  if (ready) {
-    return ready
+  const deadline = Date.now() + cashierTimeoutMs
+  let manualJumpMethod: string | undefined
+
+  while (Date.now() < deadline) {
+    const remaining = Math.max(1, deadline - Date.now())
+    const pages = contextPagesNewestFirst(page)
+    let manualJumpPage: Page | undefined
+
+    for (const candidate of pages) {
+      const text = await readBodyText(candidate, Math.min(remaining, 500), signal)
+      if (text && isCashierReadyText(text)) {
+        const resolution = manualJumpMethod
+          ? `manual_jump:${manualJumpMethod}`
+          : candidate === page
+            ? 'same_page'
+            : 'context_page'
+        return withDetail(candidate, resolution)
+      }
+      if (!manualJumpMethod && text && shouldClickManualJump(text)) {
+        manualJumpPage ??= candidate
+      }
+    }
+
+    if (!manualJumpMethod && manualJumpPage) {
+      const clickedJump = await withAbort(
+        clickManualJumpButton(manualJumpPage, Math.min(clickTimeoutMs, 1000)),
+        signal,
+      )
+      manualJumpMethod = clickedJump.clicked ? clickedJump.method : undefined
+    }
+
+    await withAbort(delay(Math.min(250, Math.max(1, deadline - Date.now()))), signal)
   }
 
-  const fallbackTimeoutMs = Math.min(cashierTimeoutMs, 10000)
-  return (await raceDefined([
-    clickManualJumpAndResolveCashierPage(page, clickTimeoutMs, fallbackTimeoutMs, signal),
-    tryWaitForCashierPage(page, fallbackTimeoutMs, signal),
-  ])) ?? page
+  throw new Error('Timed out waiting for LDXP cashier page after purchase')
 }
 
-async function clickManualJumpAndResolveCashierPage(
+function contextPagesNewestFirst(page: Page): Page[] {
+  try {
+    const pages = page.context().pages()
+    if (pages.length > 0) {
+      return [...pages].reverse()
+    }
+  } catch {
+    // Test doubles and a closing context may not expose a usable pages list.
+  }
+  return [page]
+}
+
+async function readBodyText(
   page: Page,
-  clickTimeoutMs: number,
-  cashierTimeoutMs: number,
+  timeout: number,
   signal?: AbortSignal,
-): Promise<Page | undefined> {
-  const jumpAvailable = await waitForManualJumpAvailable(page, Math.min(clickTimeoutMs, 5000), signal)
-  if (!jumpAvailable) {
+): Promise<string | undefined> {
+  try {
+    return await withAbort(page.locator('body').innerText({ timeout }), signal)
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) {
+      throw abortError()
+    }
     return undefined
   }
+}
 
-  const jumpPopupPromise = waitForNextPage(page, cashierTimeoutMs, signal)
-  const clickedJump = await withAbort(clickManualJumpButton(page, Math.min(clickTimeoutMs, 1000)), signal)
-  if (!clickedJump.clicked) {
-    return undefined
-  }
-
-  const cashierPage = await raceDefined([
-    jumpPopupPromise.then((popup) => tryWaitForCashierPage(popup, cashierTimeoutMs, signal)),
-    tryWaitForCashierPage(page, cashierTimeoutMs, signal),
-  ])
-  if (cashierPage) {
-    return withDetail(cashierPage, `manual_jump:${clickedJump.method}`)
-  }
-  return undefined
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function clickManualJumpButton(page: Page, timeout: number): Promise<{ clicked: boolean; method?: string }> {
@@ -422,25 +449,6 @@ function tryMakeLocator(makeLocator: () => Locator): Locator | undefined {
   }
 }
 
-async function waitForManualJumpAvailable(page: Page, timeout: number, signal?: AbortSignal): Promise<boolean> {
-  try {
-    await withAbort(
-      page.waitForFunction(
-        () => {
-          const text = document.body?.innerText ?? ''
-          return text.includes('立即跳转') && !(/订单号\s*[:：]?\s*[A-Z0-9]{6,64}/i.test(text) && /(?:金额|元|￥|付款|收款方)/.test(text))
-        },
-        undefined,
-        { timeout },
-      ),
-      signal,
-    )
-  } catch {
-    return false
-  }
-  return true
-}
-
 export async function raceDefined<T>(promises: Array<Promise<T | undefined>>): Promise<T | undefined> {
   const pending = new Set(promises)
   while (pending.size > 0) {
@@ -456,32 +464,6 @@ export async function raceDefined<T>(promises: Array<Promise<T | undefined>>): P
     if (settled.value !== undefined) {
       return settled.value
     }
-  }
-  return undefined
-}
-
-async function waitForNextPage(page: Page, timeout: number, signal?: AbortSignal): Promise<Page | undefined> {
-  try {
-    const nextPage = await withAbort(page.context().waitForEvent('page', { timeout }), signal)
-    await withAbort(nextPage.waitForLoadState('domcontentloaded', { timeout: Math.min(timeout, 10000) }).catch(() => undefined), signal)
-    return nextPage
-  } catch {
-    return undefined
-  }
-}
-
-async function tryWaitForCashierPage(page: Page | undefined, timeout: number, signal?: AbortSignal): Promise<Page | undefined> {
-  if (!page) {
-    return undefined
-  }
-  try {
-    await withAbort(waitForCashierOrQr(page, timeout), signal)
-    const text = await withAbort(page.locator('body').innerText({ timeout: Math.min(timeout, 5000) }), signal)
-    if (isCashierReadyText(text)) {
-      return page
-    }
-  } catch {
-    return undefined
   }
   return undefined
 }
