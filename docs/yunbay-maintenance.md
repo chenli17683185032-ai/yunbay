@@ -2139,3 +2139,12 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 - 正式 10 元商品受控探测成功：约 25.2 秒到达 `excashier.alipay.com` 并提取二维码，路径为 `manual_jump:role_button`，收银台金额 `10.30`；探测未付款，也未记录二维码、订单号或联系方式。
 - 取消专项探测在 strict 未处理拒绝模式下返回 `AbortError`；主 Worker 保持 `running / restart=0 / OOM=false`，没有 `Target page, context or browser has been closed`、未处理拒绝或 WAF 新错误。连续 10 轮稳定性检查通过，New API 始终 healthy。
 - 部署前源码备份：`/opt/new-api/backups/ldxp-qr-cashier-fix-20260807T014709-1d7d9438`。旧 Worker 回滚标签：`yunbay-ldxp-browser-worker:rollback-qr-cashier-20260807T014709`，旧镜像 `sha256:3fb25c17ad59d2938ce35139b889cf5c1cb1837bc8751eb891378929e622073c`。回滚时只需重标 `yunbay-ldxp-browser-worker:prod` 并使用基础 Compose `--no-deps --force-recreate ldxp-browser-worker`，禁止重启或回滚其他服务与数据卷。
+
+## 2026-08-08 充值渠道故障微信群公告上线
+
+- 故障证据：Worker 对所有正式 LDXP 商品均在 `product_goto` 阶段报 `net::ERR_CONNECTION_CLOSED`；同一时段回国代理上游持续 TLS handshake failure。服务器直连商品页 8/8 可达但生产 Chromium 3/3 进入滑动验证；订阅内 7 条回国线路均无法完成 TLS，不能通过直连或同订阅切换安全恢复。
+- 应急前端提交：`77571de7b2e988b8972d6c2aaf317bca36950533`。钱包页所有 LDXP 金额卡、超值套餐购买/再次购买按钮改为打开统一公告，不再创建 LDXP 会话；兑换码、已购套餐启停/重置、订单历史保持原逻辑。
+- 公告固定文案为“因充值渠道出问题，请加微信群聊联系管理员进行充值。”，展示用户提供的“云贝技术交流3群”微信群二维码。公网图片为 1080×1596 JPEG、298894 字节，SHA-256 `6a8807b2971ddf40e8e93614a48ae9e627a5499f7b112d561ba25691e12598e9`，与用户原图一致。
+- 验证：TypeScript、定向 ESLint、Prettier、相关测试 7/7、生产构建和独立复审通过；生产二进制包含公告文案，公网 `/console/topup`、`/value-packages`、`/api/status` 及二维码资源均返回 200。
+- 上线仅重建 `yunbay-new-api`，20 秒恢复 healthy；新镜像 `sha256:2087b8ca20fc3b270360c1f9860251200d9226dea733ee6ec508844aedb7beb6`，`restart=0 / OOM=false`。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器 ID、启动时间和重启次数未变化。
+- 回滚点：源码备份 `/opt/new-api/backups/recharge-channel-notice-20260808T120630-77571de7`；旧镜像标签 `yunbay-new-api:rollback-recharge-notice-20260808T120630`。回滚时恢复备份中的两个既有入口文件，删除 `new-files.txt` 列出的三个新增文件，重标旧镜像后只重建 `new-api`；禁止重启其他服务或回滚数据卷。
