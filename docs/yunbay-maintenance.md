@@ -2143,7 +2143,7 @@ old image: sha256:0d948194bc0bf45a5f106a9256d8bc3dbf8c922136628c39457d6c1bf7f88d
 ## 2026-08-08 充值渠道故障微信群公告上线
 
 - 故障证据：Worker 对所有正式 LDXP 商品均在 `product_goto` 阶段报 `net::ERR_CONNECTION_CLOSED`；同一时段回国代理上游持续 TLS handshake failure。服务器直连商品页 8/8 可达但生产 Chromium 3/3 进入滑动验证；订阅内 7 条回国线路均无法完成 TLS，不能通过直连或同订阅切换安全恢复。
-- 应急前端提交：`77571de7b2e988b8972d6c2aaf317bca36950533`。钱包页所有 LDXP 金额卡、超值套餐购买/再次购买按钮改为打开统一公告，不再创建 LDXP 会话；兑换码、已购套餐启停/重置、订单历史保持原逻辑。
+- 应急前端提交：`77571de7be081abecdd4c445cd8cb5dc30d4c12c`。钱包页所有 LDXP 金额卡、超值套餐购买/再次购买按钮改为打开统一公告，不再创建 LDXP 会话；兑换码、已购套餐启停/重置、订单历史保持原逻辑。
 - 公告固定文案为“因充值渠道出问题，请加微信群聊联系管理员进行充值。”，展示用户提供的“云贝技术交流3群”微信群二维码。公网图片为 1080×1596 JPEG、298894 字节，SHA-256 `6a8807b2971ddf40e8e93614a48ae9e627a5499f7b112d561ba25691e12598e9`，与用户原图一致。
 - 验证：TypeScript、定向 ESLint、Prettier、相关测试 7/7、生产构建和独立复审通过；生产二进制包含公告文案，公网 `/console/topup`、`/value-packages`、`/api/status` 及二维码资源均返回 200。
 - 上线仅重建 `yunbay-new-api`，20 秒恢复 healthy；新镜像 `sha256:2087b8ca20fc3b270360c1f9860251200d9226dea733ee6ec508844aedb7beb6`，`restart=0 / OOM=false`。Caddy、PostgreSQL、Redis、Sub2API、CLI Proxy、LDXP proxy/worker 的容器 ID、启动时间和重启次数未变化。
