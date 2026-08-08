@@ -33,6 +33,7 @@ import { PaymentConfirmDialog } from './components/dialogs/payment-confirm-dialo
 import { TransferDialog } from './components/dialogs/transfer-dialog'
 import { LdxpPaymentDialog } from './components/ldxp-payment-dialog'
 import { LdxpTopupCard } from './components/ldxp-topup-card'
+import { RechargeChannelNoticeDialog } from './components/recharge-channel-notice-dialog'
 import { RechargeFormCard } from './components/recharge-form-card'
 import { SubscriptionPlansCard } from './components/subscription-plans-card'
 import { ValuePackagesEntryCard } from './components/value-packages-entry-card'
@@ -89,6 +90,8 @@ export function Wallet(props: WalletProps) {
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
   const [selectedCreemProduct, setSelectedCreemProduct] =
     useState<CreemProduct | null>(null)
+  const [rechargeChannelNoticeOpen, setRechargeChannelNoticeOpen] =
+    useState(false)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
@@ -327,6 +330,9 @@ export function Wallet(props: WalletProps) {
     Boolean(
       ldxpTopup.session && !isLdxpTerminalStatus(ldxpTopup.session.status)
     )
+  const showRechargeChannelNotice = useCallback(() => {
+    setRechargeChannelNoticeOpen(true)
+  }, [])
 
   return (
     <>
@@ -343,7 +349,7 @@ export function Wallet(props: WalletProps) {
                   loading={topupLoading}
                   disabled={ldxpTopupDisabled}
                   error={!ldxpTopup.session ? ldxpTopup.error : null}
-                  onStart={ldxpTopup.start}
+                  onStart={showRechargeChannelNotice}
                   onOpenBilling={() => setBillingDialogOpen(true)}
                 />
                 <RechargeFormCard
@@ -448,6 +454,11 @@ export function Wallet(props: WalletProps) {
         onConfirm={handleCreemConfirm}
         product={selectedCreemProduct}
         processing={creemProcessing}
+      />
+
+      <RechargeChannelNoticeDialog
+        open={rechargeChannelNoticeOpen}
+        onOpenChange={setRechargeChannelNoticeOpen}
       />
 
       <LdxpPaymentDialog

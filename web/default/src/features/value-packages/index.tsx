@@ -31,6 +31,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { SectionPageLayout } from '@/components/layout'
 import { ResetCardGiftDialog } from '@/components/reset-card-gift-dialog'
+import { RechargeChannelNoticeDialog } from '@/features/wallet/components/recharge-channel-notice-dialog'
 import { useRedemption } from '@/features/wallet/hooks/use-redemption'
 import { ValuePackageCard } from './components/value-package-card'
 import { ValuePackagePaymentDialog } from './components/value-package-payment-dialog'
@@ -49,6 +50,8 @@ export function ValuePackages() {
   const [redemptionCodes, setRedemptionCodes] = useState<
     Record<number, string>
   >({})
+  const [rechargeChannelNoticeOpen, setRechargeChannelNoticeOpen] =
+    useState(false)
 
   const handleRedemptionCodeChange = (planId: number, code: string) => {
     setRedemptionCodes((previous) => ({ ...previous, [planId]: code }))
@@ -129,7 +132,7 @@ export function ValuePackages() {
                     redeeming={redeeming}
                     onRedemptionCodeChange={handleRedemptionCodeChange}
                     onRedeemCode={handleRedeemCode}
-                    onPurchase={valuePackages.purchase}
+                    onPurchase={() => setRechargeChannelNoticeOpen(true)}
                     onActivate={valuePackages.activate}
                     onDeactivate={valuePackages.deactivate}
                     onResetQuota={valuePackages.resetQuota}
@@ -154,6 +157,11 @@ export function ValuePackages() {
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
+
+      <RechargeChannelNoticeDialog
+        open={rechargeChannelNoticeOpen}
+        onOpenChange={setRechargeChannelNoticeOpen}
+      />
 
       <ValuePackagePaymentDialog
         sessionResponse={valuePackages.paymentSession}
